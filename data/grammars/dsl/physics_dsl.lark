@@ -1,1 +1,58 @@
-# placeholder
+// Physics DSL grammar used by potato.to.bacon
+
+?start: equation
+
+
+// Decorators ---------------------------------------------------------------
+
+equation: decorators funcdef
+
+decorators: ("@" DOMAIN)* ("@" TAG)*
+
+
+// Function definition ------------------------------------------------------
+
+funcdef: "def" NAME "(" parameters ")" "->" type ":" body
+
+parameters: parameter ("," parameter)*
+parameter: NAME ":" type
+
+type: DIMENSION_TYPE
+
+body: "return" expression
+
+
+// Expressions --------------------------------------------------------------
+
+?expression: term
+    | expression "+" term   -> add
+    | expression "-" term   -> sub
+
+?term: factor
+    | term "*" factor       -> mul
+    | term "/" factor       -> div
+
+?factor: power
+    | "+" factor           -> pos
+    | "-" factor           -> neg
+
+?power: atom
+    | atom "**" factor     -> pow
+
+?atom: NUMBER               -> number
+     | NAME                 -> var
+     | "(" expression ")"
+
+
+// Terminals ----------------------------------------------------------------
+
+DOMAIN: "classical" | "relativistic" | "quantum" | "statistical"
+TAG: /[a-z_][a-z0-9_]*/
+NAME: /[a-zA-Z_][a-zA-Z0-9_]*/
+DIMENSION_TYPE: "mass" | "length" | "time" | "velocity" | "acceleration"
+    | "force" | "energy" | "power" | "momentum" | "dimensionless"
+
+NUMBER: /\d+(\.\d+)?([eE][+-]?\d+)?/
+
+%import common.WS
+%ignore WS
