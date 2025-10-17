@@ -24,12 +24,15 @@ from potatobacon.validation.pipeline import validate_all
 # -----------------------------------------------------------------------------
 app = FastAPI(title="potato-to-bacon API", version="v1")
 
-# Static mounts (optional docs/examples)
-app.mount("/static/docs", StaticFiles(directory="docs", html=True), name="docs")
-app.mount("/static/examples", StaticFiles(directory="examples", html=False), name="examples")
+# Conditionally mount docs/examples if folders exist (avoids startup errors)
+if Path("docs").exists():
+    app.mount("/static/docs", StaticFiles(directory="docs", html=True), name="docs")
+
+if Path("examples").exists():
+    app.mount("/static/examples", StaticFiles(directory="examples", html=False), name="examples")
 
 # -----------------------------------------------------------------------------
-# UI mount (safe even if /web missing)
+# UI mount (safe if /web missing)
 # -----------------------------------------------------------------------------
 web_dir = Path(__file__).resolve().parents[2] / "web"
 
@@ -38,14 +41,14 @@ if web_dir.exists():
 
     @app.get("/", include_in_schema=False)
     def root_redirect() -> RedirectResponse:
-        """Redirect root to the UI."""
+        """Redirect root to the UI page."""
         return RedirectResponse(url="/ui/")
 else:
-    print(f"⚠️ Warning: UI directory not found at {web_dir}, skipping mount.")
+    print(f"⚠️ Warning: UI directory not found at {web_dir}, skipping UI mount.")
 
 
 # -----------------------------------------------------------------------------
-# Models
+# Pydantic Models
 # -----------------------------------------------------------------------------
 class TranslateReq(BaseModel):
     dsl: str
@@ -83,7 +86,7 @@ class SchemaReq(BaseModel):
 
 
 class SchemaResp(BaseModel):
-    """Renamed schema field to avoid Pydantic shadowing warning."""
+    """Avoids naming conflict with Pydantic's schema() method."""
     model_config = ConfigDict(populate_by_name=True)
     schema_json_payload: Dict[str, Any] = Field(
         serialization_alias="schema_json",
@@ -124,7 +127,7 @@ class ManifestResp(BaseModel):
 
 
 # -----------------------------------------------------------------------------
-# Health + Info
+# Health + Info Endpoints
 # -----------------------------------------------------------------------------
 @app.get("/v1/health")
 def health() -> Dict[str, Any]:
@@ -138,8 +141,8 @@ def info() -> Dict[str, Any]:
         "git_sha": os.getenv("GIT_COMMIT"),
         "dsl_features": [
             "return-based DSL",
-            "sympy-backed expr parsing",
-            "functions: +, -, *, /, pow(int)",
+            "sympy-backed expression parsing",
+            "operators: +, -, *, /, **, pow(int)",
             "derivatives: d(expr, *vars), d2(expr, var)",
             "equations with ==",
         ],
@@ -148,7 +151,7 @@ def info() -> Dict[str, Any]:
 
 
 # -----------------------------------------------------------------------------
-# API Endpoints
+# Core API Endpoints
 # -----------------------------------------------------------------------------
 @app.post("/v1/translate", response_model=TranslateResp)
 def translate(req: TranslateReq) -> TranslateResp:
@@ -159,8 +162,7 @@ def translate(req: TranslateReq) -> TranslateResp:
             status_code=422,
             detail={
                 "message": str(e),
-                "hint": "Try one of: 'E = m*c^2', 'E == m*c**2', "
-                        "'return E - m*c**2', or a bare expression like '0.5*m*v**2'.",
+                "hint": "Try examples like 'E = m*c^2', 'E == m*c**2', or 'return E - m*c**2'.",
             },
         )
     canon = canonicalize(expr)
@@ -212,11 +214,13 @@ def manifest(req: ManifestReq) -> ManifestResp:
         req.pde_time_var,
         req.checks or None,
     )
+
     if not report["ok"]:
         raise HTTPException(400, detail={"report": report})
 
     schema_dict = build_theory_schema(expr, req.domain, req.units, req.constraints)
     schema_digest = save_schema(schema_dict)
+
     code = generate_numpy(expr, name=req.metadata.get("name", "compute"), metadata=req.metadata)
     code_digest = save_code(code)
 
@@ -230,6 +234,7 @@ def manifest(req: ManifestReq) -> ManifestResp:
         schema_digest=schema_digest,
         code_digest=code_digest,
     )
+
     manifest_hash = save_manifest(asdict(manifest))
     return ManifestResp(manifest_hash=manifest_hash, code_digest=code_digest)
 
@@ -238,5 +243,5 @@ def manifest(req: ManifestReq) -> ManifestResp:
 def get_manifest(manifest_hash: str) -> Dict[str, Any]:
     try:
         return load_persisted_manifest(manifest_hash)
-    except FileNotFoundError as exc:  # simple 404 path
+    except FileNotFoundError as exc:
         raise HTTPException(404, "Not found") from exc
