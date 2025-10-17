@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 
 import sympy as sp
 
-from .dimensions import Dimension, DimensionalError, DIMENSIONLESS
+from .dimensions import Dimension, DimensionalError
 
 
 @dataclass
@@ -62,8 +62,8 @@ class PhysicalQuantity:
 
         return PhysicalQuantity(
             symbol=f"{self.symbol}^{exponent}",
-            expression=self.expression ** exponent,
-            dimensions=self.dimensions ** exponent,
+            expression=self.expression**exponent,
+            dimensions=self.dimensions**exponent,
             domain=self.domain,
         )
 
@@ -116,6 +116,6 @@ class PhysicalQuantity:
 
     def __repr__(self) -> str:  # pragma: no cover - debugging helper
         return (
-            "PhysicalQuantity(" \
+            "PhysicalQuantity("
             f"symbol={self.symbol}, dimensions={self.dimensions}, domain={self.domain})"
         )

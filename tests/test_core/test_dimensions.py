@@ -14,7 +14,6 @@ from potatobacon.core.dimensions import (
     TIME,
     VELOCITY,
     Dimension,
-    DimensionalError,
 )
 
 
@@ -36,7 +35,7 @@ def test_dimension_division():
 
 
 def test_dimension_power():
-    area = LENGTH ** 2
+    area = LENGTH**2
     assert area.length == 2
     assert area.mass == 0
 
@@ -48,7 +47,7 @@ def test_velocity_construction():
 
 
 def test_force_construction():
-    accel = LENGTH / (TIME ** 2)
+    accel = LENGTH / (TIME**2)
     force = MASS * accel
     assert force == FORCE
 
