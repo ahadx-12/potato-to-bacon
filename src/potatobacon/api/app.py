@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import os
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -20,6 +22,13 @@ from potatobacon.validation.pipeline import validate_all
 app = FastAPI(title="potato-to-bacon API", version="v1")
 app.mount("/static/docs", StaticFiles(directory="docs", html=True), name="docs")
 app.mount("/static/examples", StaticFiles(directory="examples", html=False), name="examples")
+web_dir = Path(__file__).resolve().parents[3] / "web"
+app.mount("/ui", StaticFiles(directory=web_dir, html=True), name="ui")
+
+
+@app.get("/", include_in_schema=False)
+def root_redirect() -> RedirectResponse:
+    return RedirectResponse(url="/ui/")
 
 
 class TranslateReq(BaseModel):

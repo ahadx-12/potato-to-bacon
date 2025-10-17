@@ -16,8 +16,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 # Copy project metadata and source code
-COPY pyproject.toml ./ 
+COPY pyproject.toml ./
 COPY src ./src
+COPY web ./web
 COPY examples ./examples
 COPY docs ./docs
 
