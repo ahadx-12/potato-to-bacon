@@ -105,7 +105,7 @@ class DSLParser:
         expression_line = None
         for line in body_lines:
             if line.startswith("return "):
-                expression_line = line[len("return "):]
+                expression_line = line[len("return ") :]
                 break
         if expression_line is None:
             raise ParseError("Function body must contain a return statement")

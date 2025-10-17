@@ -3,7 +3,7 @@
 import sympy as sp
 import pytest
 
-from potatobacon.core.dimensions import ENERGY, LENGTH, MASS, TIME, VELOCITY, DimensionalError
+from potatobacon.core.dimensions import ENERGY, LENGTH, MASS, VELOCITY, DimensionalError
 from potatobacon.core.quantity import PhysicalQuantity
 
 
@@ -34,7 +34,7 @@ def test_quantity_division():
 
 def test_quantity_power():
     velocity = PhysicalQuantity("v", sp.Symbol("v"), VELOCITY)
-    squared = velocity ** 2
+    squared = velocity**2
     assert squared.dimensions.length == 2
     assert squared.dimensions.time == -2
 

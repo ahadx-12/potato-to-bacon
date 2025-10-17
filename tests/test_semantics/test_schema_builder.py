@@ -25,7 +25,9 @@ def builder() -> SchemaBuilder:
     return SchemaBuilder()
 
 
-def test_build_schema_kinetic_energy(parser: DSLParser, canonicalizer: Canonicalizer, builder: SchemaBuilder) -> None:
+def test_build_schema_kinetic_energy(
+    parser: DSLParser, canonicalizer: Canonicalizer, builder: SchemaBuilder
+) -> None:
     dsl = """
 @classical @mechanics
 def kinetic_energy(m: mass, v: velocity) -> energy:
@@ -45,7 +47,9 @@ def kinetic_energy(m: mass, v: velocity) -> energy:
     assert "sympy" in schema["equation"]
 
 
-def test_schema_is_deterministic(parser: DSLParser, canonicalizer: Canonicalizer, builder: SchemaBuilder) -> None:
+def test_schema_is_deterministic(
+    parser: DSLParser, canonicalizer: Canonicalizer, builder: SchemaBuilder
+) -> None:
     dsl = """
 @classical
 def test(a: mass, b: velocity) -> momentum:
@@ -56,7 +60,9 @@ def test(a: mass, b: velocity) -> momentum:
     assert json.dumps(schema1, sort_keys=True) == json.dumps(schema2, sort_keys=True)
 
 
-def test_schema_includes_tags(parser: DSLParser, canonicalizer: Canonicalizer, builder: SchemaBuilder) -> None:
+def test_schema_includes_tags(
+    parser: DSLParser, canonicalizer: Canonicalizer, builder: SchemaBuilder
+) -> None:
     dsl = """
 @classical @mechanics @dynamics @kinematics
 def test(x: length) -> length:
@@ -68,7 +74,9 @@ def test(x: length) -> length:
     assert tags == sorted(tags)
 
 
-def test_schema_dimensions_format(parser: DSLParser, canonicalizer: Canonicalizer, builder: SchemaBuilder) -> None:
+def test_schema_dimensions_format(
+    parser: DSLParser, canonicalizer: Canonicalizer, builder: SchemaBuilder
+) -> None:
     dsl = """
 @classical
 def test(F: force) -> force:
@@ -100,7 +108,9 @@ def test_schema_validation(builder: SchemaBuilder) -> None:
     assert not builder.validate_schema(invalid_schema)
 
 
-def test_schema_includes_latex(parser: DSLParser, canonicalizer: Canonicalizer, builder: SchemaBuilder) -> None:
+def test_schema_includes_latex(
+    parser: DSLParser, canonicalizer: Canonicalizer, builder: SchemaBuilder
+) -> None:
     dsl = """
 @classical
 def test(x: mass) -> mass:
@@ -110,7 +120,9 @@ def test(x: mass) -> mass:
     assert "latex" in schema["equation"]
 
 
-def test_schema_for_newton_second_law(parser: DSLParser, canonicalizer: Canonicalizer, builder: SchemaBuilder) -> None:
+def test_schema_for_newton_second_law(
+    parser: DSLParser, canonicalizer: Canonicalizer, builder: SchemaBuilder
+) -> None:
     dsl = """
 @classical @mechanics @dynamics
 def newton_second_law(m: mass, a: acceleration) -> force:
@@ -124,7 +136,9 @@ def newton_second_law(m: mass, a: acceleration) -> force:
     assert schema["fields"]["newton_second_law"]["dimensions"]["time"] == -2
 
 
-def test_schema_save_and_load(tmp_path: Path, parser: DSLParser, canonicalizer: Canonicalizer, builder: SchemaBuilder) -> None:
+def test_schema_save_and_load(
+    tmp_path: Path, parser: DSLParser, canonicalizer: Canonicalizer, builder: SchemaBuilder
+) -> None:
     dsl = """
 @classical
 def test(x: mass) -> mass:

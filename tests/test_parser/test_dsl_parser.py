@@ -3,7 +3,7 @@
 import pytest
 import sympy as sp
 
-from potatobacon.core.dimensions import ACCELERATION, ENERGY, FORCE, MASS, VELOCITY
+from potatobacon.core.dimensions import ENERGY, FORCE, MASS, VELOCITY
 from potatobacon.core.types import EquationDomain
 from potatobacon.parser import DSLParser, ParseError
 

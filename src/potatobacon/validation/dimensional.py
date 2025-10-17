@@ -62,9 +62,7 @@ class DimensionalValidator:
                 if expected is None:
                     expected = term_dim
                 elif expected != term_dim:
-                    raise DimensionalError(
-                        f"Cannot add dimensions {expected} and {term_dim}"
-                    )
+                    raise DimensionalError(f"Cannot add dimensions {expected} and {term_dim}")
             return expected or Dimension()
 
         if isinstance(expr, Mul):
