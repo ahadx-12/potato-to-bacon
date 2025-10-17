@@ -3,22 +3,21 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Copy project metadata first
+# Copy pyproject first (for caching)
 COPY pyproject.toml .
 
-# Copy the actual source so pip can build from src/
+# Copy the source + web files
 COPY src/ ./src/
-
-# Install project dependencies (uses pyproject.toml)
-RUN pip install --no-cache-dir .
-
-# Copy the web UI after install
 COPY web/ ./web/
 
-# Verify that /web exists
-RUN ls -R /app/web
+# Verify that web files exist (debug)
+RUN ls -R /app/web || (echo "❌ web directory missing!" && exit 1)
 
+# Install package in editable mode
+RUN pip install --no-cache-dir .
+
+# Expose dynamic port for Railway
 EXPOSE 8000
 
+# Launch FastAPI (Railway injects $PORT)
 CMD uvicorn potatobacon.api.app:app --host 0.0.0.0 --port ${PORT:-8000}
-
