@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from potatobacon.codegen.reference import generate_numpy
 from potatobacon.manifest.store import ComputationManifest
@@ -58,8 +58,10 @@ class SchemaReq(BaseModel):
 
 
 class SchemaResp(BaseModel):
-    schema: Dict[str, Any]
+    schema_obj: Dict[str, Any] = Field(alias="schema")
     canonical: str
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class CodegenReq(BaseModel):
