@@ -90,8 +90,8 @@ class ManifestResp(BaseModel):
 
 
 @app.get("/v1/health")
-def health() -> Dict[str, bool]:
-    return {"ok": True}
+def health() -> Dict[str, str]:
+    return {"status": "ok"}
 
 
 @app.get("/v1/info")
