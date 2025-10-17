@@ -117,3 +117,30 @@ class SchemaBuilder:
 
     def load_schema(self, filepath: Path) -> Dict[str, Any]:
         return json.loads(filepath.read_text())
+
+
+def build_theory_schema(expr_or_eq: sp.Basic | sp.Equality,
+                        domain: str,
+                        units: Dict[str, str],
+                        constraints: Dict[str, Any]) -> Dict[str, Any]:
+    """Convenience helper for building a lightweight schema from a raw expression."""
+    from .canonicalizer import canonicalize
+
+    canon = canonicalize(expr_or_eq)
+    expr = expr_or_eq.lhs - expr_or_eq.rhs if isinstance(expr_or_eq, sp.Equality) else expr_or_eq
+    symbols: Dict[str, Any] = {}
+    for sym in sorted(expr.free_symbols, key=lambda s: s.name):
+        symbols[str(sym)] = {
+            "unit": units.get(str(sym)),
+            "constraints": constraints.get(str(sym), {}),
+        }
+
+    schema = {
+        "version": "1.0",
+        "domain": domain,
+        "canonical": canon.canonical_str,
+        "expression": str(expr_or_eq),
+        "simplified": str(canon.simplified_expr),
+        "symbols": symbols,
+    }
+    return schema

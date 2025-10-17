@@ -45,7 +45,7 @@ class DimensionalValidator:
 
     def _compute_dimensions(self, expr: sp.Expr, var_dims: Dict[sp.Symbol, Dimension]) -> Dimension:
         """Recursively determine the dimensions of a symbolic expression."""
-        from sympy import Add, Div, Mul, Number, Pow, Symbol
+        from sympy import Number, Symbol
 
         if isinstance(expr, Number):
             return Dimension()
@@ -55,7 +55,7 @@ class DimensionalValidator:
                 return var_dims[expr]
             raise DimensionalError(f"Unknown symbol encountered: {expr}")
 
-        if isinstance(expr, Add):
+        if expr.is_Add:
             expected: Dimension | None = None
             for term in expr.args:
                 term_dim = self._compute_dimensions(term, var_dims)
@@ -65,25 +65,33 @@ class DimensionalValidator:
                     raise DimensionalError(f"Cannot add dimensions {expected} and {term_dim}")
             return expected or Dimension()
 
-        if isinstance(expr, Mul):
+        if expr.is_Mul:
             result = Dimension()
             for factor in expr.args:
                 result = result * self._compute_dimensions(factor, var_dims)
             return result
 
-        if isinstance(expr, Div):
-            numerator = self._compute_dimensions(expr.args[0], var_dims)
-            denominator = self._compute_dimensions(expr.args[1], var_dims)
-            return numerator / denominator
-
-        if isinstance(expr, Pow):
-            base_dim = self._compute_dimensions(expr.args[0], var_dims)
-            exponent = expr.args[1]
-            if not isinstance(exponent, Number):
+        if expr.is_Pow:
+            base_dim = self._compute_dimensions(expr.base, var_dims)
+            exponent = expr.exp
+            if not exponent.is_number:
                 raise DimensionalError(f"Exponent must be numeric, got {exponent}")
-            exp_value = exponent.value
-            if abs(exp_value - round(exp_value)) > 1e-9:
+            if exponent.is_integer is False:
                 raise DimensionalError("Exponent must be an integer for dimensional analysis")
-            return base_dim ** int(round(exp_value))
+            return base_dim ** int(exponent)
 
         raise DimensionalError(f"Unsupported expression type: {type(expr)!r}")
+
+
+def validate_dimensions(expr_or_eq: sp.Basic | sp.Equality,
+                        units: Dict[str, str],
+                        result_unit: str | None) -> None:
+    """Lightweight helper for pipeline use: ensure all symbols have declared units."""
+    expr = expr_or_eq.lhs - expr_or_eq.rhs if isinstance(expr_or_eq, sp.Equality) else expr_or_eq
+    missing = [str(sym) for sym in sorted(expr.free_symbols, key=lambda s: s.name) if str(sym) not in units]
+    if missing:
+        raise ValueError(f"Missing units for symbols: {', '.join(missing)}")
+
+    if result_unit and result_unit not in units.values():
+        # Allow result unit to be specified separately even if not tied to a symbol.
+        pass
