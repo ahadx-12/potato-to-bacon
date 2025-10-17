@@ -45,6 +45,18 @@
           <textarea id="units" class="textarea small" rows="5" placeholder="m: kg
 c: m/s
 E: J"></textarea>
+          <div class="chips" id="detected-vars"></div>
+          <div class="row unit-actions">
+            <button type="button" class="btn-secondary" id="autoFillUnits">✨ Auto-Fill</button>
+            <button type="button" class="btn-secondary" id="inferUnits">🧠 Infer</button>
+            <select id="unit-system" class="btn-secondary">
+              <option value="SI" selected>SI</option>
+              <option value="CGS">CGS</option>
+              <option value="Imperial">Imperial</option>
+              <option value="Natural">Natural</option>
+            </select>
+          </div>
+          <div id="live-validation" class="hint"></div>
         </div>
         <div class="col">
           <label class="label">Constraints (JSON, optional)</label>
@@ -126,6 +138,6 @@ E: J"></textarea>
     </footer>
   </main>
 
-  <script src="./script.js"></script>
+  <script src="./scripts/app.js"></script>
 </body>
 </html>
