@@ -1,23 +1,24 @@
 # syntax=docker/dockerfile:1
 FROM python:3.11-slim
 
+# Set working directory
 WORKDIR /app
 
-# Copy dependency files first for caching
+# Copy pyproject.toml first for dependency caching
 COPY pyproject.toml .
-COPY requirements.txt .
 
-# Install dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install project dependencies using PEP 517 (pyproject.toml)
+RUN pip install --no-cache-dir .
 
-# Copy source and web UI
+# Copy application source code and UI
 COPY src/ ./src/
 COPY web/ ./web/
 
-# Ensure the web directory exists
+# Verify that the UI files were copied
 RUN ls -R /app/web
 
+# Expose default app port
 EXPOSE 8000
 
-# Start FastAPI (Railway sets $PORT automatically)
+# Start FastAPI (Railway automatically sets $PORT)
 CMD ["uvicorn", "potatobacon.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
