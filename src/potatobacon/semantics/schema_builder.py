@@ -85,7 +85,7 @@ class SchemaBuilder:
         }
 
     def _build_equation(self, ir: TheoryIR) -> Dict[str, Any]:
-        equation = {
+        equation: Dict[str, Any] = {
             "canonical": ir.canonical_str,
             "sympy": str(ir.simplified_expr),
         }
@@ -119,10 +119,12 @@ class SchemaBuilder:
         return json.loads(filepath.read_text())
 
 
-def build_theory_schema(expr_or_eq: sp.Basic | sp.Equality,
-                        domain: str,
-                        units: Dict[str, str],
-                        constraints: Dict[str, Any]) -> Dict[str, Any]:
+def build_theory_schema(
+    expr_or_eq: sp.Basic | sp.Equality,
+    domain: str,
+    units: Dict[str, str],
+    constraints: Dict[str, Any],
+) -> Dict[str, Any]:
     """Convenience helper for building a lightweight schema from a raw expression."""
     from .canonicalizer import canonicalize
 

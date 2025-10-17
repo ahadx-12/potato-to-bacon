@@ -1,10 +1,11 @@
 from __future__ import annotations
-from typing import Dict, Tuple, Iterable
+from typing import Dict, Iterable
 import sympy as sp
 
-def extract_derivative_orders(expr: sp.Basic,
-                              space_vars: Iterable[sp.Symbol],
-                              time_var: sp.Symbol | None) -> Dict[str, int]:
+
+def extract_derivative_orders(
+    expr: sp.Basic, space_vars: Iterable[sp.Symbol], time_var: sp.Symbol | None
+) -> Dict[str, int]:
     """
     Returns highest derivative order seen per var: {"t": 2, "x": 2, ...}
     """
