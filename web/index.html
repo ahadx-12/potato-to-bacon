@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>potato → bacon</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./style.css">
+  <!-- MathJax -->
+  <script>
+    window.MathJax = { tex: { inlineMath: [['$', '$'], ['\\(', '\\)']] }, svg: {fontCache: 'global'} };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+</head>
+<body>
+  <header class="header">
+    <div class="brand">potato → bacon</div>
+    <div class="subtitle">Physics-first translator • DSL → canonical + validated → code</div>
+  </header>
+
+  <main class="container">
+    <!-- Input card -->
+    <section class="card">
+      <div class="card-title">Input</div>
+      <label class="label">Equation / DSL</label>
+      <textarea id="dsl" class="textarea" rows="6" placeholder="E = m*c^2"></textarea>
+
+      <div class="row">
+        <div class="col">
+          <label class="label">Domain</label>
+          <select id="domain" class="select">
+            <option value="classical">classical</option>
+            <option value="relativistic">relativistic</option>
+          </select>
+        </div>
+        <div class="col">
+          <label class="label">Result Unit (optional)</label>
+          <input id="resultUnit" class="input" placeholder="e.g. J" />
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col">
+          <label class="label">Units (name: unit, one per line)</label>
+          <textarea id="units" class="textarea small" rows="5" placeholder="m: kg
+c: m/s
+E: J"></textarea>
+        </div>
+        <div class="col">
+          <label class="label">Constraints (JSON, optional)</label>
+          <textarea id="constraints" class="textarea small" rows="5" placeholder='{"m":{"positive": true}}'></textarea>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col">
+          <label class="label">PDE space vars (comma)</label>
+          <input id="pdeSpace" class="input" placeholder="x,y" />
+        </div>
+        <div class="col">
+          <label class="label">PDE time var</label>
+          <input id="pdeTime" class="input" placeholder="t" />
+        </div>
+      </div>
+
+      <div class="buttons">
+        <button id="analyzeBtn" class="btn">Analyze</button>
+        <button class="btn ghost" id="clearBtn">Clear</button>
+        <div class="spacer"></div>
+        <span class="label">Examples:</span>
+        <button class="chip" data-example="einstein">Einstein</button>
+        <button class="chip" data-example="newton">Newton</button>
+        <button class="chip" data-example="wave">Wave</button>
+        <button class="chip" data-example="gamma">Gamma</button>
+      </div>
+
+      <div id="rendered" class="math"></div>
+    </section>
+
+    <!-- Results -->
+    <section class="card">
+      <div class="card-title">Parsed</div>
+      <pre id="parsed" class="codeblock"></pre>
+    </section>
+
+    <section class="card">
+      <div class="card-title">
+        Canonical
+        <button id="copyCanonical" class="mini">Copy</button>
+      </div>
+      <div id="canonicalText" class="mono"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-title">Validation</div>
+      <div id="validation" class="grid two">
+        <!-- filled dynamically with dimensional/constraints/relativistic/pde_class -->
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-title">Schema</div>
+      <pre id="schema" class="codeblock"></pre>
+    </section>
+
+    <section class="card">
+      <div class="card-title">Generated Code</div>
+      <pre id="code" class="codeblock"></pre>
+    </section>
+
+    <section class="card">
+      <div class="card-title">
+        Manifest
+        <button id="copyManifest" class="mini">Copy JSON</button>
+      </div>
+      <pre id="manifest" class="codeblock"></pre>
+    </section>
+
+    <section class="card error hidden" id="errorCard">
+      <div class="card-title">Error</div>
+      <pre id="errorText" class="codeblock"></pre>
+    </section>
+
+    <footer class="footer">
+      Open source • potato-to-bacon • Contact: <a href="mailto:ahadpainsnap@gmail.com">ahadpainsnap@gmail.com</a>
+    </footer>
+  </main>
+
+  <script src="./script.js"></script>
+</body>
+</html>
