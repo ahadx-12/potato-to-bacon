@@ -34,7 +34,9 @@ if Path("examples").exists():
 # -----------------------------------------------------------------------------
 # UI mount (safe if /web missing)
 # -----------------------------------------------------------------------------
-web_dir = Path(__file__).resolve().parents[2] / "web"
+# Force absolute path to /app/web (works in Docker/Railway)
+web_dir = Path("/app/web")
+
 
 if web_dir.exists():
     app.mount("/ui", StaticFiles(directory=web_dir, html=True), name="ui")
