@@ -1,8 +1,9 @@
 from __future__ import annotations
-from typing import Dict, Any, Iterable, Optional
+from typing import Dict, Iterable, Optional
 import numpy as np
 import sympy as sp
 from dataclasses import dataclass
+
 
 @dataclass
 class RelativisticViolation:
@@ -10,19 +11,28 @@ class RelativisticViolation:
     message: str
     symbol: Optional[str] = None
 
+
 class RelativisticError(Exception):
     def __init__(self, vs: Iterable[RelativisticViolation]):
         self.violations = list(vs)
         super().__init__("\n".join(v.message for v in self.violations))
 
+
 def _find_speed_symbols(units: Dict[str, str]) -> set[str]:
     # Very light heuristic: treat units exactly "m/s" as speeds for MVP
-    return {name for name, unit in units.items() if unit.strip().lower() in {"m/s", "meter/second", "meters/second"}}
+    return {
+        name
+        for name, unit in units.items()
+        if unit.strip().lower() in {"m/s", "meter/second", "meters/second"}
+    }
 
-def validate_relativistic(expr: sp.Basic,
-                          units: Dict[str, str],
-                          constants: Dict[str, str] | None = None,
-                          strict: bool = False) -> None:
+
+def validate_relativistic(
+    expr: sp.Basic,
+    units: Dict[str, str],
+    constants: Dict[str, str] | None = None,
+    strict: bool = False,
+) -> None:
     """
     MVP checks:
       - Every symbol with units m/s must be < c in magnitude (sampling).
@@ -47,7 +57,12 @@ def validate_relativistic(expr: sp.Basic,
             # If matches 1 - something
             if isinstance(arg, sp.Add) and any(t == 1 for t in arg.args):
                 # crude: if we see v/c squared inside, note requirement
-                if any(isinstance(a, sp.Pow) and a.exp == 2 and a.base.has(*[sp.Symbol(n) for n in speed_names]) for a in arg.args):
+                if any(
+                    isinstance(a, sp.Pow)
+                    and a.exp == 2
+                    and a.base.has(*[sp.Symbol(n) for n in speed_names])
+                    for a in arg.args
+                ):
                     # can't prove symbolically → require caller to constrain v < c; rely on sampling below
                     pass
 
@@ -63,7 +78,11 @@ def validate_relativistic(expr: sp.Basic,
                 _ = f(*vals)
             except Exception:
                 # Fail closed
-                violations.append(RelativisticViolation("evaluation", "Relativistic evaluation failed at sampled speeds."))
+                violations.append(
+                    RelativisticViolation(
+                        "evaluation", "Relativistic evaluation failed at sampled speeds."
+                    )
+                )
                 break
 
         # Try a superluminal sample to ensure rejection
@@ -77,11 +96,26 @@ def validate_relativistic(expr: sp.Basic,
                     try:
                         arr = np.asarray(val)
                         if np.isnan(arr).any():
-                            violations.append(RelativisticViolation("causality", "Superluminal sample (v>c) produced NaN without guard."))
+                            violations.append(
+                                RelativisticViolation(
+                                    "causality",
+                                    "Superluminal sample (v>c) produced NaN without guard.",
+                                )
+                            )
                         else:
-                            violations.append(RelativisticViolation("causality", "Superluminal sample (v>c) did not fail evaluation. Guard required."))
+                            violations.append(
+                                RelativisticViolation(
+                                    "causality",
+                                    "Superluminal sample (v>c) did not fail evaluation. Guard required.",
+                                )
+                            )
                     except TypeError:
-                        violations.append(RelativisticViolation("causality", "Superluminal sample (v>c) did not fail evaluation. Guard required."))
+                        violations.append(
+                            RelativisticViolation(
+                                "causality",
+                                "Superluminal sample (v>c) did not fail evaluation. Guard required.",
+                            )
+                        )
             except Exception:
                 pass
 

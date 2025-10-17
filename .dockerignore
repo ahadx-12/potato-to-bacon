@@ -1,0 +1,15 @@
+.dockerignore
+.git
+.github
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+dist
+build
+*.log
+.artifacts
+artifacts
+tests
+railway.json

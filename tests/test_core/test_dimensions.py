@@ -23,6 +23,18 @@ def test_dimension_creation():
     assert not length.is_dimensionless()
 
 
+def test_dimension_identity_and_inverse():
+    dim = MASS * LENGTH
+    assert dim * Dimension.dimensionless() == dim
+    assert dim / dim == Dimension.dimensionless()
+
+
+def test_dimension_associativity():
+    left = (MASS * LENGTH) * TIME
+    right = MASS * (LENGTH * TIME)
+    assert left == right
+
+
 def test_dimension_multiplication():
     result = LENGTH * TIME
     assert result.length == 1
@@ -38,6 +50,18 @@ def test_dimension_power():
     area = LENGTH**2
     assert area.length == 2
     assert area.mass == 0
+
+
+def test_pow_zero_and_negative():
+    assert LENGTH**0 == Dimension.dimensionless()
+    inverse = (LENGTH / TIME) ** -1
+    assert inverse.length == -1
+    assert inverse.time == 1
+
+
+def test_pow_rejects_non_integer():
+    with pytest.raises(TypeError):
+        _ = LENGTH**0.5  # type: ignore[operator]
 
 
 def test_velocity_construction():

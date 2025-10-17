@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import sympy as sp
 
@@ -39,6 +39,13 @@ DIMENSION_MAP: Dict[str, Dimension] = {
     "momentum": MOMENTUM,
     "dimensionless": DIMENSIONLESS,
 }
+
+
+def _normalize_dimension_name(token: str) -> str:
+    base = token.strip().lower()
+    if "(" in base:
+        base = base.split("(", 1)[0]
+    return base
 
 
 FUNC_DEF_PATTERN = re.compile(
@@ -90,15 +97,15 @@ class DSLParser:
                     continue
                 if ":" not in part:
                     raise ParseError(f"Invalid parameter definition: {part}")
-                param_name, param_type = [segment.strip() for segment in part.split(":", 1)]
-                dimension = DIMENSION_MAP.get(param_type)
+                param_name, raw_param_type = [segment.strip() for segment in part.split(":", 1)]
+                dimension = DIMENSION_MAP.get(_normalize_dimension_name(raw_param_type))
                 if dimension is None:
-                    raise ParseError(f"Unknown dimension type: {param_type}")
+                    raise ParseError(f"Unknown dimension type: {raw_param_type}")
                 parameters.append(
                     Variable(name=param_name, role=VariableRole.INPUT, dimensions=dimension)
                 )
 
-        return_dimension = DIMENSION_MAP.get(return_type_name)
+        return_dimension = DIMENSION_MAP.get(_normalize_dimension_name(return_type_name))
         if return_dimension is None:
             raise ParseError(f"Unknown dimension type: {return_type_name}")
 
@@ -111,7 +118,7 @@ class DSLParser:
             raise ParseError("Function body must contain a return statement")
 
         try:
-            expression = sp.simplify(sp.sympify(expression_line))
+            expression = sp.simplify(sp.sympify(expression_line, locals=_dsl_locals()))
         except Exception as exc:  # pragma: no cover - defensive
             raise ParseError(f"Failed to parse expression: {exc}") from exc
 
@@ -137,6 +144,18 @@ class DSLParser:
         )
 
 
+def _dsl_locals() -> Dict[str, Any]:
+    def d(expr: sp.Expr, *variables: sp.Expr) -> sp.Expr:
+        if not variables:
+            raise ValueError("d() requires at least one variable for differentiation")
+        return sp.diff(expr, *variables)
+
+    def d2(expr: sp.Expr, variable: sp.Expr) -> sp.Expr:
+        return sp.diff(expr, variable, 2)
+
+    return {"d": d, "d2": d2}
+
+
 def parse_dsl(dsl_text: str) -> sp.Basic:
     """Parse DSL text into a SymPy expression or equality."""
     lines = [line.strip() for line in dsl_text.splitlines() if line.strip()]
@@ -152,7 +171,7 @@ def parse_dsl(dsl_text: str) -> sp.Basic:
     if expr_line is None:
         raise ValueError("DSL must contain a return statement")
 
-    local_ns = {"d2": lambda expr, var: sp.Function("d2")(expr, var)}
+    local_ns = _dsl_locals()
 
     if "==" in expr_line:
         lhs, rhs = expr_line.split("==", 1)
