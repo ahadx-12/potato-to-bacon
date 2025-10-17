@@ -135,3 +135,33 @@ class DSLParser:
             tags=tags,
             source="dsl",
         )
+
+
+def parse_dsl(dsl_text: str) -> sp.Basic:
+    """Parse DSL text into a SymPy expression or equality."""
+    lines = [line.strip() for line in dsl_text.splitlines() if line.strip()]
+    if not lines:
+        raise ValueError("Empty DSL text")
+
+    # Look for return statement
+    expr_line = None
+    for line in reversed(lines):
+        if line.startswith("return "):
+            expr_line = line[len("return ") :]
+            break
+    if expr_line is None:
+        raise ValueError("DSL must contain a return statement")
+
+    def d(expr, *vars):
+        return sp.diff(expr, *vars)
+
+    def d2(expr, var):
+        return sp.diff(expr, var, 2)
+
+    local_ns = {"d": d, "d2": d2}
+
+    if "==" in expr_line:
+        lhs, rhs = expr_line.split("==", 1)
+        return sp.Eq(sp.sympify(lhs, locals=local_ns), sp.sympify(rhs, locals=local_ns))
+
+    return sp.sympify(expr_line, locals=local_ns)
