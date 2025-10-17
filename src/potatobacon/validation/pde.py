@@ -4,6 +4,7 @@ from typing import List, Optional
 import sympy as sp
 from potatobacon.semantics.operators import extract_derivative_orders
 
+
 class PDEClass(str, Enum):
     ODE = "ODE"
     ELLIPTIC = "ELLIPTIC"
@@ -11,9 +12,10 @@ class PDEClass(str, Enum):
     HYPERBOLIC = "HYPERBOLIC"
     UNKNOWN = "UNKNOWN"
 
-def classify_pde(eq: sp.Basic | sp.Equality,
-                 space_vars: List[sp.Symbol],
-                 time_var: Optional[sp.Symbol]) -> PDEClass:
+
+def classify_pde(
+    eq: sp.Basic | sp.Equality, space_vars: List[sp.Symbol], time_var: Optional[sp.Symbol]
+) -> PDEClass:
     """
     MVP heuristic classification:
       - HYPERBOLIC: highest time order == 2 and some even-order spatial derivatives
