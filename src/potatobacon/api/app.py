@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from potatobacon.codegen.reference import generate_numpy
 from potatobacon.manifest.store import ComputationManifest
@@ -58,8 +58,16 @@ class SchemaReq(BaseModel):
 
 
 class SchemaResp(BaseModel):
-    schema: Dict[str, Any]
+    model_config = ConfigDict(populate_by_name=True)
+    schema_json_payload: Dict[str, Any] = Field(
+        serialization_alias="schema_json",
+        validation_alias="schema_json",
+    )
     canonical: str
+
+    @property
+    def schema_json(self) -> Dict[str, Any]:
+        return self.schema_json_payload
 
 
 class CodegenReq(BaseModel):
@@ -90,8 +98,8 @@ class ManifestResp(BaseModel):
 
 
 @app.get("/v1/health")
-def health() -> Dict[str, str]:
-    return {"status": "ok"}
+def health() -> Dict[str, Any]:
+    return {"ok": True, "status": "ok"}
 
 
 @app.get("/v1/info")
@@ -112,7 +120,16 @@ def info() -> Dict[str, Any]:
 
 @app.post("/v1/translate", response_model=TranslateResp)
 def translate(req: TranslateReq) -> TranslateResp:
-    expr = parse_dsl(req.dsl)
+    try:
+        expr = parse_dsl(req.dsl)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": str(e),
+                "hint": "Try one of: 'E = m*c^2', 'E == m*c**2', 'return E - m*c**2', or a bare expression like '0.5*m*v**2'.",
+            },
+        )
     canon = canonicalize(expr)
     return TranslateResp(success=True, expression=str(expr), canonical=canon.canonical_str)
 
@@ -138,7 +155,7 @@ def schema(req: SchemaReq) -> SchemaResp:
     expr = parse_dsl(req.dsl)
     canon = canonicalize(expr)
     schema_dict = build_theory_schema(expr, req.domain, req.units, req.constraints)
-    return SchemaResp(schema=schema_dict, canonical=canon.canonical_str)
+    return SchemaResp(schema_json=schema_dict, canonical=canon.canonical_str)
 
 
 @app.post("/v1/codegen", response_model=CodegenResp)
