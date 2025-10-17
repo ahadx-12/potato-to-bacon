@@ -10,7 +10,9 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ConfigDict
 
+from potatobacon.api.routes_units import router as units_router
 from potatobacon.codegen.reference import generate_numpy
+from potatobacon.core.units import analyze_units_map
 from potatobacon.manifest.store import ComputationManifest
 from potatobacon.parser.dsl_parser import parse_dsl
 from potatobacon.semantics.canonicalizer import canonicalize
@@ -18,11 +20,13 @@ from potatobacon.semantics.schema_builder import build_theory_schema
 from potatobacon.storage import load_manifest as load_persisted_manifest
 from potatobacon.storage import save_code, save_manifest, save_schema
 from potatobacon.validation.pipeline import validate_all
+from potatobacon.units.infer import evaluate_equation_dimensions, UnitInferenceError
 
 # -----------------------------------------------------------------------------
 # App setup
 # -----------------------------------------------------------------------------
 app = FastAPI(title="potato-to-bacon API", version="v1")
+app.include_router(units_router)
 
 # Conditionally mount docs/examples if folders exist (avoids startup errors)
 if Path("docs").exists():
@@ -174,17 +178,71 @@ def translate(req: TranslateReq) -> TranslateResp:
 @app.post("/v1/validate", response_model=ValidateResp)
 def validate(req: ValidateReq) -> ValidateResp:
     expr = parse_dsl(req.dsl)
-    report = validate_all(
-        expr,
-        req.units,
-        req.result_unit,
-        req.constraints,
-        req.domain,
-        req.pde_space_vars,
-        req.pde_time_var,
-        req.checks or None,
+
+    _, canonical_units, unit_diagnostics = analyze_units_map(req.units)
+
+    dimensions_ok = True
+    dimension_error: str | None = None
+    dimension_trace: List[Dict[str, object]] = []
+    dimension_summary: List[Dict[str, str]] = []
+
+    try:
+        _, dimension_trace, dimension_summary = evaluate_equation_dimensions(expr, canonical_units)
+    except UnitInferenceError as exc:
+        dimensions_ok = False
+        dimension_error = str(exc)
+
+    pipeline_report: Dict[str, Any]
+    if not unit_diagnostics and dimensions_ok:
+        pipeline_report = validate_all(
+            expr,
+            canonical_units,
+            req.result_unit,
+            req.constraints,
+            req.domain,
+            req.pde_space_vars,
+            req.pde_time_var,
+            req.checks or None,
+        )
+    else:
+        pipeline_report = {
+            "ok": False,
+            "errors": [
+                {
+                    "stage": "units",
+                    "message": dimension_error or "Unit diagnostics must be resolved before full validation.",
+                }
+            ],
+        }
+
+    overall_ok = (
+        pipeline_report.get("ok", False)
+        and dimensions_ok
+        and not unit_diagnostics
     )
-    return ValidateResp(ok=report["ok"], report=report)
+
+    report = {
+        "ok": overall_ok,
+        "units": canonical_units,
+        "unit_diagnostics": [
+            {
+                "symbol": diag.symbol,
+                "code": diag.code,
+                "message": diag.message,
+                "hint": diag.hint,
+            }
+            for diag in unit_diagnostics
+        ],
+        "dimensions": {
+            "ok": dimensions_ok,
+            "summary": dimension_summary,
+            "trace": dimension_trace,
+            "error": dimension_error,
+        },
+        "pipeline": pipeline_report,
+    }
+
+    return ValidateResp(ok=overall_ok, report=report)
 
 
 @app.post("/v1/schema", response_model=SchemaResp)
