@@ -6,6 +6,7 @@ import sympy as sp
 from potatobacon.core.dimensions import ENERGY, FORCE, MASS, VELOCITY
 from potatobacon.core.types import EquationDomain
 from potatobacon.parser import DSLParser, ParseError
+from potatobacon.parser.dsl_parser import parse_dsl
 
 
 @pytest.fixture
@@ -109,3 +110,27 @@ def test_neg(x: energy) -> energy:
 """
     equation = parser.parse(dsl)
     assert equation.expression == sp.sympify("-0.5*x")
+
+
+def test_accepts_assignment() -> None:
+    e = parse_dsl("E = m*c^2")
+    assert isinstance(e, sp.Equality)
+    assert str(e.lhs) == "E"
+
+
+def test_accepts_equality() -> None:
+    e = parse_dsl("E == m*c**2")
+    assert isinstance(e, sp.Equality)
+    assert str(e.rhs) in {"c**2*m", "m*c**2"}
+
+
+def test_accepts_return_residual() -> None:
+    e = parse_dsl("return E - m*c**2")
+    assert isinstance(e, sp.Basic)
+    assert e.has(sp.Symbol("E"))
+
+
+def test_accepts_bare_expr() -> None:
+    e = parse_dsl("0.5*m*v**2")
+    assert isinstance(e, sp.Basic)
+    assert {s.name for s in e.free_symbols} == {"m", "v"}

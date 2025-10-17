@@ -156,25 +156,61 @@ def _dsl_locals() -> Dict[str, Any]:
     return {"d": d, "d2": d2}
 
 
-def parse_dsl(dsl_text: str) -> sp.Basic:
-    """Parse DSL text into a SymPy expression or equality."""
-    lines = [line.strip() for line in dsl_text.splitlines() if line.strip()]
-    if not lines:
+def parse_dsl(dsl_text: str) -> sp.Basic | sp.Equality:
+    """Auto-mode DSL parser.
+
+    Accepts:
+    - "E = m*c^2" (assignment -> Eq)
+    - "E == m*c^2" (equality -> Eq)
+    - "return E - m*c^2" (residual expression)
+    - "0.5*m*v**2" (bare expression)
+    - Your decorated DSL def block (fallback to last 'return ...')
+
+    Returns a SymPy Equality or a SymPy expression.
+    """
+
+    if not dsl_text or not dsl_text.strip():
         raise ValueError("Empty DSL text")
 
-    # Look for return statement
-    expr_line = None
+    # Normalize lines
+    lines = [ln.strip() for ln in dsl_text.splitlines() if ln.strip()]
+    blob = " ".join(lines)
+
+    # Helpers: true SymPy derivatives so PDE classification sees real Derivative nodes
+    def d(expr, *vars):
+        return sp.diff(expr, *vars)
+
+    def d2(expr, var):
+        return sp.diff(expr, var, 2)
+
+    local_ns = {"d": d, "d2": d2, "E": sp.Symbol("E")}
+
+    # 1) If user supplied a def-block, prefer the last explicit 'return ...'
     for line in reversed(lines):
         if line.startswith("return "):
-            expr_line = line[len("return ") :]
-            break
-    if expr_line is None:
-        raise ValueError("DSL must contain a return statement")
+            expr_src = line[len("return ") :]
+            try:
+                return sp.sympify(expr_src, locals=local_ns)
+            except Exception as exc:
+                raise ValueError(
+                    f"Failed to parse return-expression: {expr_src!r} ({exc})"
+                ) from exc
 
-    local_ns = _dsl_locals()
+    # 2) If there is '==' or '=' treat it as an equation
+    if "==" in blob or "=" in blob:
+        lhs, rhs = re.split(r"==|=", blob, maxsplit=1)
+        try:
+            return sp.Eq(
+                sp.sympify(lhs, locals=local_ns),
+                sp.sympify(rhs, locals=local_ns),
+            )
+        except Exception as exc:
+            raise ValueError(
+                f"Failed to parse equality: {lhs!r} = {rhs!r} ({exc})"
+            ) from exc
 
-    if "==" in expr_line:
-        lhs, rhs = expr_line.split("==", 1)
-        return sp.Eq(sp.sympify(lhs, locals=local_ns), sp.sympify(rhs, locals=local_ns))
-
-    return sp.sympify(expr_line, locals=local_ns)
+    # 3) Otherwise, treat as a bare expression
+    try:
+        return sp.sympify(blob, locals=local_ns)
+    except Exception as exc:
+        raise ValueError(f"Failed to parse expression: {blob!r} ({exc})") from exc
