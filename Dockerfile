@@ -3,14 +3,13 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Copy project files first
+# Copy project metadata first
 COPY pyproject.toml .
-COPY README.md .  # optional, avoids warning if file exists
 
 # Copy the actual source so pip can build from src/
 COPY src/ ./src/
 
-# Install the project (reads pyproject.toml)
+# Install project dependencies (uses pyproject.toml)
 RUN pip install --no-cache-dir .
 
 # Copy the web UI after install
