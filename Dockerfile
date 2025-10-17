@@ -20,5 +20,5 @@ RUN ls -R /app/web
 
 EXPOSE 8000
 
-# Start FastAPI (Railway injects $PORT automatically)
-CMD ["uvicorn", "potatobacon.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD uvicorn potatobacon.api.app:app --host 0.0.0.0 --port ${PORT:-8000}
+
