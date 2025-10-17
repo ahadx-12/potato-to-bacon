@@ -26,7 +26,7 @@ web_dir = Path(__file__).resolve().parents[3] / "web"
 app.mount("/ui", StaticFiles(directory=web_dir, html=True), name="ui")
 
 
-@app.get("/")
+@app.get("/", include_in_schema=False)
 def root_redirect() -> RedirectResponse:
     return RedirectResponse(url="/ui/")
 
