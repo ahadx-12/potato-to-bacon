@@ -19,18 +19,34 @@ from potatobacon.storage import load_manifest as load_persisted_manifest
 from potatobacon.storage import save_code, save_manifest, save_schema
 from potatobacon.validation.pipeline import validate_all
 
+# -----------------------------------------------------------------------------
+# App setup
+# -----------------------------------------------------------------------------
 app = FastAPI(title="potato-to-bacon API", version="v1")
+
+# Static mounts (optional docs/examples)
 app.mount("/static/docs", StaticFiles(directory="docs", html=True), name="docs")
 app.mount("/static/examples", StaticFiles(directory="examples", html=False), name="examples")
-web_dir = Path(__file__).resolve().parents[3] / "web"
-app.mount("/ui", StaticFiles(directory=web_dir, html=True), name="ui")
+
+# -----------------------------------------------------------------------------
+# UI mount (safe even if /web missing)
+# -----------------------------------------------------------------------------
+web_dir = Path(__file__).resolve().parents[2] / "web"
+
+if web_dir.exists():
+    app.mount("/ui", StaticFiles(directory=web_dir, html=True), name="ui")
+
+    @app.get("/", include_in_schema=False)
+    def root_redirect() -> RedirectResponse:
+        """Redirect root to the UI."""
+        return RedirectResponse(url="/ui/")
+else:
+    print(f"⚠️ Warning: UI directory not found at {web_dir}, skipping mount.")
 
 
-@app.get("/")
-def root_redirect() -> RedirectResponse:
-    return RedirectResponse(url="/ui/")
-
-
+# -----------------------------------------------------------------------------
+# Models
+# -----------------------------------------------------------------------------
 class TranslateReq(BaseModel):
     dsl: str
     domain: str = "classical"
@@ -67,6 +83,7 @@ class SchemaReq(BaseModel):
 
 
 class SchemaResp(BaseModel):
+    """Renamed schema field to avoid Pydantic shadowing warning."""
     model_config = ConfigDict(populate_by_name=True)
     schema_json_payload: Dict[str, Any] = Field(
         serialization_alias="schema_json",
@@ -106,6 +123,9 @@ class ManifestResp(BaseModel):
     code_digest: str
 
 
+# -----------------------------------------------------------------------------
+# Health + Info
+# -----------------------------------------------------------------------------
 @app.get("/v1/health")
 def health() -> Dict[str, Any]:
     return {"ok": True, "status": "ok"}
@@ -127,6 +147,9 @@ def info() -> Dict[str, Any]:
     }
 
 
+# -----------------------------------------------------------------------------
+# API Endpoints
+# -----------------------------------------------------------------------------
 @app.post("/v1/translate", response_model=TranslateResp)
 def translate(req: TranslateReq) -> TranslateResp:
     try:
@@ -136,7 +159,8 @@ def translate(req: TranslateReq) -> TranslateResp:
             status_code=422,
             detail={
                 "message": str(e),
-                "hint": "Try one of: 'E = m*c^2', 'E == m*c**2', 'return E - m*c**2', or a bare expression like '0.5*m*v**2'.",
+                "hint": "Try one of: 'E = m*c^2', 'E == m*c**2', "
+                        "'return E - m*c**2', or a bare expression like '0.5*m*v**2'.",
             },
         )
     canon = canonicalize(expr)
@@ -214,5 +238,5 @@ def manifest(req: ManifestReq) -> ManifestResp:
 def get_manifest(manifest_hash: str) -> Dict[str, Any]:
     try:
         return load_persisted_manifest(manifest_hash)
-    except FileNotFoundError as exc:  # pragma: no cover - simple 404 path
+    except FileNotFoundError as exc:  # simple 404 path
         raise HTTPException(404, "Not found") from exc
