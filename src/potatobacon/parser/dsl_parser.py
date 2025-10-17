@@ -152,7 +152,13 @@ def parse_dsl(dsl_text: str) -> sp.Basic:
     if expr_line is None:
         raise ValueError("DSL must contain a return statement")
 
-    local_ns = {"d2": lambda expr, var: sp.Function("d2")(expr, var)}
+    def d(expr, *vars):
+        return sp.diff(expr, *vars)
+
+    def d2(expr, var):
+        return sp.diff(expr, var, 2)
+
+    local_ns = {"d": d, "d2": d2}
 
     if "==" in expr_line:
         lhs, rhs = expr_line.split("==", 1)
