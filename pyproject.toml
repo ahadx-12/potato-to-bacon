@@ -14,7 +14,12 @@ dependencies = [
   "sympy>=1.12",
   "pint>=0.22",
   "lark>=1.1.9",
-  "PyYAML>=6.0.1"
+  "PyYAML>=6.0.1",
+  "requests>=2.32",
+  "fastapi>=0.115",
+  "numpy>=1.26",
+  "httpx>=0.27",
+  "click>=8.1"
 ]
 [project.optional-dependencies]
 dev = [
