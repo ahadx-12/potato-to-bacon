@@ -13,6 +13,9 @@ body{
   max-width:820px; margin:32px auto 8px; padding:0 16px;
 }
 .brand{ font-weight:600; letter-spacing:.2px; }
+.top-nav{ display:flex; gap:12px; margin-top:6px; }
+.top-nav a{ color:var(--accent); text-decoration:none; font-weight:600; }
+.top-nav a:hover{ text-decoration:underline; }
 .subtitle{ color:var(--muted); margin-top:4px; font-size:.95rem; }
 
 .container{ max-width:820px; margin:0 auto 64px; padding:0 16px; }

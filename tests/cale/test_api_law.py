@@ -5,14 +5,20 @@ from typing import Dict
 
 os.environ["CALE_EMBED_BACKEND"] = "hash"
 
+import pytest
 from fastapi.testclient import TestClient
 
 from potatobacon.api.app import app
 
-client = TestClient(app)
+
+@pytest.fixture()
+def client(monkeypatch):
+    monkeypatch.delenv("CALE_DISABLE_STARTUP_INIT", raising=False)
+    with TestClient(app) as test_client:
+        yield test_client
 
 
-def test_analyze_endpoint_returns_scores_and_components():
+def test_analyze_endpoint_returns_scores_and_components(client):
     request = {
         "rule1": {
             "text": "Organizations MUST collect personal data IF consent.",
@@ -60,7 +66,7 @@ def _suggest_request() -> Dict[str, Dict[str, object]]:
     }
 
 
-def test_suggest_endpoint_schema():
+def test_suggest_endpoint_schema(client):
     response = client.post("/v1/law/suggest_amendment", json=_suggest_request())
     assert response.status_code == 200, response.text
     body = response.json()
@@ -89,7 +95,7 @@ def test_suggest_endpoint_schema():
             }
 
 
-def test_analyze_plus_suggest_roundtrip():
+def test_analyze_plus_suggest_roundtrip(client):
     request = _suggest_request()
     analyze = client.post("/v1/law/analyze", json=request)
     assert analyze.status_code == 200, analyze.text
