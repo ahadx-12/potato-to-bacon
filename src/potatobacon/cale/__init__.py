@@ -13,18 +13,25 @@ from .constants import (
     MODALITY_NORMALIZATION,
     canonicalize_jurisdiction,
 )
+from .embed import FeatureEngine, LegalEmbedder
+from .graph import compute_authority_scores, load_citation_graph
 from .parser import PredicateMapper, RuleParser
 from .symbolic import SymbolicConflictChecker
-from .types import LegalRule, ParseMetadata, RuleInput
+from .types import ConflictAnalysis, LegalRule, ParseMetadata, RuleInput
 
 __all__ = [
     "CANONICAL_STOPWORDS",
     "CONDITION_KEYWORDS",
     "CONDITION_SYNONYMS",
     "MODALITY_NORMALIZATION",
+    "FeatureEngine",
+    "LegalEmbedder",
+    "compute_authority_scores",
+    "load_citation_graph",
     "PredicateMapper",
     "RuleParser",
     "SymbolicConflictChecker",
+    "ConflictAnalysis",
     "LegalRule",
     "ParseMetadata",
     "RuleInput",

@@ -1,0 +1,8 @@
+[
+  {"id": "R1", "jurisdiction": "CA.Federal", "statute": "PIPEDA", "section": "7(3)", "year": 2000, "cites": ["R4"]},
+  {"id": "R2", "jurisdiction": "CA.Federal", "statute": "ATA", "section": "83.28", "year": 2001, "cites": ["R1", "R4"]},
+  {"id": "R3", "jurisdiction": "CA.BC", "statute": "PIPA", "section": "12", "year": 2003, "cites": ["R1"]},
+  {"id": "R4", "jurisdiction": "US.Federal", "statute": "HIPAA", "section": "164.512", "year": 1996, "cites": []},
+  {"id": "R5", "jurisdiction": "EU", "statute": "GDPR", "section": "6(1)", "year": 2016, "cites": ["R1", "R4"]},
+  {"id": "R6", "jurisdiction": "CA.ON", "statute": "PHIPA", "section": "29", "year": 2004, "cites": ["R1"]}
+]

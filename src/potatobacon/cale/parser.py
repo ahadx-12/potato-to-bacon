@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Dict, List, Mapping, MutableMapping, Sequence
+from typing import Any, Dict, List, Mapping, MutableMapping, Sequence
 
 import regex as re
 
@@ -141,7 +141,7 @@ class RuleParser:
         pattern = "|".join(re.escape(token) for token in modalities)
         self._modality_regex = re.compile(rf"\b({pattern})\b", re.IGNORECASE)
 
-    def parse(self, text: str, metadata: ParseMetadata) -> LegalRule:
+    def parse(self, text: str, metadata: ParseMetadata | Mapping[str, Any]) -> LegalRule:
         """Parse *text* and attach :class:`ParseMetadata`.
 
         Raises
@@ -150,6 +150,7 @@ class RuleParser:
             If the parser cannot locate a modality or action within the text.
         """
 
+        metadata_obj = self._coerce_metadata(metadata)
         clean_text = self._normalise_whitespace(text)
         modality_match = self._modality_regex.search(clean_text)
         if not modality_match:
@@ -167,7 +168,7 @@ class RuleParser:
         action = self._canonical_action(action_text)
         conditions = self._parse_conditions(condition_text)
 
-        rule_id = self._rule_identifier(clean_text, metadata)
+        rule_id = metadata_obj.id or self._rule_identifier(clean_text, metadata_obj)
         return LegalRule(
             id=rule_id,
             text=clean_text,
@@ -175,10 +176,10 @@ class RuleParser:
             modality=modality,
             action=action,
             conditions=conditions,
-            jurisdiction=metadata.jurisdiction,
-            statute=metadata.statute,
-            section=metadata.section,
-            enactment_year=metadata.enactment_year,
+            jurisdiction=metadata_obj.jurisdiction,
+            statute=metadata_obj.statute,
+            section=metadata_obj.section,
+            enactment_year=metadata_obj.enactment_year,
         )
 
     def from_input(self, rule_input: RuleInput) -> LegalRule:
@@ -195,6 +196,33 @@ class RuleParser:
     @staticmethod
     def _normalise_whitespace(text: str) -> str:
         return re.sub(r"\s+", " ", text.strip())
+
+    @staticmethod
+    def _coerce_metadata(metadata: ParseMetadata | Mapping[str, Any]) -> ParseMetadata:
+        if isinstance(metadata, ParseMetadata):
+            return metadata
+
+        def _get(key: str, *aliases: str, default: Any | None = None) -> Any:
+            keys = (key, *aliases)
+            for candidate in keys:
+                if candidate in metadata:
+                    return metadata[candidate]
+            if default is not None:
+                return default
+            raise KeyError(f"Missing metadata field: {key}")
+
+        enactment_year = int(
+            _get("enactment_year", "enactment_date", "year", default=1900)
+        )
+        raw_id = _get("id", default=None)
+        identifier = None if raw_id in (None, "") else str(raw_id)
+        return ParseMetadata(
+            jurisdiction=str(_get("jurisdiction")),
+            statute=str(_get("statute")),
+            section=str(_get("section")),
+            enactment_year=enactment_year,
+            id=identifier,
+        )
 
     @staticmethod
     def _rule_identifier(text: str, metadata: ParseMetadata) -> str:
