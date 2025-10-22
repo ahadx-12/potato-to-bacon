@@ -11,6 +11,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ConfigDict
 
 from potatobacon.api.routes_units import router as units_router
+from potatobacon.cale.ccs import CCSCalculator
+from potatobacon.cale.embed import FeatureEngine, LegalEmbedder
+from potatobacon.cale.graph import compute_authority_scores, load_citation_graph
+from potatobacon.cale.parser import PredicateMapper, RuleParser
+from potatobacon.cale.symbolic import SymbolicConflictChecker
+from potatobacon.cale.types import LegalRule
 from potatobacon.codegen.reference import generate_numpy
 from potatobacon.core.units import analyze_units_map
 from potatobacon.manifest.store import ComputationManifest
@@ -130,6 +136,66 @@ class ManifestReq(BaseModel):
 class ManifestResp(BaseModel):
     manifest_hash: str
     code_digest: str
+
+
+class LawRuleInput(BaseModel):
+    text: str = Field(..., min_length=3)
+    jurisdiction: str
+    statute: str
+    section: str
+    enactment_year: int
+
+
+class ConflictRequest(BaseModel):
+    rule1: LawRuleInput
+    rule2: LawRuleInput
+
+
+_cale_predicates: Optional[PredicateMapper] = None
+_cale_parser: Optional[RuleParser] = None
+_cale_embedder: Optional[LegalEmbedder] = None
+_cale_features: Optional[FeatureEngine] = None
+_cale_ccs: Optional[CCSCalculator] = None
+_cale_symbolic: Optional[SymbolicConflictChecker] = None
+_cale_authorities: Dict[str, float] = {}
+
+
+@app.on_event("startup")
+def _initialise_cale() -> None:
+    global _cale_predicates, _cale_parser, _cale_embedder, _cale_features, _cale_ccs, _cale_symbolic, _cale_authorities
+
+    _cale_predicates = PredicateMapper()
+    _cale_parser = RuleParser(_cale_predicates)
+    _cale_embedder = LegalEmbedder(backend=os.getenv("CALE_EMBED_BACKEND", "hash"))
+    _cale_features = FeatureEngine(_cale_embedder)
+    _cale_ccs = CCSCalculator()
+    _cale_symbolic = SymbolicConflictChecker(_cale_predicates)
+
+    demo_corpus = Path("data/cale/demo_corpus.json")
+    if demo_corpus.exists():
+        graph = load_citation_graph(demo_corpus)
+        _cale_authorities = compute_authority_scores(graph)
+    else:
+        _cale_authorities = {}
+
+
+def _parse_and_populate_rule(inp: LawRuleInput, rid: str) -> LegalRule:
+    if _cale_parser is None or _cale_features is None:
+        raise RuntimeError("CALE components not initialised")
+    metadata = {
+        "id": rid,
+        "jurisdiction": inp.jurisdiction,
+        "statute": inp.statute,
+        "section": inp.section,
+        "enactment_year": inp.enactment_year,
+    }
+    rule = _cale_parser.parse(inp.text, metadata)
+    return _cale_features.populate(rule, authorities=_cale_authorities)
+
+
+def _ensure_cale_ready() -> None:
+    if _cale_symbolic is None or _cale_ccs is None:
+        _initialise_cale()
 
 
 # -----------------------------------------------------------------------------
@@ -297,6 +363,39 @@ def manifest(req: ManifestReq) -> ManifestResp:
 
     manifest_hash = save_manifest(asdict(manifest))
     return ManifestResp(manifest_hash=manifest_hash, code_digest=code_digest)
+
+
+@app.post("/v1/law/analyze")
+def analyze_conflict(req: ConflictRequest) -> Dict[str, Any]:
+    _ensure_cale_ready()
+    if _cale_symbolic is None or _cale_ccs is None:
+        raise HTTPException(status_code=500, detail="CALE components not initialised")
+
+    try:
+        rule1 = _parse_and_populate_rule(req.rule1, "R_api_1")
+        rule2 = _parse_and_populate_rule(req.rule2, "R_api_2")
+        ci = _cale_symbolic.check_conflict(rule1, rule2)
+        analysis = _cale_ccs.compute_multiperspective(rule1, rule2, ci)
+    except HTTPException:
+        raise
+    except Exception as exc:  # pragma: no cover - defensive guard
+        raise HTTPException(status_code=422, detail=f"analysis failed: {exc!r}") from exc
+
+    return {
+        "conflict_scores": {
+            "textualist": analysis.CCS_textualist,
+            "living": analysis.CCS_living,
+            "pragmatic": analysis.CCS_pragmatic,
+        },
+        "components": {
+            "symbolic_conflict": analysis.CI,
+            "contextual_similarity": analysis.K,
+            "authority": analysis.H,
+            "temporal_drift": analysis.TD,
+        },
+        "interpretation": analysis.interpretation,
+        "variance": analysis.variance,
+    }
 
 
 @app.get("/v1/manifest/{manifest_hash}")

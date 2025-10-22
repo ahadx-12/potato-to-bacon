@@ -24,6 +24,7 @@ dependencies = [
   "pydantic>=2,<3",
   "regex",
   "typing-extensions",
+  "networkx>=3.2",
   "z3-solver==4.12.*",
 ]
 [project.optional-dependencies]
