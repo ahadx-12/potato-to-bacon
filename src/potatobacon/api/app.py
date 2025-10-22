@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import asdict
 from pathlib import Path
@@ -15,6 +16,7 @@ from potatobacon.cale.ccs import CCSCalculator
 from potatobacon.cale.embed import FeatureEngine, LegalEmbedder
 from potatobacon.cale.graph import compute_authority_scores, load_citation_graph
 from potatobacon.cale.parser import PredicateMapper, RuleParser
+from potatobacon.cale.suggest import AmendmentSuggester
 from potatobacon.cale.symbolic import SymbolicConflictChecker
 from potatobacon.cale.types import LegalRule
 from potatobacon.codegen.reference import generate_numpy
@@ -151,6 +153,20 @@ class ConflictRequest(BaseModel):
     rule2: LawRuleInput
 
 
+class SuggestionItem(BaseModel):
+    condition: str
+    justification: Dict[str, float]
+    estimated_ccs: float
+    suggested_text: str
+
+
+class SuggestionResponse(BaseModel):
+    precedent_count: int
+    candidates_considered: int
+    suggestions: List[SuggestionItem]
+    best: Optional[SuggestionItem]
+
+
 _cale_predicates: Optional[PredicateMapper] = None
 _cale_parser: Optional[RuleParser] = None
 _cale_embedder: Optional[LegalEmbedder] = None
@@ -158,11 +174,56 @@ _cale_features: Optional[FeatureEngine] = None
 _cale_ccs: Optional[CCSCalculator] = None
 _cale_symbolic: Optional[SymbolicConflictChecker] = None
 _cale_authorities: Dict[str, float] = {}
+_cale_corpus_rules: List[LegalRule] = []
+_cale_suggester: Optional[AmendmentSuggester] = None
+
+
+_DEMO_RULE_TEXTS: Dict[str, str] = {
+    "R1": "Organizations MUST collect personal data IF consent.",
+    "R2": "Security agencies MUST NOT collect personal data IF emergency.",
+    "R3": "Organizations MAY collect personal data IF emergency.",
+    "R4": "Financial institutions MUST report personal data breaches IF data breach.",
+    "R5": "Organizations MAY collect personal data IF national security threat.",
+    "R6": "Provincial agencies MAY collect personal data IF court order.",
+    "R7": "International agreements MAY require data disclosure IF treaty obligation.",
+}
+
+
+def _load_demo_rules() -> List[LegalRule]:
+    if (
+        _cale_parser is None
+        or _cale_features is None
+    ):
+        raise RuntimeError("CALE components not initialised")
+
+    demo_path = DATA_ROOT / "data/cale/demo_corpus.json"
+    if not demo_path.exists():
+        return []
+
+    payload = json.loads(demo_path.read_text())
+    rules: List[LegalRule] = []
+    for item in payload:
+        rid = str(item["id"])
+        text = _DEMO_RULE_TEXTS.get(rid)
+        if not text:
+            continue
+        metadata = {
+            "id": rid,
+            "jurisdiction": item.get("jurisdiction", "CA.Federal"),
+            "statute": item.get("statute", ""),
+            "section": item.get("section", ""),
+            "enactment_year": item.get("year", 2000),
+        }
+        rule = _cale_parser.parse(text, metadata)
+        populated = _cale_features.populate_features(rule, authorities=_cale_authorities)
+        rules.append(populated)
+    return rules
 
 
 @app.on_event("startup")
 def _initialise_cale() -> None:
-    global _cale_predicates, _cale_parser, _cale_embedder, _cale_features, _cale_ccs, _cale_symbolic, _cale_authorities
+    global _cale_predicates, _cale_parser, _cale_embedder, _cale_features, _cale_ccs
+    global _cale_symbolic, _cale_authorities, _cale_corpus_rules, _cale_suggester
 
     _cale_predicates = PredicateMapper()
     _cale_parser = RuleParser(_cale_predicates)
@@ -171,12 +232,28 @@ def _initialise_cale() -> None:
     _cale_ccs = CCSCalculator()
     _cale_symbolic = SymbolicConflictChecker(_cale_predicates)
 
-    demo_corpus = Path("data/cale/demo_corpus.json")
+    demo_corpus = DATA_ROOT / "data/cale/demo_corpus.json"
     if demo_corpus.exists():
         graph = load_citation_graph(demo_corpus)
         _cale_authorities = compute_authority_scores(graph)
     else:
         _cale_authorities = {}
+
+    _cale_corpus_rules = []
+    if _cale_parser is not None and _cale_features is not None:
+        _cale_corpus_rules = _load_demo_rules()
+
+    if (
+        _cale_corpus_rules
+        and _cale_embedder is not None
+        and _cale_ccs is not None
+        and _cale_predicates is not None
+    ):
+        _cale_suggester = AmendmentSuggester(
+            _cale_corpus_rules, _cale_embedder, _cale_ccs, _cale_predicates
+        )
+    else:
+        _cale_suggester = None
 
 
 def _parse_and_populate_rule(inp: LawRuleInput, rid: str) -> LegalRule:
@@ -190,11 +267,11 @@ def _parse_and_populate_rule(inp: LawRuleInput, rid: str) -> LegalRule:
         "enactment_year": inp.enactment_year,
     }
     rule = _cale_parser.parse(inp.text, metadata)
-    return _cale_features.populate(rule, authorities=_cale_authorities)
+    return _cale_features.populate_features(rule, authorities=_cale_authorities)
 
 
 def _ensure_cale_ready() -> None:
-    if _cale_symbolic is None or _cale_ccs is None:
+    if _cale_symbolic is None or _cale_ccs is None or _cale_suggester is None:
         _initialise_cale()
 
 
@@ -398,9 +475,31 @@ def analyze_conflict(req: ConflictRequest) -> Dict[str, Any]:
     }
 
 
+@app.post("/v1/law/suggest_amendment", response_model=SuggestionResponse)
+def suggest_amendment(req: ConflictRequest) -> SuggestionResponse:
+    _ensure_cale_ready()
+    if _cale_symbolic is None or _cale_ccs is None or _cale_suggester is None:
+        raise HTTPException(status_code=500, detail="CALE components not initialised")
+
+    try:
+        rule1 = _parse_and_populate_rule(req.rule1, "R_api_1")
+        rule2 = _parse_and_populate_rule(req.rule2, "R_api_2")
+        ci = _cale_symbolic.check_conflict(rule1, rule2)
+        analysis = _cale_ccs.compute_multiperspective(rule1, rule2, ci)
+        result = _cale_suggester.suggest_amendment(rule1, rule2, analysis)
+    except HTTPException:
+        raise
+    except Exception as exc:  # pragma: no cover - defensive guard
+        raise HTTPException(status_code=422, detail=f"suggestion failed: {exc!r}") from exc
+
+    return SuggestionResponse(**result)
+
+
 @app.get("/v1/manifest/{manifest_hash}")
 def get_manifest(manifest_hash: str) -> Dict[str, Any]:
     try:
         return load_persisted_manifest(manifest_hash)
     except FileNotFoundError as exc:
         raise HTTPException(404, "Not found") from exc
+DATA_ROOT = Path(__file__).resolve().parents[3]
+

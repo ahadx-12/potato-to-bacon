@@ -2,17 +2,27 @@
 
 from __future__ import annotations
 
+import os
+import random
 from typing import Dict
 
 import numpy as np
 
 try:  # pragma: no cover - torch is optional in CI
-    import torch
-
-    _TORCH_AVAILABLE = True
+    import torch  # type: ignore[import-not-found]
 except Exception:  # pragma: no cover - fallback to numpy backend
     torch = None  # type: ignore[assignment]
-    _TORCH_AVAILABLE = False
+
+SEED = int(os.getenv("CALE_SEED", "1337"))
+random.seed(SEED)
+np.random.seed(SEED)
+if torch is not None:  # pragma: no branch
+    try:  # pragma: no cover - guard against misconfigured torch builds
+        torch.manual_seed(SEED)
+    except Exception:
+        pass
+
+_TORCH_AVAILABLE = torch is not None
 
 from .embed import D_S, JURISDICTIONS
 from .types import ConflictAnalysis, LegalRule
@@ -64,6 +74,18 @@ class CCSCalculator:
 
     def __init__(self, weights: Dict[str, float] | None = None) -> None:
         self.weights = weights or DEFAULT_WEIGHTS
+        self.sigma_configs: Dict[str, np.ndarray] = {}
+
+    def _ensure_sigma_config(self, d_total: int) -> None:
+        """Cache diagonal covariance matrices for each philosophy."""
+
+        dj = len(JURISDICTIONS)
+        di = d_total - D_S - 1 - dj
+        for philosophy, scales in SIGMA_SCALES.items():
+            matrix = self.sigma_configs.get(philosophy)
+            if matrix is None or matrix.shape[0] != d_total:
+                diag = _block_diagonal_scales(*scales, di=di, dj=dj)
+                self.sigma_configs[philosophy] = np.diag(diag.astype(np.float32))
 
     @staticmethod
     def compute_temporal_drift(rule1: LegalRule, rule2: LegalRule, lambda_: float = 0.1) -> float:
@@ -105,6 +127,7 @@ class CCSCalculator:
     def compute_ccs(self, rule1: LegalRule, rule2: LegalRule, CI: float, philosophy: str) -> float:
         x1 = _to_backend_array(rule1.feature_vector.astype(np.float32))
         x2 = _to_backend_array(rule2.feature_vector.astype(np.float32))
+        self._ensure_sigma_config(len(rule1.feature_vector))
         inv_diag = self._inv_diag_for(rule1, rule2, philosophy)
         kernel_value = self._kernel_rbf(x1, x2, inv_diag)
         kernel_float = float(kernel_value.item()) if _TORCH_AVAILABLE else float(kernel_value)
@@ -131,6 +154,36 @@ class CCSCalculator:
             CCS_living=float(scores["living"]),
             CCS_pragmatic=float(scores["pragmatic"]),
         )
+
+    def _torch_ccs_components(
+        self, x1: "torch.Tensor", x2: "torch.Tensor", CI: float
+    ) -> tuple["torch.Tensor", Dict[str, "torch.Tensor"]]:
+        """Return components required for autograd-based CCS gradient."""
+
+        if torch is None:  # pragma: no cover - torch path guarded by caller
+            raise RuntimeError("Torch backend is not available")
+
+        self._ensure_sigma_config(int(x1.shape[0]))
+        pragmatic_sigma = self.sigma_configs.get("pragmatic")
+        if pragmatic_sigma is None:  # pragma: no cover - defensive guard
+            raise RuntimeError("Pragmatic covariance not initialised")
+
+        sigma = torch.diag(
+            torch.tensor(np.diag(pragmatic_sigma), dtype=torch.float32, device=x1.device)
+        )
+        eye = torch.eye(sigma.shape[0], dtype=torch.float32, device=x1.device)
+        sigma_inv = torch.inverse(sigma + 1e-6 * eye)
+        diff = x1 - x2
+        K = torch.exp(-0.5 * (diff @ sigma_inv @ diff))
+        H = torch.tensor(0.5, dtype=torch.float32, device=x1.device)
+        TD = torch.tensor(0.0, dtype=torch.float32, device=x1.device)
+        z = (
+            self.weights["w_CI"] * float(CI)
+            + self.weights["w_K"] * K
+            + self.weights["w_H"] * H
+            - self.weights["w_TD"] * TD
+        )
+        return z, {"K": K, "H": H, "TD": TD}
 
 
 __all__ = ["CCSCalculator", "DEFAULT_WEIGHTS", "SIGMA_SCALES"]

@@ -7,11 +7,28 @@ share a single canonical representation of legal rules.
 
 from __future__ import annotations
 
+import os
+import random
 from dataclasses import dataclass, field
 from typing import List, Sequence
 
 import numpy as np
+
+try:  # pragma: no cover - optional dependency
+    import torch  # type: ignore[import-not-found]
+except Exception:  # pragma: no cover - maintain deterministic fallback
+    torch = None  # type: ignore[assignment]
+
 from pydantic import BaseModel, ConfigDict
+
+SEED = int(os.getenv("CALE_SEED", "1337"))
+random.seed(SEED)
+np.random.seed(SEED)
+if torch is not None:  # pragma: no branch
+    try:  # pragma: no cover - guard against broken torch installs
+        torch.manual_seed(SEED)
+    except Exception:
+        pass
 
 
 @dataclass(slots=True)
