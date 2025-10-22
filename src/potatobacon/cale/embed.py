@@ -4,10 +4,25 @@ from __future__ import annotations
 
 import hashlib
 import os
+import random
 from dataclasses import replace
 from typing import Dict, Optional
 
 import numpy as np
+
+try:  # pragma: no cover - torch optional in CI
+    import torch  # type: ignore[import-not-found]
+except Exception:  # pragma: no cover - maintain deterministic fallback
+    torch = None  # type: ignore[assignment]
+
+SEED = int(os.getenv("CALE_SEED", "1337"))
+random.seed(SEED)
+np.random.seed(SEED)
+if torch is not None:  # pragma: no branch
+    try:  # pragma: no cover - guard against broken torch installs
+        torch.manual_seed(SEED)
+    except Exception:
+        pass
 
 try:  # pragma: no cover - optional dependency
     from sentence_transformers import SentenceTransformer
@@ -25,6 +40,13 @@ JURISDICTIONS = [
     "CA.ON",
     "UK",
 ]
+JURISDICTION_ALIASES = {
+    "Canada.Federal": "CA.Federal",
+    "Canada.BC": "CA.BC",
+    "Canada.ON": "CA.ON",
+    "United States.Federal": "US.Federal",
+    "U.S.Federal": "US.Federal",
+}
 JURISDICTION_INDEX = {j: i for i, j in enumerate(JURISDICTIONS)}
 
 D_S = 4  # [requires_consent, emergency_exception, commercial_context, data_sensitivity]
@@ -37,11 +59,20 @@ class _HashBackend:
         self.dim = dim
 
     def encode(self, text: str) -> np.ndarray:
-        h = hashlib.sha256(text.encode("utf-8")).digest()
-        raw = np.frombuffer((h * ((self.dim // len(h)) + 1))[: self.dim], dtype=np.uint8).astype(
-            np.float32
-        )
-        vec = (raw - 127.5) / 127.5
+        tokens = [tok for tok in text.lower().split() if tok]
+        if not tokens:
+            base = hashlib.sha256(b"").digest()
+            raw = np.frombuffer((base * ((self.dim // len(base)) + 1))[: self.dim], dtype=np.uint8)
+            vec = (raw.astype(np.float32) - 127.5) / 127.5
+            norm = np.linalg.norm(vec) or 1.0
+            return vec / norm
+
+        vec = np.zeros(self.dim, dtype=np.float32)
+        for token in tokens:
+            digest = hashlib.sha256(token.encode("utf-8")).digest()
+            raw = (np.frombuffer(digest, dtype=np.uint8).astype(np.float32) - 127.5) / 127.5
+            for idx, value in enumerate(raw):
+                vec[(idx) % self.dim] += value
         norm = np.linalg.norm(vec) or 1.0
         return vec / norm
 
@@ -72,15 +103,28 @@ class LegalEmbedder:
         full_text = f"{rule.subject} {rule.modality} {rule.action}. {rule.text}".strip()
         return self._backend.encode(full_text)
 
+    def embed_phrase(self, phrase: str) -> np.ndarray:
+        """Embed an arbitrary phrase using the deterministic backend."""
+
+        return self._backend.encode(phrase)
+
     @staticmethod
     def compute_situational_vec(rule: LegalRule) -> np.ndarray:
         text = (rule.text or "").lower()
+        primary_text = text
+        for marker in ("except when", "unless"):
+            if marker in primary_text:
+                primary_text = primary_text.split(marker)[0]
+                break
         conds = [c.lower() for c in (rule.conditions or [])]
-        requires_consent = float(any("consent" in c for c in conds) or "consent" in text)
-        emergency_exception = float(any("emergency" in c for c in conds) or "emergency" in text)
-        commercial_context = float("commercial" in text or "commerce" in text)
+        def _has_positive(keyword: str) -> bool:
+            return any(keyword in c and not c.startswith("¬") for c in conds)
+
+        requires_consent = float(_has_positive("consent") or "consent" in primary_text)
+        emergency_exception = float(_has_positive("emergency") or "emergency" in primary_text)
+        commercial_context = float("commercial" in primary_text or "commerce" in primary_text)
         sensitive_terms = ("health", "financial", "biometric", "genetic", "political")
-        data_sensitivity = float(sum(term in text for term in sensitive_terms)) / len(sensitive_terms)
+        data_sensitivity = float(sum(term in primary_text for term in sensitive_terms)) / len(sensitive_terms)
         vec = np.array(
             [requires_consent, emergency_exception, commercial_context, data_sensitivity],
             dtype=np.float32,
@@ -94,8 +138,9 @@ class LegalEmbedder:
 
     @staticmethod
     def compute_jurisdictional_vec(jurisdiction: str) -> np.ndarray:
+        canonical = JURISDICTION_ALIASES.get(jurisdiction, jurisdiction)
         vec = np.zeros(len(JURISDICTIONS), dtype=np.float32)
-        idx = JURISDICTION_INDEX.get(jurisdiction)
+        idx = JURISDICTION_INDEX.get(canonical)
         if idx is not None:
             vec[idx] = 1.0
         return vec
@@ -124,10 +169,18 @@ class FeatureEngine:
             authority_score=float(authority),
         )
 
+    def populate_features(
+        self, rule: LegalRule, *, authorities: Optional[Dict[str, float]] = None
+    ) -> LegalRule:
+        """Alias for :meth:`populate` to match API naming conventions."""
+
+        return self.populate(rule, authorities=authorities)
+
 __all__ = [
     "FeatureEngine",
     "LegalEmbedder",
     "JURISDICTIONS",
+    "JURISDICTION_ALIASES",
     "JURISDICTION_INDEX",
     "D_S",
 ]

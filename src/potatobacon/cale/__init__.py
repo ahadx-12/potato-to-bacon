@@ -16,6 +16,7 @@ from .constants import (
 from .embed import FeatureEngine, LegalEmbedder
 from .graph import compute_authority_scores, load_citation_graph
 from .parser import PredicateMapper, RuleParser
+from .suggest import AmendmentSuggester, Suggestion
 from .symbolic import SymbolicConflictChecker
 from .types import ConflictAnalysis, LegalRule, ParseMetadata, RuleInput
 
@@ -30,6 +31,8 @@ __all__ = [
     "load_citation_graph",
     "PredicateMapper",
     "RuleParser",
+    "AmendmentSuggester",
+    "Suggestion",
     "SymbolicConflictChecker",
     "ConflictAnalysis",
     "LegalRule",

@@ -63,3 +63,15 @@ r2 = parser.parse("Organizations CANNOT collect personal data IF consent.", meta
 ci = checker.check_conflict(r1, r2)
 print(ci)  # 1.0 indicates a symbolic conflict
 ```
+
+## CALE — Amendment Suggestion (Days 8–10)
+
+- Quickstart: `uvicorn potatobacon.api.app:app --reload`
+- Example request:
+
+  ```bash
+  curl -X POST http://localhost:8000/v1/law/suggest_amendment \
+    -H "content-type: application/json" \
+    -d '{"rule1":{"text":"Organizations MUST collect personal data IF consent.","jurisdiction":"Canada.Federal","statute":"PIPEDA","section":"7(3)","enactment_year":2000},"rule2":{"text":"Security agencies MUST NOT collect personal data IF emergency.","jurisdiction":"Canada.Federal","statute":"Anti-Terrorism Act","section":"83.28","enactment_year":2001}}'
+  ```
+- Expected JSON keys: `precedent_count`, `candidates_considered`, `suggestions`, `best`.

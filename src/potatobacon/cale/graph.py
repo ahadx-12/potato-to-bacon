@@ -6,8 +6,57 @@ import json
 from pathlib import Path
 from typing import Dict, List
 
-import networkx as nx
+try:  # pragma: no cover - optional dependency
+    import networkx as nx  # type: ignore[import-not-found]
+except Exception:  # pragma: no cover - lightweight fallback graph
+    class _DiGraph:
+        def __init__(self) -> None:
+            self._nodes: Dict[str, Dict[str, object]] = {}
+            self._edges: Dict[str, set[str]] = {}
+
+        def add_node(self, node: str, **attrs: object) -> None:
+            self._nodes[node] = dict(attrs)
+            self._edges.setdefault(node, set())
+
+        def add_edge(self, source: str, target: str) -> None:
+            if source in self._nodes and target in self._nodes:
+                self._edges.setdefault(source, set()).add(target)
+
+        def has_node(self, node: str) -> bool:
+            return node in self._nodes
+
+        def number_of_nodes(self) -> int:
+            return len(self._nodes)
+
+        def nodes(self) -> List[str]:
+            return list(self._nodes.keys())
+
+        def successors(self, node: str) -> List[str]:
+            return list(self._edges.get(node, set()))
+
+    class _NetworkXNamespace:
+        DiGraph = _DiGraph
+
+    nx = _NetworkXNamespace()  # type: ignore[assignment]
+
 import numpy as np
+
+import os
+import random
+
+try:  # pragma: no cover - optional dependency
+    import torch  # type: ignore[import-not-found]
+except Exception:  # pragma: no cover - maintain deterministic fallback
+    torch = None  # type: ignore[assignment]
+
+SEED = int(os.getenv("CALE_SEED", "1337"))
+random.seed(SEED)
+np.random.seed(SEED)
+if torch is not None:  # pragma: no branch
+    try:  # pragma: no cover - guard against broken torch installs
+        torch.manual_seed(SEED)
+    except Exception:
+        pass
 
 
 def load_citation_graph(path: str | Path) -> nx.DiGraph:
