@@ -1,0 +1,3 @@
+# Ignore trained CALE weights and other model artifacts
+*
+!.gitignore

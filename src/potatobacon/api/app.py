@@ -1,23 +1,18 @@
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ConfigDict
 
 from potatobacon.api.routes_units import router as units_router
-from potatobacon.cale.ccs import CCSCalculator
-from potatobacon.cale.embed import FeatureEngine, LegalEmbedder
-from potatobacon.cale.graph import compute_authority_scores, load_citation_graph
-from potatobacon.cale.parser import PredicateMapper, RuleParser
-from potatobacon.cale.suggest import AmendmentSuggester
-from potatobacon.cale.symbolic import SymbolicConflictChecker
+from potatobacon.cale.runtime import bootstrap
 from potatobacon.cale.types import LegalRule
 from potatobacon.codegen.reference import generate_numpy
 from potatobacon.core.units import analyze_units_map
@@ -34,6 +29,12 @@ from potatobacon.units.infer import evaluate_equation_dimensions, UnitInferenceE
 # App setup
 # -----------------------------------------------------------------------------
 app = FastAPI(title="potato-to-bacon API", version="v1")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.include_router(units_router)
 
 # Conditionally mount docs/examples if folders exist (avoids startup errors)
@@ -42,6 +43,10 @@ if Path("docs").exists():
 
 if Path("examples").exists():
     app.mount("/static/examples", StaticFiles(directory="examples", html=False), name="examples")
+
+cale_static_dir = Path("static/cale")
+if cale_static_dir.exists():
+    app.mount("/demo/cale", StaticFiles(directory=cale_static_dir, html=True), name="cale-demo")
 
 # -----------------------------------------------------------------------------
 # UI mount (safe if /web missing)
@@ -167,98 +172,31 @@ class SuggestionResponse(BaseModel):
     best: Optional[SuggestionItem]
 
 
-_cale_predicates: Optional[PredicateMapper] = None
-_cale_parser: Optional[RuleParser] = None
-_cale_embedder: Optional[LegalEmbedder] = None
-_cale_features: Optional[FeatureEngine] = None
-_cale_ccs: Optional[CCSCalculator] = None
-_cale_symbolic: Optional[SymbolicConflictChecker] = None
-_cale_authorities: Dict[str, float] = {}
-_cale_corpus_rules: List[LegalRule] = []
-_cale_suggester: Optional[AmendmentSuggester] = None
-
-
-_DEMO_RULE_TEXTS: Dict[str, str] = {
-    "R1": "Organizations MUST collect personal data IF consent.",
-    "R2": "Security agencies MUST NOT collect personal data IF emergency.",
-    "R3": "Organizations MAY collect personal data IF emergency.",
-    "R4": "Financial institutions MUST report personal data breaches IF data breach.",
-    "R5": "Organizations MAY collect personal data IF national security threat.",
-    "R6": "Provincial agencies MAY collect personal data IF court order.",
-    "R7": "International agreements MAY require data disclosure IF treaty obligation.",
-}
-
-
-def _load_demo_rules() -> List[LegalRule]:
-    if (
-        _cale_parser is None
-        or _cale_features is None
-    ):
-        raise RuntimeError("CALE components not initialised")
-
-    demo_path = DATA_ROOT / "data/cale/demo_corpus.json"
-    if not demo_path.exists():
-        return []
-
-    payload = json.loads(demo_path.read_text())
-    rules: List[LegalRule] = []
-    for item in payload:
-        rid = str(item["id"])
-        text = _DEMO_RULE_TEXTS.get(rid)
-        if not text:
-            continue
-        metadata = {
-            "id": rid,
-            "jurisdiction": item.get("jurisdiction", "CA.Federal"),
-            "statute": item.get("statute", ""),
-            "section": item.get("section", ""),
-            "enactment_year": item.get("year", 2000),
-        }
-        rule = _cale_parser.parse(text, metadata)
-        populated = _cale_features.populate_features(rule, authorities=_cale_authorities)
-        rules.append(populated)
-    return rules
-
-
 @app.on_event("startup")
-def _initialise_cale() -> None:
-    global _cale_predicates, _cale_parser, _cale_embedder, _cale_features, _cale_ccs
-    global _cale_symbolic, _cale_authorities, _cale_corpus_rules, _cale_suggester
-
-    _cale_predicates = PredicateMapper()
-    _cale_parser = RuleParser(_cale_predicates)
-    _cale_embedder = LegalEmbedder(backend=os.getenv("CALE_EMBED_BACKEND", "hash"))
-    _cale_features = FeatureEngine(_cale_embedder)
-    _cale_ccs = CCSCalculator()
-    _cale_symbolic = SymbolicConflictChecker(_cale_predicates)
-
-    demo_corpus = DATA_ROOT / "data/cale/demo_corpus.json"
-    if demo_corpus.exists():
-        graph = load_citation_graph(demo_corpus)
-        _cale_authorities = compute_authority_scores(graph)
-    else:
-        _cale_authorities = {}
-
-    _cale_corpus_rules = []
-    if _cale_parser is not None and _cale_features is not None:
-        _cale_corpus_rules = _load_demo_rules()
-
-    if (
-        _cale_corpus_rules
-        and _cale_embedder is not None
-        and _cale_ccs is not None
-        and _cale_predicates is not None
-    ):
-        _cale_suggester = AmendmentSuggester(
-            _cale_corpus_rules, _cale_embedder, _cale_ccs, _cale_predicates
-        )
-    else:
-        _cale_suggester = None
+async def _startup() -> None:
+    try:
+        if os.getenv("CALE_DISABLE_STARTUP_INIT") == "1":
+            print("[CALE] Startup init skipped via env.")
+            app.state.cale = None
+            return
+        services = bootstrap()
+        app.state.cale = services
+        print("[CALE] Core components initialised.")
+    except Exception as exc:  # pragma: no cover - defensive guard
+        app.state.cale = None
+        print("[CALE] Startup init failed:", repr(exc))
 
 
-def _parse_and_populate_rule(inp: LawRuleInput, rid: str) -> LegalRule:
-    if _cale_parser is None or _cale_features is None:
-        raise RuntimeError("CALE components not initialised")
+def _require_services(request: Request):
+    services = getattr(request.app.state, "cale", None)
+    if services is None:
+        raise HTTPException(status_code=503, detail="CALE services unavailable (not initialised)")
+    return services
+
+
+def _parse_and_populate_rule(
+    inp: LawRuleInput, rid: str, services
+) -> LegalRule:
     metadata = {
         "id": rid,
         "jurisdiction": inp.jurisdiction,
@@ -266,13 +204,10 @@ def _parse_and_populate_rule(inp: LawRuleInput, rid: str) -> LegalRule:
         "section": inp.section,
         "enactment_year": inp.enactment_year,
     }
-    rule = _cale_parser.parse(inp.text, metadata)
-    return _cale_features.populate_features(rule, authorities=_cale_authorities)
-
-
-def _ensure_cale_ready() -> None:
-    if _cale_symbolic is None or _cale_ccs is None or _cale_suggester is None:
-        _initialise_cale()
+    rule = services.parser.parse(inp.text, metadata)
+    return services.feature_engine.populate_features(
+        rule, authorities=services.authority_scores
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -443,16 +378,14 @@ def manifest(req: ManifestReq) -> ManifestResp:
 
 
 @app.post("/v1/law/analyze")
-def analyze_conflict(req: ConflictRequest) -> Dict[str, Any]:
-    _ensure_cale_ready()
-    if _cale_symbolic is None or _cale_ccs is None:
-        raise HTTPException(status_code=500, detail="CALE components not initialised")
+def analyze_conflict(req: ConflictRequest, request: Request) -> Dict[str, Any]:
+    services = _require_services(request)
 
     try:
-        rule1 = _parse_and_populate_rule(req.rule1, "R_api_1")
-        rule2 = _parse_and_populate_rule(req.rule2, "R_api_2")
-        ci = _cale_symbolic.check_conflict(rule1, rule2)
-        analysis = _cale_ccs.compute_multiperspective(rule1, rule2, ci)
+        rule1 = _parse_and_populate_rule(req.rule1, "R_api_1", services)
+        rule2 = _parse_and_populate_rule(req.rule2, "R_api_2", services)
+        ci = services.symbolic.check_conflict(rule1, rule2)
+        analysis = services.ccs.compute_multiperspective(rule1, rule2, ci)
     except HTTPException:
         raise
     except Exception as exc:  # pragma: no cover - defensive guard
@@ -476,17 +409,15 @@ def analyze_conflict(req: ConflictRequest) -> Dict[str, Any]:
 
 
 @app.post("/v1/law/suggest_amendment", response_model=SuggestionResponse)
-def suggest_amendment(req: ConflictRequest) -> SuggestionResponse:
-    _ensure_cale_ready()
-    if _cale_symbolic is None or _cale_ccs is None or _cale_suggester is None:
-        raise HTTPException(status_code=500, detail="CALE components not initialised")
+def suggest_amendment(req: ConflictRequest, request: Request) -> SuggestionResponse:
+    services = _require_services(request)
 
     try:
-        rule1 = _parse_and_populate_rule(req.rule1, "R_api_1")
-        rule2 = _parse_and_populate_rule(req.rule2, "R_api_2")
-        ci = _cale_symbolic.check_conflict(rule1, rule2)
-        analysis = _cale_ccs.compute_multiperspective(rule1, rule2, ci)
-        result = _cale_suggester.suggest_amendment(rule1, rule2, analysis)
+        rule1 = _parse_and_populate_rule(req.rule1, "R_api_1", services)
+        rule2 = _parse_and_populate_rule(req.rule2, "R_api_2", services)
+        ci = services.symbolic.check_conflict(rule1, rule2)
+        analysis = services.ccs.compute_multiperspective(rule1, rule2, ci)
+        result = services.suggester.suggest_amendment(rule1, rule2, analysis)
     except HTTPException:
         raise
     except Exception as exc:  # pragma: no cover - defensive guard
@@ -495,11 +426,56 @@ def suggest_amendment(req: ConflictRequest) -> SuggestionResponse:
     return SuggestionResponse(**result)
 
 
+@app.post("/v1/law/train/dry_run")
+def train_dry_run(request: Request) -> Dict[str, Any]:
+    if os.getenv("ALLOW_TRAIN_API") != "1":
+        raise HTTPException(status_code=403, detail="Training endpoint disabled")
+
+    services = _require_services(request)
+    if not services.corpus:
+        raise HTTPException(status_code=400, detail="CALE corpus unavailable")
+
+    try:
+        from potatobacon.cale.train import CALETrainer, LegalConflictDataset
+    except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
+        raise HTTPException(status_code=503, detail="Training dependencies unavailable") from exc
+    except RuntimeError as exc:  # pragma: no cover - fallback when torch missing
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    dataset = LegalConflictDataset(
+        csv_path=Path("data/cale/expert_labels.csv"),
+        corpus=services.corpus,
+        symbolic=services.symbolic,
+    )
+    if len(dataset) == 0:
+        raise HTTPException(status_code=400, detail="No training examples found")
+
+    feature_dim = len(services.corpus[0].feature_vector)
+    trainer = CALETrainer(feature_dim)
+    history = trainer.train(
+        dataset,
+        symbolic=services.symbolic,
+        corpus=services.corpus,
+        num_epochs=1,
+        use_ssl=False,
+        use_graph=False,
+    )
+    weights = trainer.export_weights()
+    services.ccs.weights.update(
+        {
+            "w_CI": float(weights[0]),
+            "w_K": float(weights[1]),
+            "w_H": float(weights[2]),
+            "w_TD": float(weights[3]),
+        }
+    )
+    return {"history": history}
+
+
 @app.get("/v1/manifest/{manifest_hash}")
 def get_manifest(manifest_hash: str) -> Dict[str, Any]:
     try:
         return load_persisted_manifest(manifest_hash)
     except FileNotFoundError as exc:
         raise HTTPException(404, "Not found") from exc
-DATA_ROOT = Path(__file__).resolve().parents[3]
 

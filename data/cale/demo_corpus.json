@@ -1,8 +1,72 @@
 [
-  {"id": "R1", "jurisdiction": "CA.Federal", "statute": "PIPEDA", "section": "7(3)", "year": 2000, "cites": ["R4"]},
-  {"id": "R2", "jurisdiction": "CA.Federal", "statute": "ATA", "section": "83.28", "year": 2001, "cites": ["R1", "R4"]},
-  {"id": "R3", "jurisdiction": "CA.BC", "statute": "PIPA", "section": "12", "year": 1955, "cites": ["R1"]},
-  {"id": "R4", "jurisdiction": "US.Federal", "statute": "HIPAA", "section": "164.512", "year": 1996, "cites": []},
-  {"id": "R5", "jurisdiction": "EU", "statute": "GDPR", "section": "6(1)", "year": 2016, "cites": ["R1", "R4"]},
-  {"id": "R6", "jurisdiction": "CA.ON", "statute": "PHIPA", "section": "29", "year": 2004, "cites": ["R1"]}
+  {
+    "id": "R1",
+    "text": "Organizations MUST collect personal data IF consent.",
+    "jurisdiction": "CA.Federal",
+    "statute": "PIPEDA",
+    "section": "7(3)",
+    "year": 2000,
+    "enactment_year": 2000,
+    "cites": ["R4"]
+  },
+  {
+    "id": "R2",
+    "text": "Security agencies MUST NOT collect personal data IF emergency.",
+    "jurisdiction": "CA.Federal",
+    "statute": "ATA",
+    "section": "83.28",
+    "year": 2001,
+    "enactment_year": 2001,
+    "cites": ["R1", "R4"]
+  },
+  {
+    "id": "R3",
+    "text": "Organizations MAY collect personal data IF emergency.",
+    "jurisdiction": "CA.BC",
+    "statute": "PIPA",
+    "section": "12",
+    "year": 1955,
+    "enactment_year": 1955,
+    "cites": ["R1"]
+  },
+  {
+    "id": "R4",
+    "text": "Financial institutions MUST report personal data breaches IF data breach.",
+    "jurisdiction": "US.Federal",
+    "statute": "HIPAA",
+    "section": "164.512",
+    "year": 1996,
+    "enactment_year": 1996,
+    "cites": []
+  },
+  {
+    "id": "R5",
+    "text": "Organizations MAY collect personal data IF national security threat.",
+    "jurisdiction": "EU",
+    "statute": "GDPR",
+    "section": "6(1)",
+    "year": 2016,
+    "enactment_year": 2016,
+    "cites": ["R1", "R4"]
+  },
+  {
+    "id": "R6",
+    "text": "Provincial agencies MAY collect personal data IF court order.",
+    "jurisdiction": "CA.ON",
+    "statute": "PHIPA",
+    "section": "29",
+    "year": 2004,
+    "enactment_year": 2004,
+    "cites": ["R1"]
+  },
+  {
+    "id": "R7",
+    "text": "International agreements MAY require data disclosure IF treaty obligation.",
+    "jurisdiction": "EU",
+    "statute": "GDPR",
+    "section": "96",
+    "year": 2010,
+    "enactment_year": 2010,
+    "cites": ["R5"]
+  }
 ]

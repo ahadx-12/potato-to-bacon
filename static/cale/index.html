@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CALE Demo</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <h1>Conflict-Aware Law Engine</h1>
+      <p>Explore symbolic conflict detection, contextual embeddings, and amendment suggestions.</p>
+    </header>
+
+    <main class="layout">
+      <section class="card inputs">
+        <h2>Rule 1</h2>
+        <textarea id="rule1-text" placeholder="Organizations MUST collect personal data IF consent."></textarea>
+        <div class="meta-grid">
+          <label>Jurisdiction
+            <select id="rule1-jurisdiction">
+              <option value="CA.Federal">CA.Federal</option>
+              <option value="US.Federal">US.Federal</option>
+              <option value="EU">EU</option>
+              <option value="CA.BC">CA.BC</option>
+              <option value="CA.ON">CA.ON</option>
+            </select>
+          </label>
+          <label>Statute
+            <input id="rule1-statute" value="PIPEDA" />
+          </label>
+          <label>Section
+            <input id="rule1-section" value="7(3)" />
+          </label>
+          <label>Year
+            <input id="rule1-year" type="number" value="2000" />
+          </label>
+        </div>
+      </section>
+
+      <section class="card inputs">
+        <h2>Rule 2</h2>
+        <textarea id="rule2-text" placeholder="Security agencies MUST NOT collect personal data IF emergency."></textarea>
+        <div class="meta-grid">
+          <label>Jurisdiction
+            <select id="rule2-jurisdiction">
+              <option value="CA.Federal">CA.Federal</option>
+              <option value="US.Federal">US.Federal</option>
+              <option value="EU">EU</option>
+              <option value="CA.BC">CA.BC</option>
+              <option value="CA.ON">CA.ON</option>
+            </select>
+          </label>
+          <label>Statute
+            <input id="rule2-statute" value="ATA" />
+          </label>
+          <label>Section
+            <input id="rule2-section" value="83.28" />
+          </label>
+          <label>Year
+            <input id="rule2-year" type="number" value="2001" />
+          </label>
+        </div>
+      </section>
+
+      <section class="card actions">
+        <button id="analyze-btn">Analyze Conflict</button>
+        <button id="suggest-btn" class="secondary">Suggest Amendment</button>
+        <div id="status"></div>
+      </section>
+
+      <section class="card results" id="analysis-section">
+        <h2>Conflict Scores</h2>
+        <div class="bars">
+          <div class="bar"><span>Textualist</span><progress id="score-textualist" value="0" max="1"></progress></div>
+          <div class="bar"><span>Living</span><progress id="score-living" value="0" max="1"></progress></div>
+          <div class="bar"><span>Pragmatic</span><progress id="score-pragmatic" value="0" max="1"></progress></div>
+        </div>
+        <div class="components" id="component-list"></div>
+        <p class="interpretation" id="interpretation"></p>
+      </section>
+
+      <section class="card results" id="suggestion-section">
+        <h2>Suggested Amendment</h2>
+        <div id="suggestion-body"></div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
