@@ -8,7 +8,25 @@ minimal so it can be imported without side effects.
 
 from __future__ import annotations
 
+import os
+import random
 from typing import Mapping
+
+import numpy as np
+
+try:  # pragma: no cover - optional dependency
+    import torch  # type: ignore[import-not-found]
+except Exception:  # pragma: no cover - keep deterministic fallback
+    torch = None  # type: ignore[assignment]
+
+SEED = int(os.getenv("CALE_SEED", "1337"))
+random.seed(SEED)
+np.random.seed(SEED)
+if torch is not None:  # pragma: no branch - torch may be unavailable
+    try:  # pragma: no cover - guard against misconfigured torch builds
+        torch.manual_seed(SEED)
+    except Exception:
+        pass
 
 # --- Modality handling ----------------------------------------------------
 

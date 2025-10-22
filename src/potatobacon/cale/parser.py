@@ -3,10 +3,28 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import random
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, MutableMapping, Sequence
 
-import regex as re
+import numpy as np
+import re
+
+try:  # pragma: no cover - optional dependency
+    import torch  # type: ignore[import-not-found]
+except Exception:  # pragma: no cover - maintain deterministic fallback
+    torch = None  # type: ignore[assignment]
+
+SEED = int(os.getenv("CALE_SEED", "1337"))
+random.seed(SEED)
+np.random.seed(SEED)
+if torch is not None:  # pragma: no branch
+    try:  # pragma: no cover - guard against broken torch installs
+        torch.manual_seed(SEED)
+    except Exception:
+        pass
+
 
 try:  # pragma: no cover - spaCy is optional
     import spacy
@@ -58,7 +76,7 @@ class PredicateMapper:
 
     @staticmethod
     def _normalise_key(raw: str) -> str:
-        slug = re.sub(r"[\p{Punct}\s]+", " ", raw.lower()).strip()
+        slug = re.sub(r"[^\w]+", " ", raw.lower()).strip()
         return slug
 
     @staticmethod
@@ -77,7 +95,7 @@ class PredicateMapper:
 
     @staticmethod
     def _slug(raw: str) -> str:
-        cleaned = re.sub(r"[\p{Punct}\s]+", " ", raw.lower()).strip()
+        cleaned = re.sub(r"[^\w]+", " ", raw.lower()).strip()
         if not cleaned:
             raise ValueError("Condition phrase must contain alphanumeric characters")
         return re.sub(r"\s+", "_", cleaned)
@@ -118,6 +136,15 @@ class PredicateMapper:
         """Return the atoms seen so far in lexical order."""
 
         return tuple(sorted(self._seen_atoms))
+
+    def normalize_condition(self, raw: str) -> str:
+        """Idempotently normalise an existing condition literal or fragment."""
+
+        literal = raw.strip()
+        if literal.startswith("¬"):
+            atom = self.canonical_atom(literal[1:])
+            return f"¬{atom}"
+        return self.canonicalize_condition(literal)
 
 
 class RuleParser:
@@ -249,7 +276,7 @@ class RuleParser:
 
     @staticmethod
     def _tokenise_action(action_text: str) -> List[str]:
-        cleaned = re.sub(r"[\p{Punct}]+", " ", action_text.lower())
+        cleaned = re.sub(r"[^\w]+", " ", action_text.lower())
         tokens = [token for token in cleaned.split() if token]
         filtered = [token for token in tokens if token not in CANONICAL_STOPWORDS]
         return filtered or tokens

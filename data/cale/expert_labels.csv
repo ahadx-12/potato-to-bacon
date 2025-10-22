@@ -1,0 +1,4 @@
+rule1_id,rule2_id,y_expert
+R1,R2,0.85
+R4,R7,0.10
+R3,R5,0.70
