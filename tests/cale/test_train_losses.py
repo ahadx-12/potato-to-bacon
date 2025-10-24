@@ -6,12 +6,12 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from potatobacon.cale.runtime import bootstrap
+from potatobacon.cale.bootstrap import build_services
 from potatobacon.cale.train import CALELoss, LegalConflictDataset
 
 
 def test_dataset_loads_demo_csv() -> None:
-    services = bootstrap()
+    services = build_services()
     dataset = LegalConflictDataset(
         csv_path=Path("data/cale/expert_labels.csv"),
         corpus=services.corpus,

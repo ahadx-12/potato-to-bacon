@@ -1,18 +1,20 @@
 from __future__ import annotations
 
+import logging
 import os
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ConfigDict
 
 from potatobacon.api.routes_units import router as units_router
-from potatobacon.cale.runtime import bootstrap
+from potatobacon.cale.bootstrap import CALEServices, build_services
 from potatobacon.cale.types import LegalRule
 from potatobacon.codegen.reference import generate_numpy
 from potatobacon.core.units import analyze_units_map
@@ -28,7 +30,21 @@ from potatobacon.units.infer import evaluate_equation_dimensions, UnitInferenceE
 # -----------------------------------------------------------------------------
 # App setup
 # -----------------------------------------------------------------------------
-app = FastAPI(title="potato-to-bacon API", version="v1")
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        app.state.cale = build_services()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.exception("CALE bootstrap failed")
+        app.state.cale = None
+    yield
+    app.state.cale = None
+
+
+app = FastAPI(title="potato-to-bacon API", version="v1", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -145,7 +161,7 @@ class ManifestResp(BaseModel):
     code_digest: str
 
 
-class LawRuleInput(BaseModel):
+class RuleInput(BaseModel):
     text: str = Field(..., min_length=3)
     jurisdiction: str
     statute: str
@@ -154,8 +170,8 @@ class LawRuleInput(BaseModel):
 
 
 class ConflictRequest(BaseModel):
-    rule1: LawRuleInput
-    rule2: LawRuleInput
+    rule1: RuleInput
+    rule2: RuleInput
 
 
 class SuggestionItem(BaseModel):
@@ -172,50 +188,38 @@ class SuggestionResponse(BaseModel):
     best: Optional[SuggestionItem]
 
 
-@app.on_event("startup")
-async def _startup() -> None:
-    try:
-        if os.getenv("CALE_DISABLE_STARTUP_INIT") == "1":
-            print("[CALE] Startup init skipped via env.")
-            app.state.cale = None
-            return
-        services = bootstrap()
-        app.state.cale = services
-        print("[CALE] Core components initialised.")
-    except Exception as exc:  # pragma: no cover - defensive guard
-        app.state.cale = None
-        print("[CALE] Startup init failed:", repr(exc))
-
-
-def _require_services(request: Request):
-    services = getattr(request.app.state, "cale", None)
+def _cale_services() -> CALEServices:
+    services: CALEServices | None = getattr(app.state, "cale", None)
     if services is None:
-        raise HTTPException(status_code=503, detail="CALE services unavailable (not initialised)")
+        raise HTTPException(status_code=503, detail="CALE not initialised")
+    if not services.corpus:
+        raise HTTPException(status_code=503, detail="CALE corpus empty / suggester not fitted")
     return services
 
 
-def _parse_and_populate_rule(
-    inp: LawRuleInput, rid: str, services
-) -> LegalRule:
-    metadata = {
-        "id": rid,
-        "jurisdiction": inp.jurisdiction,
-        "statute": inp.statute,
-        "section": inp.section,
-        "enactment_year": inp.enactment_year,
-    }
+def _parse_and_populate_rule(inp: RuleInput, services: CALEServices) -> LegalRule:
+    metadata = inp.model_dump(exclude={"text"})
+    metadata.setdefault("id", None)
     rule = services.parser.parse(inp.text, metadata)
-    return services.feature_engine.populate_features(
-        rule, authorities=services.authority_scores
-    )
+    return services.feature_engine.populate(rule)
 
 
 # -----------------------------------------------------------------------------
 # Health + Info Endpoints
 # -----------------------------------------------------------------------------
-@app.get("/v1/health")
+@app.get("/health")
 def health() -> Dict[str, Any]:
-    return {"ok": True, "status": "ok"}
+    services = getattr(app.state, "cale", None)
+    if services is None:
+        raise HTTPException(status_code=503, detail="CALE not initialised")
+    if not services.corpus:
+        raise HTTPException(status_code=503, detail="CALE corpus empty / suggester not fitted")
+    return {"status": "ok", "corpus": len(services.corpus)}
+
+
+@app.get("/v1/health")
+def legacy_health() -> Dict[str, Any]:
+    return health()
 
 
 @app.get("/v1/info")
@@ -378,18 +382,19 @@ def manifest(req: ManifestReq) -> ManifestResp:
 
 
 @app.post("/v1/law/analyze")
-def analyze_conflict(req: ConflictRequest, request: Request) -> Dict[str, Any]:
-    services = _require_services(request)
+def analyze_conflict(req: ConflictRequest) -> Dict[str, Any]:
+    services = _cale_services()
 
     try:
-        rule1 = _parse_and_populate_rule(req.rule1, "R_api_1", services)
-        rule2 = _parse_and_populate_rule(req.rule2, "R_api_2", services)
-        ci = services.symbolic.check_conflict(rule1, rule2)
-        analysis = services.ccs.compute_multiperspective(rule1, rule2, ci)
+        rule1 = _parse_and_populate_rule(req.rule1, services)
+        rule2 = _parse_and_populate_rule(req.rule2, services)
+        ci = services.checker.check_conflict(rule1, rule2)
+        analysis = services.calculator.compute_multiperspective(rule1, rule2, ci)
     except HTTPException:
         raise
     except Exception as exc:  # pragma: no cover - defensive guard
-        raise HTTPException(status_code=422, detail=f"analysis failed: {exc!r}") from exc
+        logger.exception("Conflict analysis failed")
+        raise HTTPException(status_code=500, detail=f"analysis failed: {exc}") from exc
 
     return {
         "conflict_scores": {
@@ -409,29 +414,30 @@ def analyze_conflict(req: ConflictRequest, request: Request) -> Dict[str, Any]:
 
 
 @app.post("/v1/law/suggest_amendment", response_model=SuggestionResponse)
-def suggest_amendment(req: ConflictRequest, request: Request) -> SuggestionResponse:
-    services = _require_services(request)
+def suggest_amendment(req: ConflictRequest) -> SuggestionResponse:
+    services = _cale_services()
 
     try:
-        rule1 = _parse_and_populate_rule(req.rule1, "R_api_1", services)
-        rule2 = _parse_and_populate_rule(req.rule2, "R_api_2", services)
-        ci = services.symbolic.check_conflict(rule1, rule2)
-        analysis = services.ccs.compute_multiperspective(rule1, rule2, ci)
+        rule1 = _parse_and_populate_rule(req.rule1, services)
+        rule2 = _parse_and_populate_rule(req.rule2, services)
+        ci = services.checker.check_conflict(rule1, rule2)
+        analysis = services.calculator.compute_multiperspective(rule1, rule2, ci)
         result = services.suggester.suggest_amendment(rule1, rule2, analysis)
     except HTTPException:
         raise
     except Exception as exc:  # pragma: no cover - defensive guard
-        raise HTTPException(status_code=422, detail=f"suggestion failed: {exc!r}") from exc
+        logger.exception("Amendment suggestion failed")
+        raise HTTPException(status_code=500, detail=f"suggestion failed: {exc}") from exc
 
     return SuggestionResponse(**result)
 
 
 @app.post("/v1/law/train/dry_run")
-def train_dry_run(request: Request) -> Dict[str, Any]:
+def train_dry_run() -> Dict[str, Any]:
     if os.getenv("ALLOW_TRAIN_API") != "1":
         raise HTTPException(status_code=403, detail="Training endpoint disabled")
 
-    services = _require_services(request)
+    services = _cale_services()
     if not services.corpus:
         raise HTTPException(status_code=400, detail="CALE corpus unavailable")
 
