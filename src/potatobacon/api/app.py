@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, ConfigDict
 
 from potatobacon.api.routes_units import router as units_router
 from potatobacon.cale.bootstrap import CALEServices, build_services
+from potatobacon.cale.engine import CALEEngine
 from potatobacon.cale.types import LegalRule
 from potatobacon.codegen.reference import generate_numpy
 from potatobacon.core.units import analyze_units_map
@@ -36,12 +37,16 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
-        app.state.cale = build_services()
+        services = build_services()
+        app.state.cale = services
+        app.state.cale_engine = CALEEngine(services)
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.exception("CALE bootstrap failed")
         app.state.cale = None
+        app.state.cale_engine = None
     yield
     app.state.cale = None
+    app.state.cale_engine = None
 
 
 app = FastAPI(title="potato-to-bacon API", version="v1", lifespan=lifespan)
@@ -181,11 +186,29 @@ class SuggestionItem(BaseModel):
     suggested_text: str
 
 
+class CCScores(BaseModel):
+    textualist: float
+    living: float
+    pragmatic: float
+
+
+class SuggestedAmendmentSummary(BaseModel):
+    condition: str
+    impact: float
+    justification: str
+
+
 class SuggestionResponse(BaseModel):
+    conflict_intensity: float
+    semantic_overlap: float
+    temporal_drift: float
+    authority_balance: float
+    ccs_scores: CCScores
+    suggested_amendment: SuggestedAmendmentSummary
     precedent_count: int
     candidates_considered: int
     suggestions: List[SuggestionItem]
-    best: Optional[SuggestionItem]
+    best: SuggestionItem
 
 
 def _cale_services() -> CALEServices:
@@ -195,6 +218,13 @@ def _cale_services() -> CALEServices:
     if not services.corpus:
         raise HTTPException(status_code=503, detail="CALE corpus empty / suggester not fitted")
     return services
+
+
+def _cale_engine() -> CALEEngine:
+    engine: CALEEngine | None = getattr(app.state, "cale_engine", None)
+    if engine is None:
+        raise HTTPException(status_code=503, detail="CALE engine not initialised")
+    return engine
 
 
 def _parse_and_populate_rule(inp: RuleInput, services: CALEServices) -> LegalRule:
@@ -415,14 +445,11 @@ def analyze_conflict(req: ConflictRequest) -> Dict[str, Any]:
 
 @app.post("/v1/law/suggest_amendment", response_model=SuggestionResponse)
 def suggest_amendment(req: ConflictRequest) -> SuggestionResponse:
-    services = _cale_services()
+    _cale_services()  # ensure bootstrap succeeded
+    engine = _cale_engine()
 
     try:
-        rule1 = _parse_and_populate_rule(req.rule1, services)
-        rule2 = _parse_and_populate_rule(req.rule2, services)
-        ci = services.checker.check_conflict(rule1, rule2)
-        analysis = services.calculator.compute_multiperspective(rule1, rule2, ci)
-        result = services.suggester.suggest_amendment(rule1, rule2, analysis)
+        result = engine.suggest(req.rule1.model_dump(), req.rule2.model_dump())
     except HTTPException:
         raise
     except Exception as exc:  # pragma: no cover - defensive guard
