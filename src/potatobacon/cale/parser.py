@@ -150,8 +150,8 @@ class PredicateMapper:
 class RuleParser:
     """Parse natural language rule sentences into :class:`LegalRule` objects."""
 
-    def __init__(self, predicate_mapper: PredicateMapper) -> None:
-        self._mapper = predicate_mapper
+    def __init__(self, predicate_mapper: PredicateMapper | None = None) -> None:
+        self._mapper = predicate_mapper or PredicateMapper()
         self._nlp = None
         if spacy is not None:  # pragma: no cover - exercised only when spaCy exists
             try:

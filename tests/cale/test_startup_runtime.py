@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+import potatobacon.api.app as api_app_module
 from potatobacon.api.app import app
-from potatobacon.cale.runtime import bootstrap
 
 
 def _sample_payload() -> dict:
@@ -17,21 +17,21 @@ def _sample_payload() -> dict:
     return {"rule1": rule, "rule2": rule}
 
 
-def test_startup_initialises_services(monkeypatch) -> None:
-    monkeypatch.delenv("CALE_DISABLE_STARTUP_INIT", raising=False)
+def test_startup_initialises_services() -> None:
     with TestClient(app) as client:
-        response = client.get("/docs")
+        response = client.get("/health")
         assert response.status_code == 200
+        assert response.json()["status"] == "ok"
         assert getattr(client.app.state, "cale", None) is not None
 
 
-def test_startup_can_be_skipped(monkeypatch) -> None:
-    monkeypatch.setenv("CALE_DISABLE_STARTUP_INIT", "1")
+def test_startup_failure_returns_503(monkeypatch) -> None:
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(api_app_module, "build_services", _boom)
+
     with TestClient(app) as client:
-        resp = client.post("/v1/law/analyze", json=_sample_payload())
-        assert resp.status_code == 503
-        assert resp.json()["detail"] == "CALE services unavailable (not initialised)"
-    monkeypatch.setenv("CALE_DISABLE_STARTUP_INIT", "0")
-    services = bootstrap()
-    if services is not None:
-        app.state.cale = services
+        response = client.get("/health")
+        assert response.status_code == 503
+        assert response.json()["detail"] == "CALE not initialised"

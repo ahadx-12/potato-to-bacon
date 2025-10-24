@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import random
 from dataclasses import replace
@@ -90,12 +91,33 @@ class _STBackend:
 class LegalEmbedder:
     """Produce interpretive embeddings for :class:`LegalRule` objects."""
 
-    def __init__(self, *, backend: Optional[str] = None, dim_interpretive: int = 384, seed: int = 13):
+    def __init__(
+        self,
+        model_name: str | None = None,
+        *,
+        backend: Optional[str] = None,
+        deterministic: bool = True,
+        dim_interpretive: int = 384,
+        seed: int = 13,
+    ) -> None:
         self.dim_interpretive = int(dim_interpretive)
-        backend = backend or os.getenv("CALE_EMBED_BACKEND", "hash")
         self._rng = np.random.RandomState(seed)
-        if backend == "st":
-            self._backend = _STBackend()
+
+        backend_choice = backend or os.getenv("CALE_EMBED_BACKEND")
+        if model_name not in (None, "hash"):
+            backend_choice = "st"
+        if backend_choice is None:
+            backend_choice = "hash" if deterministic else "st"
+        if deterministic and backend_choice == "st":
+            logging.getLogger(__name__).info(
+                "Deterministic mode enabled; falling back to hash embedder instead of %s",
+                model_name or "sentence-transformers",
+            )
+            backend_choice = "hash"
+
+        if backend_choice == "st":
+            target_model = model_name or os.getenv("CALE_EMBED_MODEL", "all-MiniLM-L6-v2")
+            self._backend = _STBackend(model_name=target_model)
         else:
             self._backend = _HashBackend(dim=self.dim_interpretive)
 
@@ -149,30 +171,36 @@ class LegalEmbedder:
 class FeatureEngine:
     """Populate a :class:`LegalRule` with embeddings, features, and authority score."""
 
-    def __init__(self, embedder: Optional[LegalEmbedder] = None) -> None:
+    def __init__(
+        self,
+        embedder: Optional[LegalEmbedder] = None,
+        authority_scores: Optional[Dict[str, float]] = None,
+    ) -> None:
         self.embedder = embedder or LegalEmbedder()
+        self.authority_scores = authority_scores or {}
 
-    def populate(self, rule: LegalRule, *, authorities: Optional[Dict[str, float]] = None) -> LegalRule:
+    def populate(
+        self, rule: LegalRule, *, authorities: Optional[Dict[str, float]] | None = None
+    ) -> LegalRule:
         interpretive_vec = self.embedder.embed_rule(rule)
         situational_vec = LegalEmbedder.compute_situational_vec(rule)
         temporal_scalar = LegalEmbedder.compute_temporal_scalar(getattr(rule, "enactment_year", 1900))
         jurisdictional_vec = LegalEmbedder.compute_jurisdictional_vec(getattr(rule, "jurisdiction", ""))
-        authority = 0.5
-        if authorities is not None:
-            authority = float(authorities.get(rule.id, 0.0))
+        scores = authorities or self.authority_scores
+        authority = float(scores.get(rule.id, 0.0))
         return replace(
             rule,
             interpretive_vec=np.asarray(interpretive_vec, dtype=np.float32),
             situational_vec=np.asarray(situational_vec, dtype=np.float32),
             temporal_scalar=float(temporal_scalar),
             jurisdictional_vec=np.asarray(jurisdictional_vec, dtype=np.float32),
-            authority_score=float(authority),
+            authority_score=authority,
         )
 
     def populate_features(
-        self, rule: LegalRule, *, authorities: Optional[Dict[str, float]] = None
+        self, rule: LegalRule, *, authorities: Optional[Dict[str, float]] | None = None
     ) -> LegalRule:
-        """Alias for :meth:`populate` to match API naming conventions."""
+        """Alias retained for backwards compatibility."""
 
         return self.populate(rule, authorities=authorities)
 

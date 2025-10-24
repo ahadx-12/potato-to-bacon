@@ -78,14 +78,21 @@ class AmendmentSuggester:
     def __init__(
         self,
         rule_corpus: List[LegalRule],
-        embedder: LegalEmbedder,
-        ccs_calc: CCSCalculator,
-        predicate_mapper: PredicateMapper,
+        embedder: LegalEmbedder | None = None,
+        ccs_calc: CCSCalculator | None = None,
+        predicate_mapper: PredicateMapper | None = None,
         k_neighbors: int = 8,
+        **extra_kwargs: object,
     ) -> None:
-        self.embedder = embedder
-        self.ccs = ccs_calc
-        self.mapper = predicate_mapper
+        if "ccs_calculator" in extra_kwargs:
+            if ccs_calc is not None:
+                raise TypeError("ccs_calc and ccs_calculator are mutually exclusive")
+            ccs_calc = extra_kwargs.pop("ccs_calculator")  # type: ignore[assignment]
+        if extra_kwargs:
+            raise TypeError(f"Unexpected keyword arguments: {sorted(extra_kwargs)}")
+        self.embedder = embedder or LegalEmbedder()
+        self.ccs = ccs_calc or CCSCalculator()
+        self.mapper = predicate_mapper or PredicateMapper()
         self.corpus = rule_corpus
         self.k = int(max(1, k_neighbors))
         self._fit_knn()
@@ -105,7 +112,7 @@ class AmendmentSuggester:
     def _ccs_grad_x1(self, r1: LegalRule, r2: LegalRule, CI: float) -> np.ndarray:
         """Return ∂CCS/∂x1 using torch autograd on the pragmatic Σ."""
 
-        if torch is None:
+        if torch is None or not getattr(self.ccs, "uses_torch", False):
             x1 = r1.feature_vector
             x2 = r2.feature_vector
             eps = 1e-4

@@ -38,8 +38,8 @@ from .types import LegalRule
 class SymbolicConflictChecker:
     """Compute symbolic conflict intensity between two :class:`LegalRule` objects."""
 
-    def __init__(self, predicate_mapper: PredicateMapper) -> None:
-        self._predicate_mapper = predicate_mapper
+    def __init__(self, predicate_mapper: PredicateMapper | None = None) -> None:
+        self._predicate_mapper = predicate_mapper or PredicateMapper()
 
     def _antecedent_bool(self, conditions: List[str]) -> BoolRef:
         if not _Z3_AVAILABLE:
