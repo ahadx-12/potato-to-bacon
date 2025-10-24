@@ -9,6 +9,7 @@ occurs.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Sequence
 import json
 import logging
@@ -22,6 +23,33 @@ from .ccs import CCSCalculator
 from .types import LegalRule
 
 LOGGER = logging.getLogger(__name__)
+
+
+def ensure_demo_corpus(path: Path) -> None:
+    """Create a minimal demo corpus if the expected file is missing."""
+
+    if path.exists():
+        return
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    demo = [
+        {
+            "id": "PIPEDA_7_3",
+            "title": "Personal Information Protection and Electronic Documents Act, Section 7(3)",
+            "jurisdiction": "Canada",
+            "text": "An organization MUST obtain consent before collecting personal data.",
+            "citations": ["ANTI_TERRORISM_83_28"],
+        },
+        {
+            "id": "ANTI_TERRORISM_83_28",
+            "title": "Anti-Terrorism Act, Section 83.28",
+            "jurisdiction": "Canada",
+            "text": "A government agency MAY collect personal data without consent in cases of national security.",
+            "citations": ["PIPEDA_7_3"],
+        },
+    ]
+    path.write_text(json.dumps(demo, indent=2), encoding="utf-8")
+    print(f"[CALE Bootstrap] Created demo corpus → {path}")
 
 
 @dataclass
@@ -88,6 +116,7 @@ def _load_corpus(path: str, parser: RuleParser | None = None) -> List[LegalRule]
 
 def build_services(corpus_path: str | None = None, deterministic: bool = True) -> CALEServices:
     corpus_path = corpus_path or os.getenv("CALE_CORPUS_PATH", "data/cale/demo_corpus.json")
+    ensure_demo_corpus(Path(corpus_path))
 
     mapper = PredicateMapper()
     parser = RuleParser(predicate_mapper=mapper)
