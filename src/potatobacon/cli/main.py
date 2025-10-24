@@ -6,7 +6,7 @@ import json
 
 import click
 
-from ..cale.bootstrap import build_services
+from ..cale.engine import CALEEngine
 
 
 @click.group()
@@ -20,43 +20,92 @@ def law() -> None:
 
 
 @law.command("sanity-check")
-def sanity_check() -> None:
-    """Run a deterministic CALE amendment suggestion over a canned example."""
+@click.option("--rule1", "rule1_text", required=True, help="Text of the first rule.")
+@click.option("--rule2", "rule2_text", required=True, help="Text of the second rule.")
+@click.option(
+    "--jurisdiction",
+    "jurisdiction",
+    required=True,
+    help="Jurisdiction shared by both rules.",
+)
+@click.option(
+    "--rule1-statute",
+    default="CLI Statute 1",
+    show_default=True,
+    help="Statute name for the first rule.",
+)
+@click.option(
+    "--rule1-section",
+    default="1",
+    show_default=True,
+    help="Section identifier for the first rule.",
+)
+@click.option(
+    "--rule1-year",
+    default=2000,
+    show_default=True,
+    type=int,
+    help="Enactment year for the first rule.",
+)
+@click.option(
+    "--rule2-statute",
+    default="CLI Statute 2",
+    show_default=True,
+    help="Statute name for the second rule.",
+)
+@click.option(
+    "--rule2-section",
+    default="2",
+    show_default=True,
+    help="Section identifier for the second rule.",
+)
+@click.option(
+    "--rule2-year",
+    default=2001,
+    show_default=True,
+    type=int,
+    help="Enactment year for the second rule.",
+)
+def sanity_check(
+    rule1_text: str,
+    rule2_text: str,
+    jurisdiction: str,
+    rule1_statute: str,
+    rule1_section: str,
+    rule1_year: int,
+    rule2_statute: str,
+    rule2_section: str,
+    rule2_year: int,
+) -> None:
+    """Run the CALE engine for the provided rule pair and emit structured JSON."""
 
-    services = build_services()
+    engine = CALEEngine()
 
-    t1 = "Citizens MUST present ID when voting in federal elections."
-    t2 = "Citizens MAY vote without presenting ID if known to election officials."
+    rule1_payload = {
+        "id": "CLI_RULE_1",
+        "text": rule1_text,
+        "jurisdiction": jurisdiction,
+        "statute": rule1_statute,
+        "section": rule1_section,
+        "enactment_year": rule1_year,
+    }
+    rule2_payload = {
+        "id": "CLI_RULE_2",
+        "text": rule2_text,
+        "jurisdiction": jurisdiction,
+        "statute": rule2_statute,
+        "section": rule2_section,
+        "enactment_year": rule2_year,
+    }
 
-    rule1 = services.parser.parse(
-        t1,
-        {
-            "id": "CLI_SANITY_R1",
-            "jurisdiction": "Canada",
-            "statute": "Elections Act",
-            "section": "1",
-            "enactment_year": 2000,
-        },
-    )
-    rule2 = services.parser.parse(
-        t2,
-        {
-            "id": "CLI_SANITY_R2",
-            "jurisdiction": "Canada",
-            "statute": "Elections Act",
-            "section": "1B",
-            "enactment_year": 2014,
-        },
-    )
+    result = engine.suggest(rule1_payload, rule2_payload)
+    payload = {
+        "rule1": rule1_payload,
+        "rule2": rule2_payload,
+        **result,
+    }
 
-    rule1 = services.feature_engine.populate(rule1)
-    rule2 = services.feature_engine.populate(rule2)
-
-    conflict = services.checker.check_conflict(rule1, rule2)
-    analysis = services.calculator.compute_multiperspective(rule1, rule2, conflict)
-    output = services.suggester.suggest_amendment(rule1, rule2, analysis)
-
-    click.echo(json.dumps(output, indent=2))
+    click.echo(json.dumps(payload, indent=2))
 
 
 if __name__ == "__main__":
