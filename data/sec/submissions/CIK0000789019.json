@@ -1,0 +1,10 @@
+{
+  "filings": {
+    "recent": {
+      "form": ["10-Q", "10-K"],
+      "filingDate": ["2023-04-20", "2023-01-25"],
+      "accessionNumber": ["0000789019-23-000001", "0000789019-23-000002"],
+      "primaryDocument": ["msft_q3_2023.htm", "msft_k_2022.htm"]
+    }
+  }
+}

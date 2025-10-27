@@ -1,0 +1,43 @@
+universe:
+  pilot: ["MPW","UPST","BBBYQ"]
+
+weights:
+  alpha: 0.45      # semantic term in C
+  beta: 0.25       # deontic gap term in C
+  eta:  0.30       # conditional-bypass term in C
+  authority:
+    # hard-coded section priors; higher = more authoritative
+    CREDIT_AGREEMENT: 2.0
+    INDENTURE_NOTES:  1.8
+    NOTES_TO_FS:      1.2
+    RISK_FACTORS:     0.8
+    LIQUIDITY:        0.6
+    MDNA:             0.4
+  temporal_gamma: 0.30  # weight for recency in A_b
+
+dv:
+  going_concern:   0.80
+  breach_keywords: 0.60
+  covenant_words:  0.40
+  ratio_weakness:  0.50
+
+signals:
+  min_semantic_overlap: 0.25
+
+# pass/fail thresholds for event study
+validation:
+  auc_strong: 0.75
+  auc_real:   0.70
+  auc_weak:   0.65
+
+ablation:
+  enable_logistic: true
+  l2_reg: 0.5          # L2 regularization for logistic
+  max_iter: 2000       # GD iterations
+  lr: 0.05             # learning rate
+  seed: 42             # reproducibility
+  feature_set: ["C","Ab","Dv","B","dCCE","S","Dt"]
+
+notes:
+  # ΔCCE is current_filing_CCE - previous_filing_CCE for the same ticker.
+  # If no previous filing found, set dCCE = 0 and mark has_prev = 0.

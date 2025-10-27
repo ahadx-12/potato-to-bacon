@@ -1,0 +1,10 @@
+{
+  "filings": {
+    "recent": {
+      "form": ["10-Q", "10-K"],
+      "filingDate": ["2023-02-28", "2022-11-01"],
+      "accessionNumber": ["0000320193-23-000001", "0000320193-22-000002"],
+      "primaryDocument": ["aapl_q1_2023.htm", "aapl_k_2022.htm"]
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "0": {"ticker": "BBBY", "cik_str": 886158, "title": "Bed Bath & Beyond Inc."},
+  "1": {"ticker": "MPW", "cik_str": 1287865, "title": "Medical Properties Trust, Inc."},
+  "2": {"ticker": "UPST", "cik_str": 1647639, "title": "Upstart Holdings, Inc."},
+  "3": {"ticker": "AAPL", "cik_str": 320193, "title": "Apple Inc."},
+  "4": {"ticker": "MSFT", "cik_str": 789019, "title": "Microsoft Corporation"},
+  "5": {"ticker": "JNJ", "cik_str": 200406, "title": "Johnson & Johnson"}
+}
