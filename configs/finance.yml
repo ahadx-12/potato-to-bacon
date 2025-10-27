@@ -1,6 +1,27 @@
 universe:
   pilot: ["MPW","UPST","BBBYQ"]
 
+enable: true
+lambda_bypass: 0.5
+overlap_threshold: 0.35
+scope_sentence_window: 2
+strict_regex_fallback: true
+
+authority_priors:
+  credit_agreement: 2.0
+  indenture: 2.0
+  notes_to_fs: 1.5
+  liquidity_capital: 1.2
+  risk_factors: 0.7
+  mdna: 0.4
+
+fragility_weights:
+  going_concern: 3.0
+  event_of_default: 2.0
+  waiver_forbearance_amendment: 1.5
+  leverage_coverage_terms: 0.8
+  acceleration: 1.0
+
 weights:
   alpha: 0.45      # semantic term in C
   beta: 0.25       # deontic gap term in C

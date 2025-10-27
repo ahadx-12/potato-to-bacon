@@ -12,6 +12,7 @@ from typing import Any, Mapping, MutableMapping
 
 import numpy as np
 
+from . import finance_extract
 from .bootstrap import CALEServices, build_services
 from .types import ConflictAnalysis, LegalRule
 
@@ -65,13 +66,22 @@ class CALEEngine:
     # ------------------------------------------------------------------
     # Finance-aware helpers
     # ------------------------------------------------------------------
+    def _finance_settings(self) -> Mapping[str, Any]:
+        return _load_finance_config()
+
+    def _finance_enabled(self) -> bool:
+        settings = self._finance_settings()
+        return bool(settings.get("enable", False))
+
     def _finance_weights(self) -> tuple[float, float, float, float, Mapping[str, float]]:
-        config = _load_finance_config()
-        alpha = float(config.get("alpha", DEFAULT_WEIGHTS["alpha"]))
-        beta = float(config.get("beta", DEFAULT_WEIGHTS["beta"]))
-        eta = float(config.get("eta", DEFAULT_WEIGHTS["eta"]))
-        gamma = float(config.get("temporal_gamma", DEFAULT_WEIGHTS["temporal_gamma"]))
-        authority = config.get("authority", DEFAULT_WEIGHTS["authority"])
+        settings = self._finance_settings()
+        weights = settings.get("weights", {}) if isinstance(settings, Mapping) else {}
+        alpha = float(weights.get("alpha", DEFAULT_FINANCE_CONFIG["weights"]["alpha"]))
+        beta = float(weights.get("beta", DEFAULT_FINANCE_CONFIG["weights"]["beta"]))
+        eta = float(weights.get("eta", DEFAULT_FINANCE_CONFIG["weights"]["eta"]))
+        gamma = float(weights.get("temporal_gamma", DEFAULT_FINANCE_CONFIG["weights"]["temporal_gamma"]))
+        authority = dict(DEFAULT_FINANCE_CONFIG["weights"]["authority"])
+        authority.update(weights.get("authority", {}))
         return alpha, beta, eta, gamma, authority
 
     @staticmethod
@@ -136,6 +146,32 @@ class CALEEngine:
         analysis.TD = float(temporal_drift)
         analysis.H = float(authority_balance)
         return analysis
+
+    def analyse_finance(
+        self,
+        doc_text: str,
+        *,
+        prior_doc_text: str | None = None,
+        section_hint: str | None = None,
+        strict: bool | None = None,
+    ) -> dict[str, Any]:
+        """Run the finance-specific extractor on raw filing text."""
+
+        strict_mode = bool(strict)
+        result = finance_extract.analyse_finance_sections(
+            doc_text,
+            prior_text=prior_doc_text,
+            section_hint=section_hint,
+            strict=strict_mode,
+        )
+        result.setdefault("temporal_drift", 0.0)
+        result.setdefault("ccs_scores", {})
+        result.setdefault("suggested_amendment", {
+            "condition": "Maintain status quo pending finance review",
+            "impact": 0.0,
+            "justification": "Finance module placeholder",
+        })
+        return result
 
     # ------------------------------------------------------------------
     # Serialisation helpers
@@ -216,7 +252,14 @@ class CALEEngine:
         rule1 = self._ensure_rule(rule1_payload, "R1")
         rule2 = self._ensure_rule(rule2_payload, "R2")
         analysis = self._prepare_analysis(rule1, rule2)
-        return self._analysis_summary(analysis)
+        summary = self._analysis_summary(analysis)
+        if self._finance_enabled():
+            section_hint = str(getattr(rule1, "section", "")) or str(getattr(rule2, "section", ""))
+            summary["finance"] = self.analyse_finance(
+                f"{rule1.text}\n{rule2.text}",
+                section_hint=section_hint or None,
+            )
+        return summary
 
     def suggest(
         self, rule1_payload: Mapping[str, Any], rule2_payload: Mapping[str, Any]
@@ -231,21 +274,31 @@ class CALEEngine:
 
         result = self._analysis_summary(analysis)
         result.update(self._suggestion_summary(analysis, suggestion))
+        if self._finance_enabled():
+            section_hint = str(getattr(rule1, "section", "")) or str(getattr(rule2, "section", ""))
+            result["finance"] = self.analyse_finance(
+                f"{rule1.text}\n{rule2.text}",
+                section_hint=section_hint or None,
+            )
         return result
 FINANCE_CONFIG_PATH = Path("configs/finance.yml")
 
-DEFAULT_WEIGHTS = {
-    "alpha": 0.45,
-    "beta": 0.25,
-    "eta": 0.30,
-    "temporal_gamma": 0.30,
-    "authority": {
-        "CREDIT_AGREEMENT": 2.0,
-        "INDENTURE_NOTES": 1.8,
-        "NOTES_TO_FS": 1.2,
-        "RISK_FACTORS": 0.8,
-        "LIQUIDITY": 0.6,
-        "MDNA": 0.4,
+DEFAULT_FINANCE_CONFIG = {
+    "enable": False,
+    "lambda_bypass": 0.5,
+    "weights": {
+        "alpha": 0.45,
+        "beta": 0.25,
+        "eta": 0.30,
+        "temporal_gamma": 0.30,
+        "authority": {
+            "CREDIT_AGREEMENT": 2.0,
+            "INDENTURE_NOTES": 1.8,
+            "NOTES_TO_FS": 1.2,
+            "RISK_FACTORS": 0.8,
+            "LIQUIDITY": 0.6,
+            "MDNA": 0.4,
+        },
     },
 }
 
@@ -302,23 +355,42 @@ def _finance_config_module():
 @lru_cache(maxsize=1)
 def _load_finance_config() -> Mapping[str, Any]:
     yaml_module = _finance_config_module()
+    base: dict[str, Any] = {
+        "enable": DEFAULT_FINANCE_CONFIG.get("enable", False),
+        "lambda_bypass": DEFAULT_FINANCE_CONFIG.get("lambda_bypass", 0.5),
+        "weights": dict(DEFAULT_FINANCE_CONFIG["weights"]),
+    }
     if yaml_module is None or not FINANCE_CONFIG_PATH.exists():
-        return DEFAULT_WEIGHTS
+        return base
     try:
         with FINANCE_CONFIG_PATH.open("r", encoding="utf-8") as handle:
             data = yaml_module.safe_load(handle) or {}
     except Exception:
-        return DEFAULT_WEIGHTS
-    weights = data.get("weights", {})
-    authority = dict(DEFAULT_WEIGHTS["authority"])
-    authority.update(weights.get("authority", {}))
-    return {
-        "alpha": float(weights.get("alpha", DEFAULT_WEIGHTS["alpha"])),
-        "beta": float(weights.get("beta", DEFAULT_WEIGHTS["beta"])),
-        "eta": float(weights.get("eta", DEFAULT_WEIGHTS["eta"])),
-        "temporal_gamma": float(weights.get("temporal_gamma", DEFAULT_WEIGHTS["temporal_gamma"])),
-        "authority": authority,
-    }
+        return base
+    if isinstance(data, Mapping):
+        base["enable"] = bool(data.get("enable", base["enable"]))
+        if "lambda_bypass" in data:
+            try:
+                base["lambda_bypass"] = float(data["lambda_bypass"])
+            except Exception:
+                pass
+        weights = dict(base["weights"])
+        incoming = data.get("weights", {}) if isinstance(data.get("weights"), Mapping) else {}
+        for key in ("alpha", "beta", "eta", "temporal_gamma"):
+            if key in incoming:
+                try:
+                    weights[key] = float(incoming[key])
+                except Exception:
+                    continue
+        authority = dict(weights.get("authority", {}))
+        if isinstance(incoming.get("authority"), Mapping):
+            authority.update(incoming["authority"])
+        weights["authority"] = authority
+        base["weights"] = weights
+        for key, value in data.items():
+            if key not in ("weights", "enable", "lambda_bypass"):
+                base[key] = value
+    return base
 
 
 def _section_family(section: str | None) -> str | None:

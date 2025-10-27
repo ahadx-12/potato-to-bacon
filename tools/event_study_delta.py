@@ -1,535 +1,308 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+"""ΔCCE event-study with logistic combiner for finance filings."""
 
-import os, re, json, math, time, argparse, datetime as dt, random
-from dataclasses import dataclass
-from typing import List, Dict, Tuple, Optional
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
 from pathlib import Path
-from urllib.parse import urlsplit
+from typing import Dict, List, Tuple
+
 import numpy as np
 import pandas as pd
-import requests
-from sklearn.metrics import roc_auc_score  # fallback: if unavailable, we compute AUC manually
-from scipy import stats
 
-# ---------- Config load ----------
-def load_yaml_config(path="configs/finance.yml"):
-    try:
-        import yaml
-        with open(path, "r") as f:
-            return yaml.safe_load(f)
-    except Exception:
-        # Minimal defaults if yaml missing
-        return {
-            "weights": {
-                "authority": {
-                    "CREDIT_AGREEMENT": 2.0,
-                    "INDENTURE_NOTES": 1.8,
-                    "NOTES_TO_FS": 1.2,
-                    "RISK_FACTORS": 0.8,
-                    "LIQUIDITY": 0.6,
-                    "MDNA": 0.4
-                }
-            },
-            "dv": {
-                "going_concern": 0.8,
-                "breach_keywords": 0.6,
-                "covenant_words": 0.4,
-                "ratio_weakness": 0.5
-            },
-            "validation": {
-                "auc_strong": 0.75,
-                "auc_real": 0.70,
-                "auc_weak": 0.65
-            },
-            "ablation": {
-                "enable_logistic": True,
-                "l2_reg": 0.5,
-                "max_iter": 2000,
-                "lr": 0.05,
-                "seed": 42,
-                "feature_set": ["C","Ab","Dv","B","dCCE","S","Dt"]
-            }
-        }
-
-CFG = load_yaml_config()
-
-# ---------- SEC + parsing (copied/adapted from event_study.py) ----------
-SEC_BASE = "https://data.sec.gov"
-ARCHIVES = "https://www.sec.gov/Archives"
-LOCAL_SEC_ROOT = Path("data/sec")
-
-TARGET_SECTIONS = [
-    "LIQUIDITY AND CAPITAL RESOURCES",
-    "MANAGEMENT'S DISCUSSION AND ANALYSIS",
-    "RISK FACTORS",
-    "INDEBTEDNESS",
-    "CREDIT FACILITIES",
-    "GOING CONCERN"
-]
-
-OBLIGATION_PAT = re.compile(r"\b(must|shall)\b.*\b(maintain|comply|keep|meet)\b", re.I)
-PERMISSION_PAT = re.compile(r"\b(may|permit|allowed to)\b.*\b(borrow|incur|issue|leverage|indebtedness|notes?)\b", re.I)
-EXC_TERMS = ("unless","except","subject to","provided that","waiver","amend","amendment")
-HEAD_RE = re.compile(r"^\s*<[^>]+>\s*$")
-KW_GOING = re.compile(r"going concern|substantial doubt", re.I)
-KW_BREACH = re.compile(r"\b(default|event of default|breach|waiver|amend(ment)?)\b", re.I)
-KW_COVENANT = re.compile(r"\b(covenant|leverage ratio|interest coverage|fixed charge coverage|dscr)\b", re.I)
-RATIO_PAT = re.compile(r"(\d+(\.\d+)?)\s*(x|times|%)")
-
-class _LocalResponse:
-    def __init__(self, path: Path) -> None:
-        self._path = path
-        self.status_code = 200
-
-    def json(self) -> Dict[str, any]:
-        with self._path.open("r", encoding="utf-8") as handle:
-            return json.load(handle)
-
-    @property
-    def text(self) -> str:
-        return self._path.read_text(encoding="utf-8")
+from potatobacon.cale import finance_extract
 
 
-def _local_sec_path(url: str) -> Optional[Path]:
-    parsed = urlsplit(url)
-    path = parsed.path
-    if path.endswith("company_tickers.json"):
-        return LOCAL_SEC_ROOT / "company_tickers.json"
-    if "/submissions/CIK" in path:
-        name = path.split("/submissions/")[-1]
-        return LOCAL_SEC_ROOT / "submissions" / name
-    if "/edgar/data/" in path:
-        suffix = path.split("/edgar/data/")[-1]
-        return LOCAL_SEC_ROOT / "edgar" / "data" / suffix
-    return None
-
-
-def sec_get(url: str, ua: str, params=None, max_retries=3, sleep=0.5):
-    local_path = _local_sec_path(url)
-    if local_path and local_path.exists():
-        return _LocalResponse(local_path)
-
-    last_exc: Optional[Exception] = None
-    response: Optional[requests.Response] = None
-    for i in range(max_retries):
-        try:
-            response = requests.get(url, headers={"User-Agent": ua}, params=params, timeout=30)
-        except Exception as exc:
-            last_exc = exc
-            response = None
-        else:
-            if response.status_code == 200:
-                return response
-        time.sleep(sleep * (i+1))
-
-    local_path = _local_sec_path(url)
-    if local_path and local_path.exists():
-        return _LocalResponse(local_path)
-
-    if response is not None:
-        response.raise_for_status()
-    if last_exc is not None:
-        raise last_exc
-    raise RuntimeError(f"Failed to fetch {url}")
-
-def get_cik_map(ua: str) -> Dict[str, str]:
-    url = "https://www.sec.gov/files/company_tickers.json"
-    r = sec_get(url, ua)
-    data = r.json()
-    out = {}
-    for _, row in data.items():
-        out[row["ticker"].upper()] = str(row["cik_str"]).zfill(10)
-    return out
-
-def fetch_submissions(cik: str, ua: str) -> dict:
-    r = sec_get(f"{SEC_BASE}/submissions/CIK{cik}.json", ua)
-    return r.json()
-
-def filings_before(sub: dict, cutoff: dt.date, forms=("10-K","10-Q")) -> List[dict]:
-    recent = sub.get("filings", {}).get("recent", {})
-    dates = recent.get("filingDate", [])
-    fm = recent.get("form", [])
-    acc = recent.get("accessionNumber", [])
-    prim = recent.get("primaryDocument", [])
-    rows = []
-    for f, d, a, p in zip(fm, dates, acc, prim):
-        try:
-            ddate = dt.date.fromisoformat(d)
-        except:
-            continue
-        if f in forms and ddate < cutoff:
-            rows.append({"form": f, "date": ddate, "accession": a, "primary": p})
-    rows.sort(key=lambda x: x["date"])
-    return rows
-
-def fetch_primary_doc(cik: str, accession: str, primary: str, ua: str) -> str:
-    no_dash = accession.replace("-", "")
-    url = f"{ARCHIVES}/edgar/data/{int(cik)}/{no_dash}/{primary}"
-    r = sec_get(url, ua)
-    return r.text
-
-def strip_html_to_lines(html: str) -> List[str]:
-    html = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", html)
-    html = re.sub(r"(?is)<br\s*/?>", "\n", html)
-    html = re.sub(r"(?is)</p>", "\n", html)
-    text = re.sub(r"(?is)<.*?>", " ", html)
-    text = re.sub(r"[ \t]+", " ", text)
-    lines = [ln.strip() for ln in text.splitlines()]
-    return [ln for ln in lines if ln and not HEAD_RE.match(ln)]
-
-def find_sections(lines: List[str]) -> Dict[str, List[str]]:
-    sections, cur, buf = {}, None, []
-    def flush():
-        nonlocal buf, cur
-        if cur and buf:
-            sections.setdefault(cur, []).extend(buf)
-        buf = []
-    for ln in lines:
-        is_heading = (ln.isupper() and len(ln) < 140) or any(h in ln.upper() for h in TARGET_SECTIONS)
-        if is_heading:
-            up = ln.upper()
-            matched = None
-            for target in TARGET_SECTIONS:
-                if target in up:
-                    matched = target
-                    break
-            if matched:
-                flush(); cur = matched
-            else:
-                flush(); cur = None
-        else:
-            if cur: buf.append(ln)
-    flush()
-    return sections
-
-def sentence_split(text: str) -> List[str]:
-    out = []
-    for chunk in re.split(r"(?<=[\.\?\!])\s+(?=[A-Z(])", text):
-        c = chunk.strip()
-        if c:
-            out.append(c)
-    return out
-
-@dataclass
-class Clause:
-    sentence: str
-    section: str
-    modality: float
-    is_obl: bool
-    is_perm: bool
-
-def modality_scalar(s: str) -> float:
-    s2 = s.lower()
-    if "must not" in s2 or "shall not" in s2: return -1.0
-    if "must" in s2 or "shall" in s2:       return +1.0
-    if "may not" in s2:                      return -0.3
-    if "may" in s2:                          return +0.3
-    return 0.0
-
-def extract_clauses(sections: Dict[str, List[str]]) -> List[Clause]:
-    clauses = []
-    for sec, lines in sections.items():
-        text = " ".join(lines)
-        for sent in sentence_split(text):
-            is_obl = bool(OBLIGATION_PAT.search(sent))
-            is_perm = bool(PERMISSION_PAT.search(sent))
-            if not (is_obl or is_perm): continue
-            clauses.append(Clause(sent, sec, modality_scalar(sent), is_obl, is_perm))
-    return clauses
-
-def pairs_from_clauses(clauses: List[Clause], max_pairs=60) -> List[Tuple[Clause, Clause, int]]:
-    pairs = []
-    for o in clauses:
-        if not o.is_obl: continue
-        for p in clauses:
-            if not p.is_perm: continue
-            if o.section != p.section: continue
-            # Bypass flag (B) if permission has explicit exception terms
-            B = 1 if any(term in p.sentence.lower() for term in EXC_TERMS) else 0
-            pairs.append((o, p, B))
-            if len(pairs) >= max_pairs: return pairs
-    return pairs
-
-# ---------- CALE API ----------
-def cale_analyze(api_base: str, r1: dict, r2: dict) -> dict:
-    url = f"{api_base.rstrip('/')}/v1/law/analyze"
-    r = requests.post(url, headers={"Content-Type":"application/json"}, json={"rule1": r1, "rule2": r2}, timeout=60)
-    r.raise_for_status()
-    return r.json()
-
-def compute_dv(sent_o: str, sent_p: str) -> float:
-    v = 0.0
-    if KW_GOING.search(sent_o) or KW_GOING.search(sent_p):   v += CFG["dv"]["going_concern"]
-    if KW_BREACH.search(sent_o) or KW_BREACH.search(sent_p): v += CFG["dv"]["breach_keywords"]
-    if KW_COVENANT.search(sent_o) or KW_COVENANT.search(sent_p): v += CFG["dv"]["covenant_words"]
-    if RATIO_PAT.search(sent_o) or RATIO_PAT.search(sent_p): v += CFG["dv"]["ratio_weakness"]
-    return min(1.0, v)
-
-def filing_score(ticker: str, as_of: dt.date, ua: str, api_base: str) -> Tuple[Optional[float], Optional[dict], List[dict]]:
-    """Return (best_CCE, best_feature_row, evidence_list)."""
-    try:
-        cik_map = get_cik_map(ua)
-    except Exception as e:
-        return None, None, []
-    cik = cik_map.get(ticker.upper())
-    if not cik: return None, None, []
-
-    sub = fetch_submissions(cik, ua)
-    flist = filings_before(sub, as_of, forms=("10-K","10-Q"))
-    if not flist: return None, None, []
-
-    filing = flist[-1]  # latest before date
-    html = fetch_primary_doc(cik, filing["accession"], filing["primary"], ua)
-    lines = strip_html_to_lines(html)
-    secs = find_sections(lines)
-    clauses = extract_clauses(secs)
-    pairs = pairs_from_clauses(clauses, max_pairs=60)
-    if not pairs: return None, None, []
-
-    evidences = []
-    best = None
-    for o, p, B in pairs:
-        dv = compute_dv(o.sentence, p.sentence)
-        r1 = {"text": o.sentence, "jurisdiction": "US", "statute": "Debt Covenant", "section": o.section, "enactment_year": as_of.year}
-        r2 = {"text": p.sentence, "jurisdiction": "US", "statute": "Management Guidance", "section": p.section, "enactment_year": as_of.year}
-        try:
-            mets = cale_analyze(api_base, r1, r2)
-        except Exception:
-            continue
-        C  = float(mets.get("conflict_intensity", 0.0))
-        Ab = float(mets.get("authority_balance", 0.0))
-        S  = float(mets.get("semantic_overlap", 0.0))
-        Dt = float(mets.get("temporal_drift", 0.0))
-        cce = max(0.0, min(1.0, C * Ab * dv))
-        row = {"ticker": ticker, "as_of": str(as_of), "filing_date": str(filing["date"]), "form": filing["form"],
-               "C": C, "Ab": Ab, "Dv": dv, "B": float(B), "S": S, "Dt": Dt, "CCE": cce,
-               "o_sentence": o.sentence, "p_sentence": p.sentence, "section": o.section}
-        evidences.append(row)
-        if best is None or cce > best["CCE"]:
-            best = row
-    if best is None:
-        return None, None, evidences
-    return best["CCE"], best, evidences
-
-def previous_filing_score(ticker: str, as_of: dt.date, ua: str, api_base: str) -> Optional[float]:
-    """Return best CCE from the filing BEFORE the latest (i.e., second most recent)."""
-    try:
-        cik_map = get_cik_map(ua)
-    except Exception:
-        return None
-    cik = cik_map.get(ticker.upper())
-    if not cik: return None
-    sub = fetch_submissions(cik, ua)
-    flist = filings_before(sub, as_of, forms=("10-K","10-Q"))
-    if len(flist) < 2: return None
-    prev = flist[-2]
-    html = fetch_primary_doc(cik, prev["accession"], prev["primary"], ua)
-    lines = strip_html_to_lines(html)
-    secs = find_sections(lines)
-    clauses = extract_clauses(secs)
-    pairs = pairs_from_clauses(clauses, max_pairs=60)
-    if not pairs: return None
-    best_cce = 0.0
-    for o, p, B in pairs:
-        dv = compute_dv(o.sentence, p.sentence)
-        r1 = {"text": o.sentence, "jurisdiction": "US", "statute": "Debt Covenant", "section": o.section, "enactment_year": as_of.year}
-        r2 = {"text": p.sentence, "jurisdiction": "US", "statute": "Management Guidance", "section": p.section, "enactment_year": as_of.year}
-        try:
-            mets = cale_analyze(api_base, r1, r2)
-        except Exception:
-            continue
-        C  = float(mets.get("conflict_intensity", 0.0))
-        Ab = float(mets.get("authority_balance", 0.0))
-        cce = max(0.0, min(1.0, C * Ab * dv))
-        if cce > best_cce: best_cce = cce
-    return best_cce
-
-# ---------- Logistic combiner (dependency-free) ----------
 class Logistic:
-    def __init__(self, l2=0.0, lr=0.05, max_iter=2000, seed=42):
-        self.l2 = l2; self.lr = lr; self.max_iter = max_iter; self.rng = random.Random(seed)
-        self.w = None
+    def __init__(self, lr: float = 0.05, max_iter: int = 2000, l2: float = 0.5, seed: int = 42):
+        self.lr = lr
+        self.max_iter = max_iter
+        self.l2 = l2
+        self.rng = np.random.default_rng(seed)
+        self.w: np.ndarray | None = None
 
-    @staticmethod
-    def _sigmoid(z):
-        return 1.0/(1.0+np.exp(-z))
-
-    def fit(self, X: np.ndarray, y: np.ndarray):
+    def fit(self, X: np.ndarray, y: np.ndarray) -> "Logistic":
         n, d = X.shape
         self.w = np.zeros(d)
-        lr = self.lr
-        for it in range(self.max_iter):
+        for _ in range(self.max_iter):
             z = X @ self.w
-            p = self._sigmoid(z)
-            grad = (X.T @ (p - y))/n + self.l2 * self.w
-            self.w -= lr * grad
+            p = 1.0 / (1.0 + np.exp(-z))
+            grad = (X.T @ (p - y)) / n + self.l2 * self.w
+            self.w -= self.lr * grad
         return self
 
-    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        if self.w is None:
+            raise RuntimeError("Model not fitted")
         z = X @ self.w
-        return self._sigmoid(z)
+        return 1.0 / (1.0 + np.exp(-z))
 
     def stderr(self, X: np.ndarray) -> np.ndarray:
-        # approximate std errors from Hessian diagonal
-        p = self.predict_proba(X)
-        W = p*(1-p)
-        XtWX = X.T @ (X * W[:,None]) + self.l2*np.eye(X.shape[1])
+        if self.w is None:
+            raise RuntimeError("Model not fitted")
+        p = self.predict(X)
+        W = p * (1 - p)
+        XtWX = X.T @ (X * W[:, None]) + self.l2 * np.eye(X.shape[1])
         try:
             cov = np.linalg.inv(XtWX)
             return np.sqrt(np.diag(cov))
-        except Exception:
+        except np.linalg.LinAlgError:
             return np.full(X.shape[1], np.nan)
 
-# ---------- Main validator ----------
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--events-csv", required=True)
-    ap.add_argument("--controls-csv", required=True)
-    ap.add_argument("--api-base", required=True)
-    ap.add_argument("--user-agent", required=True)
-    ap.add_argument("--out-dir", default="reports/leverage_alpha")
-    args = ap.parse_args()
 
+def strip_html(text: str) -> str:
+    import re
+
+    text = re.sub(r"(?is)<(script|style).*?>.*?</\\1>", " ", text)
+    text = re.sub(r"(?is)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?is)</p>", "\n", text)
+    text = re.sub(r"(?is)<.*?>", " ", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    return text
+
+
+def read_filing(path: Path) -> str:
+    if not path.exists():
+        raise FileNotFoundError(f"Missing filing: {path}")
+    return path.read_text(encoding="utf-8", errors="ignore")
+
+
+def find_prior(path: Path) -> Path | None:
+    company_dir = path.parents[1] if len(path.parents) >= 2 else path.parent
+    candidates = sorted(company_dir.glob("**/*.htm"))
+    try:
+        idx = candidates.index(path)
+    except ValueError:
+        return None
+    if idx == 0:
+        return None
+    return candidates[idx - 1]
+
+
+def analyse(path: Path, strict: bool) -> Dict[str, float | List[dict]]:
+    raw = read_filing(path)
+    text = strip_html(raw)
+    return finance_extract.analyse_finance_sections(text, strict=strict)
+
+
+def roc_auc_score(y_true: np.ndarray, scores: np.ndarray) -> float:
+    order = np.argsort(scores)
+    ranks = np.empty_like(order)
+    ranks[order] = np.arange(len(scores))
+    pos = ranks[y_true == 1]
+    n_pos = (y_true == 1).sum()
+    n_neg = (y_true == 0).sum()
+    if n_pos == 0 or n_neg == 0:
+        return float("nan")
+    return (pos.mean() - (n_pos - 1) / 2.0) / n_neg
+
+
+def welch_ttest(x: np.ndarray, y: np.ndarray) -> float:
+    if len(x) < 2 or len(y) < 2:
+        return float("nan")
+    mx, my = x.mean(), y.mean()
+    vx, vy = x.var(ddof=1), y.var(ddof=1)
+    nx, ny = len(x), len(y)
+    denom = math.sqrt(vx / nx + vy / ny)
+    if denom == 0:
+        return float("nan")
+    t_stat = (mx - my) / denom
+    z = abs(t_stat)
+    p = 2.0 * (1.0 - 0.5 * (1.0 + math.erf(z / math.sqrt(2.0))))
+    return float(max(0.0, min(1.0, p)))
+
+
+def youden_threshold(y_true: np.ndarray, scores: np.ndarray) -> Tuple[float, Tuple[int, int, int, int]]:
+    thresholds = np.unique(scores)
+    best_thr = 0.5
+    best_stat = -1
+    best_conf = (0, 0, 0, 0)
+    for thr in thresholds:
+        preds = (scores >= thr).astype(int)
+        tp = int(((preds == 1) & (y_true == 1)).sum())
+        fp = int(((preds == 1) & (y_true == 0)).sum())
+        tn = int(((preds == 0) & (y_true == 0)).sum())
+        fn = int(((preds == 0) & (y_true == 1)).sum())
+        tpr = tp / max(1, (y_true == 1).sum())
+        fpr = fp / max(1, (y_true == 0).sum())
+        stat = tpr - fpr
+        if stat > best_stat:
+            best_stat = stat
+            best_thr = thr
+            best_conf = (tp, fp, tn, fn)
+    return best_thr, best_conf
+
+
+def build_feature_row(ticker: str, label: int, current: Dict[str, float | List[dict]], prior: Dict[str, float | List[dict]] | None) -> Dict[str, float]:
+    cce_curr = float(current.get("CCE_prod", 0.0))
+    cce_prev = float(prior.get("CCE_prod", 0.0)) if prior else 0.0
+    delta = cce_curr - cce_prev
+    row = {
+        "ticker": ticker,
+        "label": label,
+        "C": float(current.get("conflict_intensity", 0.0)),
+        "Ab": float(current.get("authority_balance", 0.0)),
+        "Dv": float(current.get("fragility", 0.0)),
+        "B": float(current.get("bypass", 0.0)),
+        "S": float(current.get("semantic_overlap", 0.0)),
+        "CCE_prod": cce_curr,
+        "delta_cce": delta,
+        "Dt": 0.0,
+    }
+    return row
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--events-csv", required=True)
+    parser.add_argument("--controls-csv", required=True)
+    parser.add_argument("--api-base", default="")
+    parser.add_argument("--user-agent", default="CALE-Research/0.1")
+    parser.add_argument("--out-dir", default="reports/leverage_alpha")
+    args = parser.parse_args()
+
+    cfg = finance_extract.CFG or {}
     os.makedirs(args.out_dir, exist_ok=True)
 
     events = pd.read_csv(args.events_csv)
     controls = pd.read_csv(args.controls_csv)
 
-    rows = []
-    evidence_all = []
+    def run(strict: bool):
+        rows: List[Dict[str, float]] = []
+        evidence: List[dict] = []
+        for _, row in events.iterrows():
+            path = Path(row["filing_path"])
+            current = analyse(path, strict)
+            prior_path = find_prior(path)
+            prior = analyse(prior_path, strict) if prior_path else None
+            rows.append(build_feature_row(str(row["ticker"]).upper(), 1, current, prior))
+            ev = current.get("evidence", []) or []
+            if ev:
+                ev0 = dict(ev[0])
+                ev0["ticker"] = str(row["ticker"]).upper()
+                evidence.append(ev0)
+        for _, row in controls.iterrows():
+            path = Path(row["filing_path"])
+            current = analyse(path, strict)
+            prior_path = find_prior(path)
+            prior = analyse(prior_path, strict) if prior_path else None
+            rows.append(build_feature_row(str(row["ticker"]).upper(), 0, current, prior))
+            ev = current.get("evidence", []) or []
+            if ev:
+                ev0 = dict(ev[0])
+                ev0["ticker"] = str(row["ticker"]).upper()
+                evidence.append(ev0)
+        df = pd.DataFrame(rows)
+        return df, evidence
 
-    # Distressed
-    for _, r in events.iterrows():
-        tkr = str(r["ticker"]).upper()
-        as_of = dt.date.fromisoformat(str(r["event_date"]))
-        cce, feat, ev = filing_score(tkr, as_of, args.user_agent, args.api_base)
-        if cce is None: continue
-        prev = previous_filing_score(tkr, as_of, args.user_agent, args.api_base)
-        dCCE = (cce - prev) if (prev is not None) else 0.0
-        has_prev = 0 if (prev is None) else 1
-        feat_row = {
-            "ticker": tkr, "as_of": str(as_of), "label": 1,
-            "C": feat["C"], "Ab": feat["Ab"], "Dv": feat["Dv"], "B": feat["B"], "S": feat["S"], "Dt": feat["Dt"],
-            "CCE": feat["CCE"], "dCCE": dCCE, "has_prev": has_prev
-        }
-        rows.append(feat_row)
-        # keep top pair evidence for explainability
-        evidence_all.append({k:feat[k] for k in ["ticker","as_of","filing_date","form","section","o_sentence","p_sentence","CCE"]})
+    strict = False
+    df, evidence = run(strict)
+    if (df["CCE_prod"].std() < 1e-6 or df["CCE_prod"].sum() == 0.0) and not strict:
+        strict = True
+        df, evidence = run(strict)
 
-    # Controls
-    for _, r in controls.iterrows():
-        tkr = str(r["ticker"]).upper()
-        as_of = dt.date.fromisoformat(str(r["as_of_date"]))
-        cce, feat, ev = filing_score(tkr, as_of, args.user_agent, args.api_base)
-        if cce is None: continue
-        prev = previous_filing_score(tkr, as_of, args.user_agent, args.api_base)
-        dCCE = (cce - prev) if (prev is not None) else 0.0
-        has_prev = 0 if (prev is None) else 1
-        feat_row = {
-            "ticker": tkr, "as_of": str(as_of), "label": 0,
-            "C": feat["C"], "Ab": feat["Ab"], "Dv": feat["Dv"], "B": feat["B"], "S": feat["S"], "Dt": feat["Dt"],
-            "CCE": feat["CCE"], "dCCE": dCCE, "has_prev": has_prev
-        }
-        rows.append(feat_row)
-        evidence_all.append({k:feat[k] for k in ["ticker","as_of","filing_date","form","section","o_sentence","p_sentence","CCE"]})
+    out_csv = Path(args.out_dir) / "event_scores_delta.csv"
+    df.to_csv(out_csv, index=False)
 
-    df = pd.DataFrame(rows)
-    if df.empty:
-        print("No rows produced — check API availability, SEC UA, or CSVs.")
-        return
+    with (Path(args.out_dir) / "top_pairs_delta.json").open("w", encoding="utf-8") as handle:
+        json.dump(evidence[:50], handle, indent=2)
 
-    # Save raw features
-    features_csv = os.path.join(args.out_dir, "event_scores_delta.csv")
-    df.to_csv(features_csv, index=False)
+    y = df["label"].to_numpy(dtype=float)
+    scores = df["CCE_prod"].to_numpy(dtype=float)
+    auc_base = roc_auc_score(y, scores)
 
-    # Baseline AUC on CCE
-    y = df["label"].values
-    scores_base = df["CCE"].values
-    try:
-        auc_base = roc_auc_score(y, scores_base)
-    except Exception:
-        # manual AUC if sklearn unavailable
-        order = np.argsort(scores_base)
-        ranks = np.empty_like(order); ranks[order] = np.arange(len(scores_base))
-        pos_ranks = ranks[y==1]
-        n1 = (y==1).sum(); n0 = (y==0).sum()
-        auc_base = (pos_ranks.mean() - (n1-1)/2) / n0
+    feats_cfg = cfg.get("ablation", {}).get("feature_set", ["C", "Ab", "Dv", "B", "delta_cce", "S", "Dt"])
+    feat_cols = []
+    for f in feats_cfg:
+        if f == "Ab":
+            feat_cols.append("Ab")
+        elif f in df.columns:
+            feat_cols.append(f)
+        else:
+            df[f] = 0.0
+            feat_cols.append(f)
+    X = df[feat_cols].to_numpy(dtype=float)
+    mu = X.mean(axis=0)
+    sigma = X.std(axis=0) + 1e-9
+    X_std = (X - mu) / sigma
+    X_std = np.hstack([np.ones((X_std.shape[0], 1)), X_std])
 
-    # t-test on means
-    d = df[df.label==1]["CCE"].values
-    c = df[df.label==0]["CCE"].values
-    t_p = stats.ttest_ind(d, c, equal_var=False).pvalue if (len(d)>1 and len(c)>1) else float('nan')
+    log_cfg = cfg.get("ablation", {})
+    model = Logistic(
+        lr=float(log_cfg.get("lr", 0.05)),
+        max_iter=int(log_cfg.get("max_iter", 2000)),
+        l2=float(log_cfg.get("l2_reg", 0.5)),
+        seed=int(log_cfg.get("seed", 42)),
+    )
+    model.fit(X_std, y)
+    probs = model.predict(X_std)
+    auc_log = roc_auc_score(y, probs)
+    se = model.stderr(X_std)
 
-    # Logistic features
-    feats = CFG["ablation"]["feature_set"]
-    X_list = []
-    for _, r in df.iterrows():
-        v = []
-        for f in feats:
-            v.append(float(r[f]) if f in r else 0.0)
-        # Add bias term
-        v.insert(0, 1.0)
-        X_list.append(v)
-    X = np.array(X_list, dtype=float)
-    ybin = y.astype(float)
+    coeff_path = Path(args.out_dir) / "logistic_coeffs.json"
+    with coeff_path.open("w", encoding="utf-8") as handle:
+        json.dump(
+            {
+                "names": ["bias"] + feat_cols,
+                "weights": [float(v) for v in model.w],
+                "stderr": [float(v) for v in se],
+                "mu": mu.tolist(),
+                "sigma": sigma.tolist(),
+            },
+            handle,
+            indent=2,
+        )
 
-    # Standardize non-bias columns
-    Xm = X.copy()
-    mu = Xm[:,1:].mean(axis=0); sd = Xm[:,1:].std(axis=0) + 1e-9
-    Xm[:,1:] = (Xm[:,1:] - mu)/sd
+    thr, conf = youden_threshold(y, scores)
+    distress = df[df.label == 1]["CCE_prod"].to_numpy()
+    control = df[df.label == 0]["CCE_prod"].to_numpy()
+    t_p = welch_ttest(distress, control)
 
-    # Fit logistic
-    logi = Logistic(l2=CFG["ablation"]["l2_reg"], lr=CFG["ablation"]["lr"], max_iter=CFG["ablation"]["max_iter"], seed=CFG["ablation"]["seed"])
-    logi.fit(Xm, ybin)
-    probs = logi.predict_proba(Xm)
-    try:
-        auc_log = roc_auc_score(y, probs)
-    except Exception:
-        order = np.argsort(probs); ranks = np.empty_like(order); ranks[order] = np.arange(len(probs))
-        pos_ranks = ranks[y==1]; n1 = (y==1).sum(); n0 = (y==0).sum()
-        auc_log = (pos_ranks.mean() - (n1-1)/2) / n0
+    verdict = "FAIL"
+    if auc_base >= 0.70 or auc_log >= 0.70:
+        verdict = "PASS"
+    iteration = "regex_fallback" if strict else "first_pass"
 
-    # Std errors (approx)
-    se = logi.stderr(Xm)
-
-    # Save coefficients
-    coef_path = os.path.join(args.out_dir, "logistic_coeffs.json")
-    with open(coef_path, "w") as f:
-        names = ["bias"] + feats
-        json.dump({"names": names, "weights": list(map(float, logi.w)), "stderr": list(map(float, se)), "mu": mu.tolist(), "sd": sd.tolist()}, f, indent=2)
-
-    # Save evidence pairs
-    pairs_path = os.path.join(args.out_dir, "top_pairs_delta.json")
-    with open(pairs_path, "w") as f:
-        json.dump(evidence_all[:50], f, indent=2)
-
-    # Verdicts
-    auc_s = CFG["validation"]["auc_strong"]; auc_r = CFG["validation"]["auc_real"]; auc_w = CFG["validation"]["auc_weak"]
-    def bucket(auc):
-        if auc >= auc_s: return "🟢 STRONG — proceed to backtest immediately"
-        if auc >= auc_r: return "🟡 REAL — expand sample & tune"
-        if auc >= auc_w: return "🟠 WEAK — iterate parsing/authority/ΔCCE"
-        return "🔴 NO SIGNAL — fix features and re-test"
-
-    print("\n=== CALE ΔCCE + Logistic Combiner Event Study ===")
-    print(f"N(distressed)={int((df.label==1).sum())}, mean CCE={np.mean(d) if len(d)>0 else float('nan'):.3f}")
-    print(f"N(control)   ={int((df.label==0).sum())}, mean CCE={np.mean(c) if len(c)>0 else float('nan'):.3f}")
-    print(f"Baseline CCE AUC: {auc_base:.3f}   Verdict: {bucket(auc_base)}")
-    print(f"Logistic  AUC:    {auc_log:.3f}   Verdict: {bucket(auc_log)}")
-    print(f"T-test (CCE means) p-value: {t_p:.4f}")
-    print("\nLogistic weights (bias + " + ", ".join(CFG['ablation']['feature_set']) + "):")
-    names = ["bias"] + CFG["ablation"]["feature_set"]
-    for i, n in enumerate(names):
-        se_i = float(se[i]) if i < len(se) else float('nan')
-        print(f"  {n:>6}: {float(logi.w[i]): .4f}  (± {se_i:.4f})")
-    print(f"\nSaved features: {features_csv}")
-    print(f"Saved logistic coeffs: {coef_path}")
-    print(f"Saved top evidence pairs: {pairs_path}")
-    print("Note: Research tool only — not investment advice.")
+    print("=== CALE Finance Validation Report (Target AUC ≥ 0.70) ===")
+    print(f"Distressed N: {len(distress)}, mean CCE: {float(distress.mean() if len(distress) else float('nan')):.3f}")
+    print(f"Control    N: {len(control)}, mean CCE: {float(control.mean() if len(control) else float('nan')):.3f}")
+    print(f"Baseline AUC (CCE_prod): {auc_base:.3f}")
+    print(f"ΔCCE Logistic AUC:        {auc_log:.3f}")
+    print(f"t-test p-value:           {t_p:.4f}")
+    print(f"Confusion @ optimal thr:  TP={conf[0]}, FP={conf[1]}, TN={conf[2]}, FN={conf[3]}")
+    print("\nTop evidence (distressed):")
+    distressed_tickers = set(df[df.label == 1]["ticker"])
+    dist_evidence = [ev for ev in evidence if ev.get("ticker") in distressed_tickers]
+    if not dist_evidence:
+        print("- No obligation/permission pairs detected; consider tightening extraction rules.")
+    for ev in dist_evidence[:3]:
+        c_val = float(ev.get('conflict', 0.0))
+        ab_val = float(ev.get('authority', 0.0))
+        dv_val = float(ev.get('fragility', 0.0))
+        cce_est = c_val * ab_val if ab_val else c_val
+        print(
+            f"- {ev.get('ticker')} {ev.get('section')}: [OBLIGATION ⟂ PERMISSION], "
+            f"bypass={ev.get('bypass')}, Ab={ab_val:.2f}, Dv={dv_val:.2f}, C={c_val:.2f}, "
+            f"CCE≈{cce_est:.2f}, sentence=\"{ev.get('obligation', '')[:80]}...\""
+        )
+    print(f"\nIteration: {iteration}")
+    print(f"Verdict: {verdict}")
+    print("Artifacts:")
+    print(f"- {Path(args.out_dir) / 'event_scores_delta.csv'}")
+    print(f"- {Path(args.out_dir) / 'event_scores.csv'}")
+    print(f"- {Path(args.out_dir) / 'top_pairs_delta.json'}")
+    print(f"- {coeff_path}")
+    print("===========================================================")
+    if verdict == "PASS":
+        print("\nNext steps:")
+        print("- Expand sample to ≥100 events / 100 controls (2019–2025)")
+        print("- Add borrow-fee filter + universe liquidity filter")
+        print("- Build monthly short-decile backtest (hedged) with costs")
+        print("- Paper trade 8–12 weeks before deploying capital")
 
 
 if __name__ == "__main__":
-    random.seed(CFG.get("ablation", {}).get("seed", 42))
-    np.random.seed(CFG.get("ablation", {}).get("seed", 42))
     main()
