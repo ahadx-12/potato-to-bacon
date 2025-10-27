@@ -2,8 +2,15 @@
 
 from __future__ import annotations
 
+import math
+import importlib
+import importlib.util
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Mapping, MutableMapping
+
+import numpy as np
 
 from .bootstrap import CALEServices, build_services
 from .types import ConflictAnalysis, LegalRule
@@ -54,6 +61,81 @@ class CALEEngine:
             rule = self.services.parser.parse(text, metadata)
 
         return self.services.feature_engine.populate(rule)
+
+    # ------------------------------------------------------------------
+    # Finance-aware helpers
+    # ------------------------------------------------------------------
+    def _finance_weights(self) -> tuple[float, float, float, float, Mapping[str, float]]:
+        config = _load_finance_config()
+        alpha = float(config.get("alpha", DEFAULT_WEIGHTS["alpha"]))
+        beta = float(config.get("beta", DEFAULT_WEIGHTS["beta"]))
+        eta = float(config.get("eta", DEFAULT_WEIGHTS["eta"]))
+        gamma = float(config.get("temporal_gamma", DEFAULT_WEIGHTS["temporal_gamma"]))
+        authority = config.get("authority", DEFAULT_WEIGHTS["authority"])
+        return alpha, beta, eta, gamma, authority
+
+    @staticmethod
+    def _semantic_overlap(rule1: LegalRule, rule2: LegalRule) -> float:
+        vec1 = getattr(rule1, "interpretive_vec", None)
+        vec2 = getattr(rule2, "interpretive_vec", None)
+        if vec1 is None or vec2 is None:
+            return 0.0
+        similarity = float(np.dot(vec1, vec2))
+        similarity = max(-1.0, min(1.0, similarity))
+        return 0.5 * (similarity + 1.0)
+
+    def _authority_prior(self, rule: LegalRule, authority: Mapping[str, float]) -> float:
+        family = _section_family(getattr(rule, "section", ""))
+        if family:
+            return float(authority.get(family, 0.0))
+        return 0.0
+
+    def _compute_conflict_metrics(
+        self, rule1: LegalRule, rule2: LegalRule
+    ) -> tuple[float, float, float, float]:
+        if not self.services:
+            raise RuntimeError("CALE services not initialised")
+
+        symbolic = float(self.services.checker.check_conflict(rule1, rule2))
+        alpha, beta, eta, gamma, authority = self._finance_weights()
+
+        semantic_overlap = self._semantic_overlap(rule1, rule2)
+        m1 = _modality_scalar(rule1.text)
+        m2 = _modality_scalar(rule2.text)
+        modality_gap = abs(m1 - m2)
+
+        bypass_flag = max(
+            detects_bypass(rule1.text, rule2.text),
+            detects_bypass(rule2.text, rule1.text),
+        )
+
+        if symbolic <= 0.0:
+            conflict_intensity = 0.0
+        else:
+            conflict_intensity = _clamp01(alpha * (1.0 - semantic_overlap) + beta * modality_gap + eta * float(bypass_flag))
+
+        temporal_drift = float(
+            self.services.calculator.compute_temporal_drift(rule1, rule2)
+        )
+
+        prior1 = self._authority_prior(rule1, authority)
+        prior2 = self._authority_prior(rule2, authority)
+        delta_year = float(getattr(rule2, "enactment_year", 0) - getattr(rule1, "enactment_year", 0))
+        authority_balance = _sigmoid((prior2 - prior1) + gamma * delta_year)
+
+        return conflict_intensity, semantic_overlap, temporal_drift, authority_balance
+
+    def _prepare_analysis(self, rule1: LegalRule, rule2: LegalRule) -> ConflictAnalysis:
+        metrics = self._compute_conflict_metrics(rule1, rule2)
+        conflict_intensity, semantic_overlap, temporal_drift, authority_balance = metrics
+        analysis = self.services.calculator.compute_multiperspective(
+            rule1, rule2, conflict_intensity
+        )
+        analysis.CI = float(conflict_intensity)
+        analysis.K = float(semantic_overlap)
+        analysis.TD = float(temporal_drift)
+        analysis.H = float(authority_balance)
+        return analysis
 
     # ------------------------------------------------------------------
     # Serialisation helpers
@@ -133,8 +215,7 @@ class CALEEngine:
 
         rule1 = self._ensure_rule(rule1_payload, "R1")
         rule2 = self._ensure_rule(rule2_payload, "R2")
-        conflict = self.services.checker.check_conflict(rule1, rule2)
-        analysis = self.services.calculator.compute_multiperspective(rule1, rule2, conflict)
+        analysis = self._prepare_analysis(rule1, rule2)
         return self._analysis_summary(analysis)
 
     def suggest(
@@ -145,10 +226,128 @@ class CALEEngine:
 
         rule1 = self._ensure_rule(rule1_payload, "R1")
         rule2 = self._ensure_rule(rule2_payload, "R2")
-        conflict = self.services.checker.check_conflict(rule1, rule2)
-        analysis = self.services.calculator.compute_multiperspective(rule1, rule2, conflict)
+        analysis = self._prepare_analysis(rule1, rule2)
         suggestion = self.services.suggester.suggest_amendment(rule1, rule2, analysis)
 
         result = self._analysis_summary(analysis)
         result.update(self._suggestion_summary(analysis, suggestion))
         return result
+FINANCE_CONFIG_PATH = Path("configs/finance.yml")
+
+DEFAULT_WEIGHTS = {
+    "alpha": 0.45,
+    "beta": 0.25,
+    "eta": 0.30,
+    "temporal_gamma": 0.30,
+    "authority": {
+        "CREDIT_AGREEMENT": 2.0,
+        "INDENTURE_NOTES": 1.8,
+        "NOTES_TO_FS": 1.2,
+        "RISK_FACTORS": 0.8,
+        "LIQUIDITY": 0.6,
+        "MDNA": 0.4,
+    },
+}
+
+EXC_TERMS = (
+    "unless",
+    "except",
+    "subject to",
+    "provided that",
+    "waiver",
+    "amend",
+    "amendment",
+)
+PERM_TOKENS = (
+    "may",
+    "allowed to",
+    "permit",
+    "incur",
+    "borrow",
+    "issue",
+    "leverage",
+    "indebtedness",
+    "notes",
+)
+OBL_TOKENS = ("must", "shall")
+
+
+def _sigmoid(x: float) -> float:
+    return 1.0 / (1.0 + math.exp(-x))
+
+
+def _clamp01(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def detects_bypass(rule_obl_text: str, rule_perm_text: str) -> int:
+    t1 = rule_obl_text.lower()
+    t2 = rule_perm_text.lower()
+    if not any(tok in t1 for tok in OBL_TOKENS):
+        return 0
+    if not any(tok in t2 for tok in PERM_TOKENS):
+        return 0
+    if any(term in t2 for term in EXC_TERMS) or ("subject to" in t2) or ("provided that" in t2):
+        return 1
+    return 0
+
+
+def _finance_config_module():
+    spec = importlib.util.find_spec("yaml")
+    if spec is None:
+        return None
+    return importlib.import_module("yaml")
+
+
+@lru_cache(maxsize=1)
+def _load_finance_config() -> Mapping[str, Any]:
+    yaml_module = _finance_config_module()
+    if yaml_module is None or not FINANCE_CONFIG_PATH.exists():
+        return DEFAULT_WEIGHTS
+    try:
+        with FINANCE_CONFIG_PATH.open("r", encoding="utf-8") as handle:
+            data = yaml_module.safe_load(handle) or {}
+    except Exception:
+        return DEFAULT_WEIGHTS
+    weights = data.get("weights", {})
+    authority = dict(DEFAULT_WEIGHTS["authority"])
+    authority.update(weights.get("authority", {}))
+    return {
+        "alpha": float(weights.get("alpha", DEFAULT_WEIGHTS["alpha"])),
+        "beta": float(weights.get("beta", DEFAULT_WEIGHTS["beta"])),
+        "eta": float(weights.get("eta", DEFAULT_WEIGHTS["eta"])),
+        "temporal_gamma": float(weights.get("temporal_gamma", DEFAULT_WEIGHTS["temporal_gamma"])),
+        "authority": authority,
+    }
+
+
+def _section_family(section: str | None) -> str | None:
+    if not section:
+        return None
+    sec = section.upper()
+    if "CREDIT" in sec or "FACILITIES" in sec:
+        return "CREDIT_AGREEMENT"
+    if "INDENTURE" in sec or "NOTE" in sec:
+        return "INDENTURE_NOTES"
+    if "NOTES" in sec and "FINANC" in sec:
+        return "NOTES_TO_FS"
+    if "RISK" in sec and "FACTOR" in sec:
+        return "RISK_FACTORS"
+    if "LIQUIDITY" in sec:
+        return "LIQUIDITY"
+    if "MANAGEMENT" in sec or "MD&A" in sec:
+        return "MDNA"
+    return None
+
+
+def _modality_scalar(text: str) -> float:
+    lowered = text.lower()
+    if "must not" in lowered or "shall not" in lowered:
+        return -1.0
+    if "may not" in lowered:
+        return -0.3
+    if "must" in lowered or "shall" in lowered:
+        return 1.0
+    if "may" in lowered:
+        return 0.3
+    return 0.0
