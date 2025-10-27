@@ -1,0 +1,4 @@
+ticker,filing_date,filing_path
+AAPL,2022-10-27,data/sec/edgar/data/320193/000032019323000001/aapl_q1_2023.htm
+MSFT,2022-07-28,data/sec/edgar/data/789019/000078901923000001/msft_q3_2023.htm
+JNJ,2022-02-23,data/sec/edgar/data/200406/000020040623000001/jnj_q1_2023.htm

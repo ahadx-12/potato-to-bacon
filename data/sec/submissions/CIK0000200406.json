@@ -1,0 +1,10 @@
+{
+  "filings": {
+    "recent": {
+      "form": ["10-Q", "10-K"],
+      "filingDate": ["2023-04-10", "2023-01-15"],
+      "accessionNumber": ["0000200406-23-000001", "0000200406-23-000002"],
+      "primaryDocument": ["jnj_q1_2023.htm", "jnj_k_2022.htm"]
+    }
+  }
+}

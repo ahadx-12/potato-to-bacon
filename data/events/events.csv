@@ -1,0 +1,4 @@
+ticker,event_date,event_type,filing_before,filing_path
+MPW,2023-05-10,leverage_stress,2023-05-10,data/sec/edgar/data/1287865/00128786523000001/mpw_q1_2023.htm
+UPST,2023-08-15,leverage_stress,2023-05-09,data/sec/edgar/data/1647639/00164763923000001/upst_q2_2023.htm
+BBBYQ,2023-01-05,bankruptcy,2022-09-30,data/sec/edgar/data/886158/000088615822000001/bbby_q3_2022.htm

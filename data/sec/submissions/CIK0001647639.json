@@ -1,0 +1,10 @@
+{
+  "filings": {
+    "recent": {
+      "form": ["10-Q", "10-Q"],
+      "filingDate": ["2023-07-20", "2023-05-10"],
+      "accessionNumber": ["001647639-23-000001", "001647639-23-000002"],
+      "primaryDocument": ["upst_q2_2023.htm", "upst_q1_2023.htm"]
+    }
+  }
+}
