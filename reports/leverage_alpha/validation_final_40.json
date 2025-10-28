@@ -1,0 +1,13 @@
+{
+  "auc": 0.5555555555555556,
+  "p_value": 0.19197068228022046,
+  "false_positive_rate": 0.0,
+  "evidence_density": {
+    "distressed_avg": 1.6666666666666667,
+    "control_avg": 0.0
+  },
+  "delta_auc": 0.5555555555555556,
+  "logistic_auc": 0.6527777777777777,
+  "verdict": "NOT_READY",
+  "commentary": "Extraction/sample size requires improvement before backtest."
+}

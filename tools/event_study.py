@@ -8,7 +8,12 @@ import argparse
 import datetime as dt
 import json
 import math
+import sys
 from pathlib import Path
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from typing import Dict, List, Sequence
 
 import numpy as np
@@ -24,7 +29,7 @@ try:  # optional dependency
 except Exception:  # pragma: no cover - fallback if scipy missing
     stats = None  # type: ignore[assignment]
 
-import finance_extract as fx
+from tools import finance_extract as fx
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +138,7 @@ def main() -> None:
     # Control samples
     for _, record in controls.iterrows():
         ticker = str(record["ticker"]).upper()
-        as_of = dt.date.fromisoformat(str(record["as_of_date"]))
+        as_of = dt.date.fromisoformat(str(record["event_date"]))
         best_row, evidence_rows, _ = fx.extract_filing_features(ticker, as_of, args.user_agent, args.api_base)
         if best_row is None:
             continue
