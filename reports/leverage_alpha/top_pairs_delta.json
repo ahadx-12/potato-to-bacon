@@ -4,59 +4,99 @@
     "as_of": "2023-01-05",
     "filing_date": "2022-12-20",
     "form": "10-Q",
-    "section": "LIQUIDITY AND CAPITAL RESOURCES",
-    "o_sentence": "The Company MUST maintain a consolidated leverage ratio below 4.0x under its credit agreement.",
-    "p_sentence": "Management MAY incur additional borrowings subject to lender consent unless the leverage ratio exceeds 4.25x.",
-    "CCE": 0.0
+    "C": 0.63,
+    "Ab": 0.4,
+    "Dv": 0.8,
+    "B": 1.0,
+    "S": 0.0,
+    "Dt": 0.0,
+    "CCE": 0.2113400345408451,
+    "cce_raw": 0.2016,
+    "weight": 0.39375,
+    "cue_meta": {
+      "neg_hits": 1,
+      "pos_hits": 0,
+      "asset": false,
+      "liquidity": true
+    },
+    "o_sentence": "The borrower MUST keep minimum liquidity of $150 million.",
+    "p_sentence": "The borrower MAY request a waiver provided that no event of default has occurred.",
+    "section": "RISK FACTORS",
+    "is_threshold": true
   },
   {
     "ticker": "MPW",
     "as_of": "2023-07-11",
     "filing_date": "2023-05-15",
     "form": "10-Q",
-    "section": "CREDIT FACILITIES",
+    "C": 0.7699999999999999,
+    "Ab": 1.0,
+    "Dv": 1.0,
+    "B": 1.0,
+    "S": 0.0,
+    "Dt": 0.0,
+    "CCE": 0.38913707910010514,
+    "cce_raw": 0.7699999999999999,
+    "weight": 0.4692,
+    "cue_meta": {
+      "neg_hits": 2,
+      "pos_hits": 0,
+      "asset": false,
+      "liquidity": false
+    },
     "o_sentence": "The borrower MUST maintain an interest coverage ratio above 3.0x across all secured loans.",
     "p_sentence": "The borrower MAY incur secured debt subject to lender approval unless a default exists.",
-    "CCE": 0.0
+    "section": "CREDIT FACILITIES",
+    "is_threshold": true
+  },
+  {
+    "ticker": "MPW",
+    "as_of": "2023-07-11",
+    "filing_date": "2023-05-15",
+    "form": "10-Q",
+    "C": 0.08,
+    "Ab": 0.3,
+    "Dv": 0.0,
+    "B": 1.0,
+    "S": 0.0,
+    "Dt": 0.0,
+    "CCE": 0.024550744291523208,
+    "cce_raw": 0.0,
+    "weight": 0.34500000000000003,
+    "cue_meta": {
+      "neg_hits": 0,
+      "pos_hits": 0,
+      "asset": false,
+      "liquidity": false
+    },
+    "o_sentence": "The company MUST keep unrestricted cash of $50 million.",
+    "p_sentence": "The company MAY seek waivers from the administrative agent provided that compliance reports are delivered.",
+    "section": "LIQUIDITY AND CAPITAL RESOURCES",
+    "is_threshold": true
   },
   {
     "ticker": "UPST",
     "as_of": "2023-08-15",
     "filing_date": "2023-07-20",
     "form": "10-Q",
-    "section": "MANAGEMENT'S DISCUSSION AND ANALYSIS",
+    "C": 0.48,
+    "Ab": 0.2,
+    "Dv": 1.0,
+    "B": 1.0,
+    "S": 0.0,
+    "Dt": 0.0,
+    "CCE": 0.21578397410610695,
+    "cce_raw": 0.096,
+    "weight": 0.33705,
+    "cue_meta": {
+      "neg_hits": 0,
+      "pos_hits": 0,
+      "asset": false,
+      "liquidity": true
+    },
     "o_sentence": "The company MUST maintain a minimum unrestricted cash balance of $100 million.",
     "p_sentence": "The company MAY borrow additional funds subject to covenant compliance unless the fixed charge coverage ratio falls below 1.5x.",
-    "CCE": 0.0
-  },
-  {
-    "ticker": "AAPL",
-    "as_of": "2023-05-01",
-    "filing_date": "2023-02-28",
-    "form": "10-Q",
-    "section": "LIQUIDITY AND CAPITAL RESOURCES",
-    "o_sentence": "The company MUST maintain prudent liquidity consistent with its investment grade rating.",
-    "p_sentence": "The company MAY issue notes for strategic investments in accordance with board-approved policies.",
-    "CCE": 0.0
-  },
-  {
-    "ticker": "MSFT",
-    "as_of": "2023-05-01",
-    "filing_date": "2023-04-20",
-    "form": "10-Q",
-    "section": "LIQUIDITY AND CAPITAL RESOURCES",
-    "o_sentence": "The company MUST maintain strong cash flow generation to fund strategic investments.",
-    "p_sentence": "The company MAY issue notes within authorized limits.",
-    "CCE": 0.0
-  },
-  {
-    "ticker": "JNJ",
-    "as_of": "2023-05-01",
-    "filing_date": "2023-04-10",
-    "form": "10-Q",
-    "section": "LIQUIDITY AND CAPITAL RESOURCES",
-    "o_sentence": "The company MUST maintain financial flexibility to pursue R&D investments.",
-    "p_sentence": "The company MAY borrow under its revolving credit agreement subject to customary approvals.",
-    "CCE": 0.0
+    "section": "MANAGEMENT'S DISCUSSION AND ANALYSIS",
+    "is_threshold": true
   }
 ]

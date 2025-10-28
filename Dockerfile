@@ -13,6 +13,9 @@ COPY web/ ./web/
 # Verify that web files exist (debug)
 RUN ls -R /app/web || (echo "❌ web directory missing!" && exit 1)
 
+# Install CPU-only PyTorch
+RUN pip install torch==2.3.0 --index-url https://download.pytorch.org/whl/cpu
+
 # Install package in editable mode
 RUN pip install --no-cache-dir .
 

@@ -1,0 +1,63 @@
+{
+  "baseline": {
+    "auc": 1.0,
+    "confusion_matrix": [
+      [
+        3,
+        0
+      ],
+      [
+        3,
+        0
+      ]
+    ],
+    "counts": {
+      "tp": 0,
+      "fp": 0,
+      "tn": 3,
+      "fn": 3
+    },
+    "distressed_mean": 0.27208702924901906,
+    "control_mean": 0.0,
+    "p_value": 0.04330425157807258
+  },
+  "delta": {
+    "auc": 0.6666666666666666
+  },
+  "logistic": {
+    "auc": 1.0,
+    "confusion_matrix": [
+      [
+        3,
+        0
+      ],
+      [
+        3,
+        0
+      ]
+    ],
+    "counts": {
+      "tp": 0,
+      "fp": 0,
+      "tn": 3,
+      "fn": 3
+    }
+  },
+  "evidence_density": {
+    "avg_pairs_distressed": 1.3333333333333333,
+    "avg_pairs_control": 0.0,
+    "min_pairs_distressed": 1
+  },
+  "false_positives_ig": {
+    "count": 0,
+    "total": 3,
+    "rate": 0.0
+  },
+  "pass_fail": {
+    "auc": true,
+    "p_value": true,
+    "fp_rate": true,
+    "pair_density": false,
+    "verdict": "NOT_READY"
+  }
+}

@@ -1,0 +1,9 @@
+ticker,filing,sentence,cce_raw,cce_delta,weight
+BBBY,10-Q 2022-12-20,The borrower MUST keep minimum liquidity of $150 million.,0.2016,0.2113400345408451,0.39375
+BBBY,10-Q 2022-12-20,The borrower MAY request a waiver provided that no event of default has occurred.,0.2016,0.2113400345408451,0.39375
+MPW,10-Q 2023-05-15,The borrower MUST maintain an interest coverage ratio above 3.0x across all secured loans.,0.7699999999999999,-0.10845950696524931,0.4692
+MPW,10-Q 2023-05-15,The borrower MAY incur secured debt subject to lender approval unless a default exists.,0.7699999999999999,-0.10845950696524931,0.4692
+MPW,10-Q 2023-05-15,The company MUST keep unrestricted cash of $50 million.,0.0,-0.10845950696524931,0.34500000000000003
+MPW,10-Q 2023-05-15,The company MAY seek waivers from the administrative agent provided that compliance reports are delivered.,0.0,-0.10845950696524931,0.34500000000000003
+UPST,10-Q 2023-07-20,The company MUST maintain a minimum unrestricted cash balance of $100 million.,0.096,0.09206464752036166,0.33705
+UPST,10-Q 2023-07-20,The company MAY borrow additional funds subject to covenant compliance unless the fixed charge coverage ratio falls below 1.5x.,0.096,0.09206464752036166,0.33705
