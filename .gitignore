@@ -10,3 +10,5 @@ htmlcov/
 .mypy_cache/
 .DS_Store
 artifacts/
+data/sec/edgar/
+data/sec/submissions/

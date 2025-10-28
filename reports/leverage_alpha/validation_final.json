@@ -1,61 +1,61 @@
 {
   "baseline": {
-    "auc": 1.0,
+    "auc": 0.5555555555555556,
     "confusion_matrix": [
       [
-        3,
+        20,
         0
       ],
       [
-        3,
-        0
+        17,
+        1
       ]
     ],
     "counts": {
-      "tp": 0,
+      "tp": 1,
       "fp": 0,
-      "tn": 3,
-      "fn": 3
+      "tn": 20,
+      "fn": 17
     },
-    "distressed_mean": 0.27208702924901906,
+    "distressed_mean": 0.07918068451549563,
     "control_mean": 0.0,
-    "p_value": 0.04330425157807258
+    "p_value": 0.19197068228022046
   },
   "delta": {
-    "auc": 0.6666666666666666
+    "auc": 0.5555555555555556
   },
   "logistic": {
-    "auc": 1.0,
+    "auc": 0.6527777777777777,
     "confusion_matrix": [
       [
-        3,
+        20,
         0
       ],
       [
-        3,
-        0
+        16,
+        2
       ]
     ],
     "counts": {
-      "tp": 0,
+      "tp": 2,
       "fp": 0,
-      "tn": 3,
-      "fn": 3
+      "tn": 20,
+      "fn": 16
     }
   },
   "evidence_density": {
-    "avg_pairs_distressed": 1.3333333333333333,
+    "avg_pairs_distressed": 1.6666666666666667,
     "avg_pairs_control": 0.0,
-    "min_pairs_distressed": 1
+    "min_pairs_distressed": 0
   },
   "false_positives_ig": {
     "count": 0,
-    "total": 3,
+    "total": 20,
     "rate": 0.0
   },
   "pass_fail": {
-    "auc": true,
-    "p_value": true,
+    "auc": false,
+    "p_value": false,
     "fp_rate": true,
     "pair_density": false,
     "verdict": "NOT_READY"

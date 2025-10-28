@@ -7,15 +7,20 @@ import datetime as dt
 import hashlib
 import importlib
 import importlib.util
-import json
 import re
-import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import requests
+
+from tools.sec_fetch import (
+    TICKER_TO_CIK,
+    ensure_filing_html,
+    load_submissions,
+    pick_last_10k_10q_before,
+)
 
 CFG_PATH = Path("configs/finance.yml")
 
@@ -23,42 +28,31 @@ CFG_PATH = Path("configs/finance.yml")
 # Pattern banks & heuristics
 # ---------------------------------------------------------------------------
 
-SECTION_TITLES: Sequence[str] = [
-    r"LIQUIDITY AND CAPITAL RESOURCES",
-    r"MANAGEMENT['’]S DISCUSSION AND ANALYSIS",
-    r"CREDIT (AGREEMENT|FACILIT(Y|IES))",
-    r"INDEBTEDNESS",
-    r"RISK FACTORS",
-    r"NOTES? TO (THE )?FINANCIAL STATEMENTS",
-]
-
-SECTION_RE = re.compile("|".join(f"(?:{pat})" for pat in SECTION_TITLES), re.I)
-
-OBLIGATION_PAT = re.compile(
-    r"\b(must|shall|required to)\b.*?"
-    r"(maintain|comply|keep|meet|not exceed|remain|stay)\b.*?"
-    r"(\b(leverage|interest|coverage|fixed\s*charge|debt\s*service|DSCR|"
-    r"current\s*ratio|quick\s*ratio|liquidity|cash|EBITDA|net\s*worth|"
-    r"minimum|maximum|cap|limit|covenant)\b).*?"
-    r"(\d+(\.\d+)?\s*(x|%|percent)|[\$€£]\s?\d{2,}(\.\d+)?|\bbelow\b|\babove\b|\bnot\s*exceed\b)",
+COVENANT_OBL = re.compile(
+    r"\b(must|shall|required to)\b.*\b(maintain|comply|keep|meet|not exceed|remain(?:s)? (?:above|below))\b.*("
+    r"\d+(\.\d+)?\s*(?:x|percent|%)|[$€£]\s*\d[\d,\.]*|\bratio\b|\bcovenant\b)",
     re.I,
 )
 
-ASPIRATIONAL_PAT = re.compile(
-    r"(prudent|strong|adequate|appropriate|strategic|investment grade|"
-    r"financial flexibility)",
+PERM_BYPASS = re.compile(
+    r"\b(may|permitted to|can)\b.*\b(borrow|incur|issue|draw|increase)\b.*\b("
+    r"unless|except|subject to|provided that|so long as|absent a default)\b",
     re.I,
 )
 
-PERMISSION_PAT = re.compile(
-    r"\b(may|permitted to|allowed to|subject to (lender|holder) consent|"
-    r"capacity to (borrow|incur))\b",
+PERM_WEAK = re.compile(
+    r"\b(may|permitted to|can)\b.*\b(borrow|incur (?:additional )?indebtedness|issue notes?|draw on (?:its )?credit (?:facility|facilities)|increase (?:its )?debt)\b",
     re.I,
 )
 
-THRESHOLD_PAT = re.compile(
-    r"(\d+(\.\d+)?\s*(x|%|percent)|[\$€£]\s?\d{2,}(\.\d+)?|\bbelow\b|\babove\b|\bnot\s*exceed\b)",
+ASPIRATIONAL = re.compile(
+    r"\b(must|shall)\b.*\b(maintain|preserve|ensure|pursue|support|target|aim)\b.*\b(liquidity|cash flow|"
+    r"financial flexibility|investment grade|strong|prudent|sound)\b(?!.*\d)(?!.*[$€£])",
     re.I,
+)
+
+INVESTMENT_GRADE = set(
+    "AAPL PEP WMT PG GOOGL MA V HD KO COST MRK UNH LMT UPS TGT ORCL PFE NVDA MSFT JNJ".split()
 )
 
 NEG_LEVERAGE_CUES: Sequence[re.Pattern[str]] = (
@@ -85,33 +79,41 @@ LIQUIDITY_PATTERNS: Sequence[re.Pattern[str]] = (
     re.compile(r"\bavailability under\b", re.I),
 )
 
-INVESTMENT_GRADE = {
-    "AAPL",
-    "MSFT",
-    "JNJ",
-    "GOOGL",
-    "PG",
-    "WMT",
-    "KO",
-    "PEP",
-    "COST",
-    "HD",
-    "UNH",
-    "V",
-    "MA",
-}
+THRESHOLD_PAT = re.compile(
+    r"(\d+(\.\d+)?\s*(x|times|%|percent)|[$€£]\s*\d[\d,\.]*|\bratio\b|\bthreshold\b)",
+    re.I,
+)
 
-EXC_TERMS = ("unless", "except", "subject to", "provided that", "waiver", "amend", "amendment")
-HEAD_RE = re.compile(r"^\s*<[^>]+>\s*$")
 
-KW_GOING = re.compile(r"going concern|substantial doubt", re.I)
-KW_BREACH = re.compile(r"\b(default|event of default|breach|waiver|amend(ment)?)\b", re.I)
-KW_COVENANT = re.compile(r"\b(covenant|leverage ratio|interest coverage|fixed charge coverage|dscr)\b", re.I)
-RATIO_PAT = re.compile(r"(\d+(\.\d+)?)\s*(x|times|%)")
+def extract_pairs_from_html(html_text: str) -> List[Tuple[str, str]]:
+    """Return (obligation_sentence, permission_sentence) pairs using tightened heuristics."""
 
-SEC_BASE = "https://data.sec.gov"
-ARCHIVES = "https://www.sec.gov/Archives"
-LOCAL_SEC_ROOT = Path("data/sec")
+    text = re.sub(r"<[^>]+>", " ", html_text)
+    text = re.sub(r"\s+", " ", text)
+    sentences = re.split(r"(?<=[\.!?])\s+(?=[A-Z(])", text)
+    obligations = [
+        sent
+        for sent in sentences
+        if COVENANT_OBL.search(sent) and not ASPIRATIONAL.search(sent)
+    ]
+    permissions = [
+        sent
+        for sent in sentences
+        if PERM_BYPASS.search(sent) or PERM_WEAK.search(sent)
+    ]
+    pairs: List[Tuple[str, str]] = []
+    for i, obligation in enumerate(obligations):
+        window_start = max(0, i - 3)
+        window_end = min(len(permissions), i + 4)
+        for perm in permissions[window_start:window_end]:
+            pairs.append((obligation, perm))
+    return pairs
+
+
+def damp_investment_grade(ticker: str, cce: float) -> float:
+    if ticker.upper() in INVESTMENT_GRADE and cce > 0.15:
+        return float(np.clip(cce * 0.3, 0.0, 1.0))
+    return float(np.clip(cce, 0.0, 1.0))
 
 
 # ---------------------------------------------------------------------------
@@ -160,235 +162,8 @@ AUTHORITY_MAX = max(AUTHORITY_WEIGHTS.values()) if AUTHORITY_WEIGHTS else 1.0
 
 
 # ---------------------------------------------------------------------------
-# Filing + text utilities
+# Heuristic scoring helpers
 # ---------------------------------------------------------------------------
-
-
-class _LocalResponse:
-    def __init__(self, path: Path) -> None:
-        self._path = path
-        self.status_code = 200
-
-    def json(self) -> Dict[str, object]:
-        with self._path.open("r", encoding="utf-8") as handle:
-            return json.load(handle)
-
-    @property
-    def text(self) -> str:
-        return self._path.read_text(encoding="utf-8")
-
-
-def _local_sec_path(url: str) -> Optional[Path]:
-    from urllib.parse import urlsplit
-
-    parsed = urlsplit(url)
-    path = parsed.path
-    if path.endswith("company_tickers.json"):
-        return LOCAL_SEC_ROOT / "company_tickers.json"
-    if "/submissions/CIK" in path:
-        name = path.split("/submissions/")[-1]
-        return LOCAL_SEC_ROOT / "submissions" / name
-    if "/edgar/data/" in path:
-        suffix = path.split("/edgar/data/")[-1]
-        return LOCAL_SEC_ROOT / "edgar" / "data" / suffix
-    return None
-
-
-def sec_get(url: str, ua: str, params=None, max_retries: int = 3, sleep: float = 0.5):
-    local_path = _local_sec_path(url)
-    if local_path and local_path.exists():
-        return _LocalResponse(local_path)
-
-    last_exc: Optional[Exception] = None
-    response: Optional[requests.Response] = None
-    for attempt in range(max_retries):
-        try:
-            response = requests.get(url, headers={"User-Agent": ua}, params=params, timeout=30)
-        except Exception as exc:  # pragma: no cover - network fallback
-            last_exc = exc
-            response = None
-        else:
-            if response.status_code == 200:
-                return response
-        time.sleep(sleep * (attempt + 1))
-
-    local_path = _local_sec_path(url)
-    if local_path and local_path.exists():
-        return _LocalResponse(local_path)
-
-    if response is not None:
-        response.raise_for_status()
-    if last_exc is not None:
-        raise last_exc
-    raise RuntimeError(f"Failed to fetch {url}")
-
-
-_CIK_CACHE: Dict[str, str] = {}
-
-
-def get_cik_map(ua: str) -> Dict[str, str]:
-    if _CIK_CACHE:
-        return _CIK_CACHE
-    url = "https://www.sec.gov/files/company_tickers.json"
-    data = sec_get(url, ua).json()
-    mapping: Dict[str, str] = {}
-    for row in data.values():
-        mapping[row["ticker"].upper()] = str(row["cik_str"]).zfill(10)
-    _CIK_CACHE.update(mapping)
-    return mapping
-
-
-def fetch_submissions(cik: str, ua: str) -> dict:
-    return sec_get(f"{SEC_BASE}/submissions/CIK{cik}.json", ua).json()
-
-
-def filings_before(sub: dict, cutoff: dt.date, forms: Sequence[str] = ("10-K", "10-Q")) -> List[dict]:
-    recent = sub.get("filings", {}).get("recent", {})
-    out: List[dict] = []
-    for form, date_str, accession, primary in zip(
-        recent.get("form", []),
-        recent.get("filingDate", []),
-        recent.get("accessionNumber", []),
-        recent.get("primaryDocument", []),
-    ):
-        try:
-            date = dt.date.fromisoformat(str(date_str))
-        except Exception:
-            continue
-        if form in forms and date < cutoff:
-            out.append({"form": form, "date": date, "accession": accession, "primary": primary})
-    out.sort(key=lambda row: row["date"])
-    return out
-
-
-def fetch_primary_doc(cik: str, accession: str, primary: str, ua: str) -> str:
-    accession_nodash = accession.replace("-", "")
-    url = f"{ARCHIVES}/edgar/data/{int(cik)}/{accession_nodash}/{primary}"
-    return sec_get(url, ua).text
-
-
-def strip_html_to_lines(html: str) -> List[str]:
-    html = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", html)
-    html = re.sub(r"(?is)<br\s*/?>", "\n", html)
-    html = re.sub(r"(?is)</p>", "\n", html)
-    text = re.sub(r"(?is)<.*?>", " ", html)
-    text = re.sub(r"[ \t]+", " ", text)
-    lines = [ln.strip() for ln in text.splitlines()]
-    return [ln for ln in lines if ln and not HEAD_RE.match(ln)]
-
-
-def find_sections(lines: Iterable[str]) -> Dict[str, List[str]]:
-    sections: Dict[str, List[str]] = {}
-    current: Optional[str] = None
-    buffer: List[str] = []
-
-    def flush() -> None:
-        nonlocal buffer, current
-        if current and buffer:
-            sections.setdefault(current, []).extend(buffer)
-        buffer = []
-
-    for line in lines:
-        match = SECTION_RE.search(line)
-        is_heading = bool(match) or (line.isupper() and len(line) < 140)
-        if is_heading and match:
-            flush()
-            current = match.group(0).upper()
-        elif is_heading and current:
-            flush()
-            current = line.upper()
-        else:
-            if current:
-                buffer.append(line)
-    flush()
-    return sections
-
-
-def sentence_split(text: str) -> List[str]:
-    out: List[str] = []
-    for chunk in re.split(r"(?<=[\.\?\!])\s+(?=[A-Z(])", text):
-        chunk = chunk.strip()
-        if chunk:
-            out.append(chunk)
-    return out
-
-
-@dataclass
-class Clause:
-    sentence: str
-    section: str
-    modality: float
-    is_obl: bool
-    is_perm: bool
-
-
-def modality_scalar(sentence: str) -> float:
-    lower = sentence.lower()
-    if "must not" in lower or "shall not" in lower:
-        return -1.0
-    if "may not" in lower:
-        return -0.3
-    if "must" in lower or "shall" in lower or "required to" in lower:
-        return 1.0
-    if "may" in lower or "can" in lower:
-        return 0.3
-    return 0.0
-
-
-def extract_clauses(sections: Dict[str, List[str]]) -> List[Clause]:
-    clauses: List[Clause] = []
-    for sec, lines in sections.items():
-        text = " ".join(lines)
-        for sent in sentence_split(text):
-            is_obl = bool(OBLIGATION_PAT.search(sent))
-            if is_obl and ASPIRATIONAL_PAT.search(sent):
-                is_obl = False
-            is_perm = bool(PERMISSION_PAT.search(sent))
-            if not (is_obl or is_perm):
-                continue
-            clauses.append(Clause(sent, sec, modality_scalar(sent), is_obl, is_perm))
-    return clauses
-
-
-def pairs_from_clauses(clauses: Sequence[Clause], max_pairs: int = 60) -> List[Tuple[Clause, Clause, int]]:
-    pairs: List[Tuple[Clause, Clause, int]] = []
-    for rule_obl in clauses:
-        if not rule_obl.is_obl:
-            continue
-        for rule_perm in clauses:
-            if not rule_perm.is_perm:
-                continue
-            if rule_obl.section != rule_perm.section:
-                continue
-            bypass_flag = 1 if any(term in rule_perm.sentence.lower() for term in EXC_TERMS) else 0
-            pairs.append((rule_obl, rule_perm, bypass_flag))
-            if len(pairs) >= max_pairs:
-                return pairs
-    return pairs
-
-
-def cale_analyze(api_base: str, rule1: dict, rule2: dict) -> dict:
-    url = f"{api_base.rstrip('/')}/v1/law/analyze"
-    response = requests.post(url, json={"rule1": rule1, "rule2": rule2}, timeout=60)
-    response.raise_for_status()
-    return response.json()
-
-
-def compute_dv(sent1: str, sent2: str) -> float:
-    value = 0.0
-    if KW_GOING.search(sent1) or KW_GOING.search(sent2):
-        value += CFG["dv"]["going_concern"]
-    if KW_BREACH.search(sent1) or KW_BREACH.search(sent2):
-        value += CFG["dv"]["breach_keywords"]
-    if KW_COVENANT.search(sent1) or KW_COVENANT.search(sent2):
-        value += CFG["dv"]["covenant_words"]
-    if RATIO_PAT.search(sent1) or RATIO_PAT.search(sent2):
-        value += CFG["dv"]["ratio_weakness"]
-    if any(pat.search(sent1) or pat.search(sent2) for pat in LIQUIDITY_PATTERNS):
-        value += 0.20
-    if any(pat.search(sent1) or pat.search(sent2) for pat in ASSET_COVERAGE_PATTERNS):
-        value += 0.25
-    return min(1.0, value)
 
 
 def _cue_score(sent1: str, sent2: str) -> Tuple[float, Dict[str, object]]:
@@ -425,10 +200,12 @@ def _temporal_weight(form: str, prev_form: Optional[str], delta_days: Optional[i
     return max(0.1, weight)
 
 
-def _authority_balance(section: str) -> float:
-    section_upper = (section or "").upper()
+def _authority_balance(context: Optional[str]) -> float:
+    base_weight = 0.5
+    context_upper = (context or "").upper()
     mapping = [
         ("CREDIT", "CREDIT_AGREEMENT"),
+        ("FACILITY", "CREDIT_AGREEMENT"),
         ("INDEBTEDNESS", "CREDIT_AGREEMENT"),
         ("LIQUIDITY", "LIQUIDITY"),
         ("MANAGEMENT", "MDNA"),
@@ -436,13 +213,12 @@ def _authority_balance(section: str) -> float:
         ("NOTE", "NOTES_TO_FS"),
         ("INDENTURE", "INDENTURE_NOTES"),
     ]
-    weight = 0.5
     for needle, key in mapping:
-        if needle in section_upper:
-            weight = AUTHORITY_WEIGHTS.get(key, weight)
+        if needle in context_upper:
+            base_weight = AUTHORITY_WEIGHTS.get(key, base_weight)
             break
     max_w = AUTHORITY_MAX if AUTHORITY_MAX > 0 else 1.0
-    return float(np.clip(weight / max_w, 0.1, 1.0))
+    return float(np.clip(base_weight / max_w, 0.1, 1.0))
 
 
 def _fallback_conflict(dv: float, cue_meta: Dict[str, object], sent1: str, sent2: str) -> float:
@@ -461,11 +237,77 @@ def _fallback_conflict(dv: float, cue_meta: Dict[str, object], sent1: str, sent2
     return float(np.clip(base, 0.03, 0.85))
 
 
+def cale_analyze(api_base: str, rule1: dict, rule2: dict) -> dict:
+    url = f"{api_base.rstrip('/')}/v1/law/analyze"
+    response = requests.post(url, json={"rule1": rule1, "rule2": rule2}, timeout=60)
+    response.raise_for_status()
+    return response.json()
+
+
+KW_GOING = re.compile(r"going concern|substantial doubt", re.I)
+KW_BREACH = re.compile(r"\b(default|event of default|breach|waiver|amend(ment)?)\b", re.I)
+KW_COVENANT = re.compile(r"\b(covenant|leverage ratio|interest coverage|fixed charge coverage|dscr)\b", re.I)
+RATIO_PAT = re.compile(r"(\d+(\.\d+)?)\s*(x|times|%)")
+
+
+def compute_dv(sent1: str, sent2: str) -> float:
+    value = 0.0
+    if KW_GOING.search(sent1) or KW_GOING.search(sent2):
+        value += CFG["dv"]["going_concern"]
+    if KW_BREACH.search(sent1) or KW_BREACH.search(sent2):
+        value += CFG["dv"]["breach_keywords"]
+    if KW_COVENANT.search(sent1) or KW_COVENANT.search(sent2):
+        value += CFG["dv"]["covenant_words"]
+    if RATIO_PAT.search(sent1) or RATIO_PAT.search(sent2):
+        value += CFG["dv"]["ratio_weakness"]
+    if any(pat.search(sent1) or pat.search(sent2) for pat in LIQUIDITY_PATTERNS):
+        value += 0.20
+    if any(pat.search(sent1) or pat.search(sent2) for pat in ASSET_COVERAGE_PATTERNS):
+        value += 0.25
+    return float(min(1.0, value))
+
+
 @dataclass
 class FilingScore:
     best_row: Optional[dict]
     evidence_rows: List[dict]
     pair_count: int
+
+
+def _parse_filings(ticker: str, as_of: dt.date, ua: str) -> Tuple[str, List[dict]]:
+    cik = TICKER_TO_CIK.get(ticker.upper())
+    if not cik:
+        return "", []
+    submissions = load_submissions(cik, ua=ua)
+    if not submissions:
+        return cik, []
+    rows = pick_last_10k_10q_before(submissions, as_of)
+    filings: List[dict] = []
+    for row in rows:
+        try:
+            filing_date = dt.datetime.strptime(row["date"], "%Y-%m-%d").date()
+        except Exception:
+            continue
+        filings.append(
+            {
+                "form": row["form"],
+                "date": filing_date,
+                "accession": row["acc"],
+                "primary": row["prim"],
+            }
+        )
+    filings.sort(key=lambda item: item["date"])
+    return cik, filings
+
+
+def _read_html(cik: str, filing: dict, ua: str) -> Optional[str]:
+    path = ensure_filing_html(cik, filing["accession"], filing["primary"], ua=ua)
+    if not path or not path.exists():
+        return None
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return None
 
 
 def score_filing(
@@ -478,21 +320,34 @@ def score_filing(
     prev_meta: Optional[dict] = None,
     prev_best: Optional[dict] = None,
 ) -> FilingScore:
-    html = fetch_primary_doc(cik, filing["accession"], filing["primary"], ua)
-    lines = strip_html_to_lines(html)
-    sections = find_sections(lines)
-    section_keys = list(sections.keys())
-    clauses = extract_clauses(sections)
-    pairs = pairs_from_clauses(clauses)
+    html = _read_html(cik, filing, ua)
+    if html is None:
+        empty_row = {
+            "ticker": ticker,
+            "as_of": str(as_of),
+            "filing_date": str(filing.get("date")),
+            "form": filing.get("form"),
+            "CCE": 0.0,
+            "cce_raw": 0.0,
+            "weight": 0.0,
+            "pair_count": 0,
+            "cce_level": 0.0,
+            "cce_delta": 0.0,
+            "no_evidence": True,
+            "notes": "Missing HTML filing",
+        }
+        return FilingScore(best_row=empty_row, evidence_rows=[], pair_count=0)
+
+    pairs = extract_pairs_from_html(html)
     print(
-        f"[extract] {ticker} {filing['form']} {filing['date']}: sections={len(section_keys)} lines={len(lines)} pairs={len(pairs)}"
+        f"[extract] {ticker} {filing.get('form')} {filing.get('date')}: pairs={len(pairs)}"
     )
     if not pairs:
         empty_row = {
             "ticker": ticker,
             "as_of": str(as_of),
-            "filing_date": str(filing["date"]),
-            "form": filing["form"],
+            "filing_date": str(filing.get("date")),
+            "form": filing.get("form"),
             "CCE": 0.0,
             "cce_raw": 0.0,
             "weight": 0.0,
@@ -507,7 +362,7 @@ def score_filing(
     evidences: List[dict] = []
     best_row: Optional[dict] = None
 
-    delta_days = None
+    delta_days: Optional[int] = None
     prev_form = None
     if prev_meta:
         prev_form = prev_meta.get("form")
@@ -515,20 +370,20 @@ def score_filing(
         if isinstance(prev_date, dt.date):
             delta_days = (filing["date"] - prev_date).days
 
-    for clause_obl, clause_perm, bypass in pairs:
-        dv = compute_dv(clause_obl.sentence, clause_perm.sentence)
+    for obligation, permission in pairs[:60]:
+        dv = compute_dv(obligation, permission)
         rule1 = {
-            "text": clause_obl.sentence,
+            "text": obligation,
             "jurisdiction": "US",
             "statute": "Debt Covenant",
-            "section": clause_obl.section,
+            "section": "N/A",
             "enactment_year": as_of.year,
         }
         rule2 = {
-            "text": clause_perm.sentence,
+            "text": permission,
             "jurisdiction": "US",
             "statute": "Management Guidance",
-            "section": clause_perm.section,
+            "section": "N/A",
             "enactment_year": as_of.year,
         }
         try:
@@ -536,21 +391,22 @@ def score_filing(
         except Exception:
             metrics = {}
 
-        cue_weight, cue_meta = _cue_score(clause_obl.sentence, clause_perm.sentence)
+        cue_weight, cue_meta = _cue_score(obligation, permission)
         C = float(metrics.get("conflict_intensity", 0.0))
         Ab = float(metrics.get("authority_balance", 0.0))
         S = float(metrics.get("semantic_overlap", 0.0))
         Dt = float(metrics.get("temporal_drift", 0.0))
         if C <= 0.0:
-            C = _fallback_conflict(dv, cue_meta, clause_obl.sentence, clause_perm.sentence)
+            C = _fallback_conflict(dv, cue_meta, obligation, permission)
         if Ab <= 0.0:
-            Ab = _authority_balance(clause_obl.section)
+            Ab = _authority_balance(f"{obligation} {permission}")
         cce_raw = float(np.clip(C * Ab * dv, 0.0, 1.0))
 
         temporal_weight = _temporal_weight(filing["form"], prev_form, delta_days)
+        bypass = 1 if PERM_BYPASS.search(permission) else 0
         bypass_weight = 0.3 if bypass else 1.0
         combo_weight = float(np.clip(cue_weight * temporal_weight * bypass_weight, 0.1, 3.0))
-        jitter_seed = (clause_obl.sentence + "||" + clause_perm.sentence).encode("utf-8")
+        jitter_seed = (obligation + "||" + permission).encode("utf-8")
         jitter = (int(hashlib.sha1(jitter_seed).hexdigest()[:8], 16) / 0xFFFFFFFF) * 0.4 - 0.2
         cce_weighted = float(np.clip(cce_raw * combo_weight + jitter, 0.0, 1.0))
 
@@ -569,10 +425,10 @@ def score_filing(
             "cce_raw": cce_raw,
             "weight": combo_weight,
             "cue_meta": cue_meta,
-            "o_sentence": clause_obl.sentence,
-            "p_sentence": clause_perm.sentence,
-            "section": clause_obl.section,
-            "is_threshold": bool(THRESHOLD_PAT.search(clause_obl.sentence)),
+            "o_sentence": obligation,
+            "p_sentence": permission,
+            "section": "N/A",
+            "is_threshold": bool(THRESHOLD_PAT.search(obligation)),
         }
         evidences.append(row)
         if best_row is None or row["CCE"] > best_row["CCE"]:
@@ -583,8 +439,8 @@ def score_filing(
         empty_row = {
             "ticker": ticker,
             "as_of": str(as_of),
-            "filing_date": str(filing["date"]),
-            "form": filing["form"],
+            "filing_date": str(filing.get("date")),
+            "form": filing.get("form"),
             "CCE": 0.0,
             "cce_raw": 0.0,
             "weight": 0.0,
@@ -597,16 +453,16 @@ def score_filing(
         return FilingScore(best_row=empty_row, evidence_rows=[], pair_count=0)
 
     cce_level = max(row["CCE"] for row in evidences)
-    damping = 1.0
-    if ticker.upper() in INVESTMENT_GRADE and cce_level > 0.15:
-        damping = 0.3
-        cce_level = float(np.clip(cce_level * damping, 0.0, 1.0))
+    damped_level = damp_investment_grade(ticker, cce_level)
+    if damped_level != cce_level and cce_level > 0:
+        scale = damped_level / cce_level
         for row in evidences:
-            row["CCE"] = float(np.clip(row["CCE"] * damping, 0.0, 1.0))
-    if damping != 1.0:
-        best_row = max(evidences, key=lambda r: r["CCE"])
+            row["CCE"] = float(np.clip(row["CCE"] * scale, 0.0, 1.0))
+        cce_level = damped_level
     if best_row is None:
-        best_row = evidences[0]
+        best_row = max(evidences, key=lambda r: r["CCE"])
+    else:
+        best_row = max(evidences, key=lambda r: r["CCE"])
 
     prev_level = None
     if prev_best is not None:
@@ -634,14 +490,8 @@ def extract_filing_features(
 ) -> Tuple[Optional[dict], List[dict], Optional[dict]]:
     """Return (best_row, evidence_rows, previous_best_row)."""
 
-    cik_map = get_cik_map(ua)
-    cik = cik_map.get(ticker.upper())
-    if not cik:
-        return None, [], None
-
-    submissions = fetch_submissions(cik, ua)
-    filings = filings_before(submissions, as_of)
-    if not filings:
+    cik, filings = _parse_filings(ticker, as_of, ua)
+    if not cik or not filings:
         return None, [], None
 
     latest = filings[-1]
@@ -710,4 +560,3 @@ def top_evidence_sentences(evidence_rows: Sequence[dict], limit: int = 3) -> Lis
             }
         )
     return out[:limit]
-

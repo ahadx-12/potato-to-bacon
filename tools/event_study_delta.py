@@ -7,8 +7,13 @@ import argparse
 import datetime as dt
 import json
 import math
+import sys
 from collections import defaultdict
 from pathlib import Path
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from typing import Dict, List
 import hashlib
 
@@ -25,7 +30,7 @@ try:
 except Exception:  # pragma: no cover
     stats = None  # type: ignore[assignment]
 
-import finance_extract as fx
+from tools import finance_extract as fx
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +179,7 @@ def main() -> None:
     # Controls
     for _, rec in controls.iterrows():
         ticker = str(rec["ticker"]).upper()
-        as_of = dt.date.fromisoformat(str(rec["as_of_date"]))
+        as_of = dt.date.fromisoformat(str(rec["event_date"]))
         best_row, evidence_rows, _ = fx.extract_filing_features(ticker, as_of, args.user_agent, args.api_base)
         if best_row is None:
             continue
