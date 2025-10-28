@@ -1,119 +1,102 @@
 [
   {
     "ticker": "BBBY",
-    "filing": "10-Q 2022-12-20",
-    "sentence": "The Company MUST maintain a consolidated leverage ratio below 4.0x under its credit agreement.",
-    "role": "obligation",
-    "cce_raw": 0.17775000000000002,
-    "CCE": 0.22806701324513085,
-    "weight": 0.315
-  },
-  {
-    "ticker": "BBBY",
-    "filing": "10-Q 2022-12-20",
-    "sentence": "Management MAY incur additional borrowings subject to lender consent unless the leverage ratio exceeds 4.25x.",
-    "role": "permission",
-    "cce_raw": 0.17775000000000002,
-    "CCE": 0.22806701324513085,
-    "weight": 0.315
+    "as_of": "2023-01-05",
+    "filing_date": "2022-12-20",
+    "form": "10-Q",
+    "C": 0.63,
+    "Ab": 0.4,
+    "Dv": 0.8,
+    "B": 1.0,
+    "S": 0.0,
+    "Dt": 0.0,
+    "CCE": 0.2113400345408451,
+    "cce_raw": 0.2016,
+    "weight": 0.39375,
+    "cue_meta": {
+      "neg_hits": 1,
+      "pos_hits": 0,
+      "asset": false,
+      "liquidity": true
+    },
+    "o_sentence": "The borrower MUST keep minimum liquidity of $150 million.",
+    "p_sentence": "The borrower MAY request a waiver provided that no event of default has occurred.",
+    "section": "RISK FACTORS",
+    "is_threshold": true
   },
   {
     "ticker": "MPW",
-    "filing": "10-Q 2023-05-15",
-    "sentence": "The borrower MUST maintain an interest coverage ratio above 3.0x across all secured loans.",
-    "role": "obligation",
-    "cce_raw": 0.38499999999999995,
-    "CCE": 0.20849507910010517,
-    "weight": 0.4692
+    "as_of": "2023-07-11",
+    "filing_date": "2023-05-15",
+    "form": "10-Q",
+    "C": 0.7699999999999999,
+    "Ab": 1.0,
+    "Dv": 1.0,
+    "B": 1.0,
+    "S": 0.0,
+    "Dt": 0.0,
+    "CCE": 0.38913707910010514,
+    "cce_raw": 0.7699999999999999,
+    "weight": 0.4692,
+    "cue_meta": {
+      "neg_hits": 2,
+      "pos_hits": 0,
+      "asset": false,
+      "liquidity": false
+    },
+    "o_sentence": "The borrower MUST maintain an interest coverage ratio above 3.0x across all secured loans.",
+    "p_sentence": "The borrower MAY incur secured debt subject to lender approval unless a default exists.",
+    "section": "CREDIT FACILITIES",
+    "is_threshold": true
   },
   {
     "ticker": "MPW",
-    "filing": "10-Q 2023-05-15",
-    "sentence": "The borrower MAY incur secured debt subject to lender approval unless a default exists.",
-    "role": "permission",
-    "cce_raw": 0.38499999999999995,
-    "CCE": 0.20849507910010517,
-    "weight": 0.4692
+    "as_of": "2023-07-11",
+    "filing_date": "2023-05-15",
+    "form": "10-Q",
+    "C": 0.08,
+    "Ab": 0.3,
+    "Dv": 0.0,
+    "B": 1.0,
+    "S": 0.0,
+    "Dt": 0.0,
+    "CCE": 0.024550744291523208,
+    "cce_raw": 0.0,
+    "weight": 0.34500000000000003,
+    "cue_meta": {
+      "neg_hits": 0,
+      "pos_hits": 0,
+      "asset": false,
+      "liquidity": false
+    },
+    "o_sentence": "The company MUST keep unrestricted cash of $50 million.",
+    "p_sentence": "The company MAY seek waivers from the administrative agent provided that compliance reports are delivered.",
+    "section": "LIQUIDITY AND CAPITAL RESOURCES",
+    "is_threshold": true
   },
   {
     "ticker": "UPST",
-    "filing": "10-Q 2023-07-20",
-    "sentence": "The company MUST maintain a minimum unrestricted cash balance of $100 million.",
-    "role": "obligation",
-    "cce_raw": 0.24,
-    "CCE": 0.26431917410610695,
-    "weight": 0.33705
-  },
-  {
-    "ticker": "UPST",
-    "filing": "10-Q 2023-07-20",
-    "sentence": "The company MAY borrow additional funds subject to covenant compliance unless the fixed charge coverage ratio falls below 1.5x.",
-    "role": "permission",
-    "cce_raw": 0.24,
-    "CCE": 0.26431917410610695,
-    "weight": 0.33705
-  },
-  {
-    "ticker": "AAPL",
-    "filing": "10-Q 2023-02-28",
-    "sentence": "The company MUST maintain prudent liquidity consistent with its investment grade rating.",
-    "role": "obligation",
-    "cce_raw": 0.020000000000000004,
-    "CCE": 0.21205840314319552,
-    "weight": 1.2305000000000001
-  },
-  {
-    "ticker": "AAPL",
-    "filing": "10-Q 2023-02-28",
-    "sentence": "The company MAY issue notes for strategic investments in accordance with board-approved policies.",
-    "role": "permission",
-    "cce_raw": 0.020000000000000004,
-    "CCE": 0.21205840314319552,
-    "weight": 1.2305000000000001
-  },
-  {
-    "ticker": "MSFT",
-    "filing": "10-Q 2023-04-20",
-    "sentence": "The company MUST maintain strong cash flow generation to fund strategic investments.",
-    "role": "obligation",
-    "cce_raw": 0.0,
-    "CCE": 0.0,
-    "weight": 1.1500000000000001
-  },
-  {
-    "ticker": "MSFT",
-    "filing": "10-Q 2023-04-20",
-    "sentence": "The company MAY issue notes within authorized limits.",
-    "role": "permission",
-    "cce_raw": 0.0,
-    "CCE": 0.0,
-    "weight": 1.1500000000000001
-  },
-  {
-    "ticker": "JNJ",
-    "filing": "10-Q 2023-04-10",
-    "sentence": "The company MUST maintain financial flexibility to pursue R&D investments.",
-    "role": "obligation",
-    "cce_raw": 0.0,
-    "CCE": 0.17425039568316436,
-    "weight": 0.34500000000000003
-  },
-  {
-    "ticker": "JNJ",
-    "filing": "10-Q 2023-04-10",
-    "sentence": "The company MAY borrow under its revolving credit agreement subject to customary approvals.",
-    "role": "permission",
-    "cce_raw": 0.0,
-    "CCE": 0.17425039568316436,
-    "weight": 0.34500000000000003
-  },
-  {
-    "ticker": "JNJ",
-    "filing": "10-Q 2023-04-10",
-    "sentence": "The company MUST comply with its credit agreements, which are not restrictive.",
-    "role": "obligation",
-    "cce_raw": 0.0,
-    "CCE": 0.14513056556348003,
-    "weight": 1.1500000000000001
+    "as_of": "2023-08-15",
+    "filing_date": "2023-07-20",
+    "form": "10-Q",
+    "C": 0.48,
+    "Ab": 0.2,
+    "Dv": 1.0,
+    "B": 1.0,
+    "S": 0.0,
+    "Dt": 0.0,
+    "CCE": 0.21578397410610695,
+    "cce_raw": 0.096,
+    "weight": 0.33705,
+    "cue_meta": {
+      "neg_hits": 0,
+      "pos_hits": 0,
+      "asset": false,
+      "liquidity": true
+    },
+    "o_sentence": "The company MUST maintain a minimum unrestricted cash balance of $100 million.",
+    "p_sentence": "The company MAY borrow additional funds subject to covenant compliance unless the fixed charge coverage ratio falls below 1.5x.",
+    "section": "MANAGEMENT'S DISCUSSION AND ANALYSIS",
+    "is_threshold": true
   }
 ]

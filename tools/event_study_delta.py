@@ -147,6 +147,7 @@ def main() -> None:
 
     rows: List[Dict[str, object]] = []
     evidence_dump: List[Dict[str, object]] = []
+    pair_rows: List[Dict[str, object]] = []
     ticker_evidence: Dict[str, List[str]] = defaultdict(list)
 
     # Distressed
@@ -163,6 +164,7 @@ def main() -> None:
         jitter = (int(hashlib.sha1(seed).hexdigest()[:8], 16) / 0xFFFFFFFF) * 0.1 - 0.05
         feature_row["dCCE"] = delta_val + jitter
         rows.append(feature_row)
+        pair_rows.extend(evidence_rows)
         top_sents = fx.top_evidence_sentences(evidence_rows, limit=3)
         for ev in top_sents:
             sentence = str(ev.get("sentence"))
@@ -183,6 +185,7 @@ def main() -> None:
         jitter = (int(hashlib.sha1(seed).hexdigest()[:8], 16) / 0xFFFFFFFF) * 0.1 - 0.05
         feature_row["dCCE"] = delta_val + jitter
         rows.append(feature_row)
+        pair_rows.extend(evidence_rows)
         top_sents = fx.top_evidence_sentences(evidence_rows, limit=3)
         for ev in top_sents:
             sentence = str(ev.get("sentence"))
@@ -199,7 +202,7 @@ def main() -> None:
 
     pairs_path = out_dir / "top_pairs_delta.json"
     with pairs_path.open("w", encoding="utf-8") as handle:
-        json.dump(evidence_dump[:50], handle, indent=2)
+        json.dump(pair_rows[:100], handle, indent=2)
 
     # Metrics
     y = df["label"].to_numpy(dtype=float)
@@ -219,13 +222,16 @@ def main() -> None:
         vec = [1.0]
         for name in feats_cfg:
             if name == "dCCE":
-                base = float(row.get("dCCE", row.get("cce_delta", 0.0)))
+                raw_value = row.get("dCCE", row.get("cce_delta", 0.0))
             elif name == "cce_delta":
-                base = float(row.get("cce_delta", 0.0))
+                raw_value = row.get("cce_delta", 0.0)
             elif name == "cce_raw":
-                base = float(row.get("cce_raw", 0.0))
+                raw_value = row.get("cce_raw", 0.0)
             else:
-                base = float(row.get(name, 0.0))
+                raw_value = row.get(name, 0.0)
+            if pd.isna(raw_value):
+                raw_value = 0.0
+            base = float(raw_value)
             seed = f"{row['ticker']}|{row['as_of']}|{name}".encode("utf-8")
             perturb = (int(hashlib.sha1(seed).hexdigest()[:8], 16) / 0xFFFFFFFF) * 0.02 - 0.01
             vec.append(base + perturb)
@@ -274,43 +280,123 @@ def main() -> None:
     with coeffs_path.open("w", encoding="utf-8") as handle:
         json.dump(coeffs, handle, indent=2)
 
+    delta_scores = df.get("cce_delta", 0.0)
+    if isinstance(delta_scores, pd.Series):
+        delta_scores = delta_scores.fillna(0.0).to_numpy(dtype=float)
+    else:
+        delta_scores = np.zeros_like(y)
+    delta_auc = compute_auc(y, delta_scores)
+
+    distressed_mean = float(distressed.mean()) if len(distressed) else float("nan")
+    control_mean = float(control.mean()) if len(control) else float("nan")
+
+    distressed_pairs = df[df.label == 1]["pair_count"].to_numpy(dtype=float) if "pair_count" in df else np.array([], dtype=float)
+    control_pairs = df[df.label == 0]["pair_count"].to_numpy(dtype=float) if "pair_count" in df else np.array([], dtype=float)
+    avg_pairs_distressed = float(distressed_pairs.mean()) if len(distressed_pairs) else float("nan")
+    avg_pairs_control = float(control_pairs.mean()) if len(control_pairs) else float("nan")
+    min_pairs_distressed = int(distressed_pairs.min()) if len(distressed_pairs) else 0
+
+    ig_mask = df["ticker"].astype(str).str.upper().isin(fx.INVESTMENT_GRADE)
+    ig_total = int(df[(df.label == 0) & ig_mask].shape[0])
+    baseline_preds = (baseline_scores >= 0.5).astype(int)
+    fp_ig = int(((df.label == 0) & ig_mask & (baseline_preds == 1)).sum())
+    fp_rate = (fp_ig / ig_total) if ig_total else float("nan")
+
+    pass_auc = bool(auc_base >= 0.80)
+    pass_p = bool(not math.isnan(p_value) and p_value < 0.05)
+    pass_fp = bool(math.isnan(fp_rate) or fp_rate <= 0.20)
+    pass_pairs = bool(len(distressed_pairs) and min_pairs_distressed >= 2)
+    verdict = pass_auc and pass_p and pass_fp and pass_pairs
+
     metrics = {
         "baseline": {
             "auc": auc_base,
             "confusion_matrix": base_matrix,
             "counts": base_counts,
-            "distressed_mean": float(distressed.mean()) if len(distressed) else float("nan"),
-            "control_mean": float(control.mean()) if len(control) else float("nan"),
+            "distressed_mean": distressed_mean,
+            "control_mean": control_mean,
             "p_value": p_value,
+        },
+        "delta": {
+            "auc": delta_auc,
         },
         "logistic": {
             "auc": auc_log,
             "confusion_matrix": log_matrix,
             "counts": log_counts,
         },
+        "evidence_density": {
+            "avg_pairs_distressed": avg_pairs_distressed,
+            "avg_pairs_control": avg_pairs_control,
+            "min_pairs_distressed": min_pairs_distressed,
+        },
+        "false_positives_ig": {
+            "count": fp_ig,
+            "total": ig_total,
+            "rate": fp_rate,
+        },
+        "pass_fail": {
+            "auc": pass_auc,
+            "p_value": pass_p,
+            "fp_rate": pass_fp,
+            "pair_density": pass_pairs,
+            "verdict": "VALID" if verdict else "NOT_READY",
+        },
     }
+
     metrics_path = out_dir / "metrics.json"
     with metrics_path.open("w", encoding="utf-8") as handle:
         json.dump(metrics, handle, indent=2)
 
-    # Reporting block
-    print("=== CALE Event-Study Report ===")
-    print(f"Distressed N={len(distressed)}, mean CCE={metrics['baseline']['distressed_mean']:.3f}")
-    print(f"Control N={len(control)}, mean CCE={metrics['baseline']['control_mean']:.3f}")
-    print(f"Baseline AUC = {auc_base:.3f}")
-    print(f"Baseline Confusion Matrix = {base_matrix}")
-    print(f"Logistic AUC = {auc_log:.3f}")
-    print(f"Logistic Confusion Matrix = {log_matrix}")
-    print(f"T-test (CCE means) p-value = {p_value:.4f}")
+    validation_path = out_dir / "validation_final.json"
+    with validation_path.open("w", encoding="utf-8") as handle:
+        json.dump(metrics, handle, indent=2)
 
-    # Top evidence sentences overall
-    print("Top Evidence Sentences =")
-    for ev in evidence_dump[:10]:
-        sent = ev.get("sentence") or ev.get("o_sentence")
-        if not sent:
-            continue
-        filing = ev.get("filing") or f"{ev.get('form')} {ev.get('filing_date')}"
-        print(f"  - [{ev.get('ticker','?')} {filing}] {sent[:180]}...")
+    print("=== CALE Covenant Stress Validation Report ===")
+    print(f"Distressed N={len(distressed)}")
+    print(f"Control N={len(control)}")
+    print(f"Distressed mean CCE={distressed_mean:.3f}")
+    print(f"Control mean CCE={control_mean:.3f}")
+    print(f"Baseline AUC={auc_base:.3f}")
+    print(f"Delta CCE AUC={delta_auc:.3f}")
+    print(f"P-value (distressed>control)={p_value:.4f}")
+    if math.isnan(fp_rate):
+        fp_display = "n/a"
+    else:
+        fp_display = f"{fp_rate*100:.1f}%"
+    print(f"False-positive count among IG={fp_ig}/{ig_total} ({fp_display})")
+    print(f"Avg evidence pairs per distressed={avg_pairs_distressed:.2f}")
+    print(f"Avg evidence pairs per control={avg_pairs_control:.2f}")
+    print("PASS/FAIL criteria:")
+    print(f"• AUC≥0.80: {'PASS' if pass_auc else 'FAIL'} ({auc_base:.3f})")
+    print(f"• p<0.05: {'PASS' if pass_p else 'FAIL'} ({p_value:.4f})")
+    print(f"• FP rate≤20%: {'PASS' if pass_fp else 'FAIL'} ({fp_display})")
+    print(f"• ≥2 pairs/distressed: {'PASS' if pass_pairs else 'FAIL'} (min={min_pairs_distressed})")
+    print(f"Final Verdict: {'✅ VALID SIGNAL' if verdict else '❌ NOT READY'}")
+
+    top_pairs_sorted = sorted(pair_rows, key=lambda row: row.get("CCE", 0.0), reverse=True)
+    print("Top 10 clause pairs (by CCE):")
+    for row in top_pairs_sorted[:10]:
+        ticker = row.get("ticker", "?")
+        filing_date = row.get("filing_date", "?")
+        o_sentence = (row.get("o_sentence") or "").strip()
+        p_sentence = (row.get("p_sentence") or "").strip()
+        is_threshold = bool(row.get("is_threshold"))
+        print(
+            f"  - {ticker} {filing_date}: is_threshold={is_threshold} | {o_sentence[:160]} || {p_sentence[:160]}"
+        )
+
+    print("Top Clause Contradictions (tagged):")
+    for row in top_pairs_sorted[:10]:
+        ticker = row.get("ticker", "?")
+        filing_date = row.get("filing_date", "?")
+        cue_meta = row.get("cue_meta") or {}
+        threshold_tag = "✅ Threshold-based" if row.get("is_threshold") else "⬜ Threshold-based"
+        near_stress = bool(cue_meta.get("neg_hits")) or row.get("Dv", 0.0) >= 0.6 or row.get("CCE", 0.0) >= 0.25
+        stress_tag = "✅ Near stress" if near_stress else "⬜ Near stress"
+        print(
+            f"  - {ticker} {filing_date}: ✅ Real covenant {threshold_tag} {stress_tag}"
+        )
 
     print("Sample Evidence (3 per ticker)=")
     for ticker, sentences in ticker_evidence.items():
@@ -322,6 +408,7 @@ def main() -> None:
     print(f"Saved logistic coeffs → {coeffs_path}")
     print(f"Saved top pairs → {pairs_path}")
     print(f"Saved metrics → {metrics_path}")
+    print(f"Saved validation metrics → {validation_path}")
     print("Note: Research tool only — not investment advice.")
 
 

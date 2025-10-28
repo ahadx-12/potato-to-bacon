@@ -23,25 +23,42 @@ CFG_PATH = Path("configs/finance.yml")
 # Pattern banks & heuristics
 # ---------------------------------------------------------------------------
 
-TARGET_SECTIONS = [
-    "LIQUIDITY AND CAPITAL RESOURCES",
-    "MANAGEMENT'S DISCUSSION AND ANALYSIS",
-    "RISK FACTORS",
-    "INDEBTEDNESS",
-    "CREDIT FACILITIES",
-    "GOING CONCERN",
+SECTION_TITLES: Sequence[str] = [
+    r"LIQUIDITY AND CAPITAL RESOURCES",
+    r"MANAGEMENT['’]S DISCUSSION AND ANALYSIS",
+    r"CREDIT (AGREEMENT|FACILIT(Y|IES))",
+    r"INDEBTEDNESS",
+    r"RISK FACTORS",
+    r"NOTES? TO (THE )?FINANCIAL STATEMENTS",
 ]
 
-OBLIGATION_PATTERNS: Sequence[re.Pattern[str]] = (
-    re.compile(r"\b(must|shall|required to|agree(s)? to)\b.*\b(maintain|comply|keep|meet|reduce|not exceed)\b", re.I),
-    re.compile(r"\b(covenant|indenture)\b.*\b(require(s|d)?|obligate(s|d)?)\b", re.I),
-    re.compile(r"\b(is subject to|remains subject to)\b.*\b(leverage|coverage|debt)\b", re.I),
+SECTION_RE = re.compile("|".join(f"(?:{pat})" for pat in SECTION_TITLES), re.I)
+
+OBLIGATION_PAT = re.compile(
+    r"\b(must|shall|required to)\b.*?"
+    r"(maintain|comply|keep|meet|not exceed|remain|stay)\b.*?"
+    r"(\b(leverage|interest|coverage|fixed\s*charge|debt\s*service|DSCR|"
+    r"current\s*ratio|quick\s*ratio|liquidity|cash|EBITDA|net\s*worth|"
+    r"minimum|maximum|cap|limit|covenant)\b).*?"
+    r"(\d+(\.\d+)?\s*(x|%|percent)|[\$€£]\s?\d{2,}(\.\d+)?|\bbelow\b|\babove\b|\bnot\s*exceed\b)",
+    re.I,
 )
 
-PERMISSION_PATTERNS: Sequence[re.Pattern[str]] = (
-    re.compile(r"\b(may|can|is permitted to|are allowed to)\b.*\b(borrow|incur|issue|draw|access)\b", re.I),
-    re.compile(r"\b(avail(able)?|availability)\b.*\b(facility|revolver|credit line)\b", re.I),
-    re.compile(r"\b(borrowing capacity|borrowing availability)\b", re.I),
+ASPIRATIONAL_PAT = re.compile(
+    r"(prudent|strong|adequate|appropriate|strategic|investment grade|"
+    r"financial flexibility)",
+    re.I,
+)
+
+PERMISSION_PAT = re.compile(
+    r"\b(may|permitted to|allowed to|subject to (lender|holder) consent|"
+    r"capacity to (borrow|incur))\b",
+    re.I,
+)
+
+THRESHOLD_PAT = re.compile(
+    r"(\d+(\.\d+)?\s*(x|%|percent)|[\$€£]\s?\d{2,}(\.\d+)?|\bbelow\b|\babove\b|\bnot\s*exceed\b)",
+    re.I,
 )
 
 NEG_LEVERAGE_CUES: Sequence[re.Pattern[str]] = (
@@ -67,6 +84,22 @@ LIQUIDITY_PATTERNS: Sequence[re.Pattern[str]] = (
     re.compile(r"\bcash (on hand|balance)\b", re.I),
     re.compile(r"\bavailability under\b", re.I),
 )
+
+INVESTMENT_GRADE = {
+    "AAPL",
+    "MSFT",
+    "JNJ",
+    "GOOGL",
+    "PG",
+    "WMT",
+    "KO",
+    "PEP",
+    "COST",
+    "HD",
+    "UNH",
+    "V",
+    "MA",
+}
 
 EXC_TERMS = ("unless", "except", "subject to", "provided that", "waiver", "amend", "amendment")
 HEAD_RE = re.compile(r"^\s*<[^>]+>\s*$")
@@ -256,16 +289,14 @@ def find_sections(lines: Iterable[str]) -> Dict[str, List[str]]:
         buffer = []
 
     for line in lines:
-        is_heading = (line.isupper() and len(line) < 140) or any(target in line.upper() for target in TARGET_SECTIONS)
-        if is_heading:
-            upper = line.upper()
-            matched = None
-            for candidate in TARGET_SECTIONS:
-                if candidate in upper:
-                    matched = candidate
-                    break
+        match = SECTION_RE.search(line)
+        is_heading = bool(match) or (line.isupper() and len(line) < 140)
+        if is_heading and match:
             flush()
-            current = matched
+            current = match.group(0).upper()
+        elif is_heading and current:
+            flush()
+            current = line.upper()
         else:
             if current:
                 buffer.append(line)
@@ -309,8 +340,10 @@ def extract_clauses(sections: Dict[str, List[str]]) -> List[Clause]:
     for sec, lines in sections.items():
         text = " ".join(lines)
         for sent in sentence_split(text):
-            is_obl = any(pat.search(sent) for pat in OBLIGATION_PATTERNS)
-            is_perm = any(pat.search(sent) for pat in PERMISSION_PATTERNS)
+            is_obl = bool(OBLIGATION_PAT.search(sent))
+            if is_obl and ASPIRATIONAL_PAT.search(sent):
+                is_obl = False
+            is_perm = bool(PERMISSION_PAT.search(sent))
             if not (is_obl or is_perm):
                 continue
             clauses.append(Clause(sent, sec, modality_scalar(sent), is_obl, is_perm))
@@ -432,6 +465,7 @@ def _fallback_conflict(dv: float, cue_meta: Dict[str, object], sent1: str, sent2
 class FilingScore:
     best_row: Optional[dict]
     evidence_rows: List[dict]
+    pair_count: int
 
 
 def score_filing(
@@ -442,12 +476,34 @@ def score_filing(
     api_base: str,
     as_of: dt.date,
     prev_meta: Optional[dict] = None,
+    prev_best: Optional[dict] = None,
 ) -> FilingScore:
     html = fetch_primary_doc(cik, filing["accession"], filing["primary"], ua)
     lines = strip_html_to_lines(html)
     sections = find_sections(lines)
+    section_keys = list(sections.keys())
     clauses = extract_clauses(sections)
     pairs = pairs_from_clauses(clauses)
+    print(
+        f"[extract] {ticker} {filing['form']} {filing['date']}: sections={len(section_keys)} lines={len(lines)} pairs={len(pairs)}"
+    )
+    if not pairs:
+        empty_row = {
+            "ticker": ticker,
+            "as_of": str(as_of),
+            "filing_date": str(filing["date"]),
+            "form": filing["form"],
+            "CCE": 0.0,
+            "cce_raw": 0.0,
+            "weight": 0.0,
+            "pair_count": 0,
+            "cce_level": 0.0,
+            "cce_delta": 0.0,
+            "no_evidence": True,
+            "notes": "No eligible covenants",
+        }
+        return FilingScore(best_row=empty_row, evidence_rows=[], pair_count=0)
+
     evidences: List[dict] = []
     best_row: Optional[dict] = None
 
@@ -478,7 +534,7 @@ def score_filing(
         try:
             metrics = cale_analyze(api_base, rule1, rule2)
         except Exception:
-            continue
+            metrics = {}
 
         cue_weight, cue_meta = _cue_score(clause_obl.sentence, clause_perm.sentence)
         C = float(metrics.get("conflict_intensity", 0.0))
@@ -516,12 +572,58 @@ def score_filing(
             "o_sentence": clause_obl.sentence,
             "p_sentence": clause_perm.sentence,
             "section": clause_obl.section,
+            "is_threshold": bool(THRESHOLD_PAT.search(clause_obl.sentence)),
         }
         evidences.append(row)
         if best_row is None or row["CCE"] > best_row["CCE"]:
             best_row = row
 
-    return FilingScore(best_row=best_row, evidence_rows=evidences)
+    pair_count = len(evidences)
+    if pair_count == 0:
+        empty_row = {
+            "ticker": ticker,
+            "as_of": str(as_of),
+            "filing_date": str(filing["date"]),
+            "form": filing["form"],
+            "CCE": 0.0,
+            "cce_raw": 0.0,
+            "weight": 0.0,
+            "pair_count": 0,
+            "cce_level": 0.0,
+            "cce_delta": 0.0,
+            "no_evidence": True,
+            "notes": "No eligible covenants",
+        }
+        return FilingScore(best_row=empty_row, evidence_rows=[], pair_count=0)
+
+    cce_level = max(row["CCE"] for row in evidences)
+    damping = 1.0
+    if ticker.upper() in INVESTMENT_GRADE and cce_level > 0.15:
+        damping = 0.3
+        cce_level = float(np.clip(cce_level * damping, 0.0, 1.0))
+        for row in evidences:
+            row["CCE"] = float(np.clip(row["CCE"] * damping, 0.0, 1.0))
+    if damping != 1.0:
+        best_row = max(evidences, key=lambda r: r["CCE"])
+    if best_row is None:
+        best_row = evidences[0]
+
+    prev_level = None
+    if prev_best is not None:
+        prev_level = float(prev_best.get("cce_level", prev_best.get("CCE", 0.0)) or 0.0)
+    cce_delta = cce_level - prev_level if prev_level is not None else 0.0
+
+    enriched_best = dict(best_row)
+    enriched_best.update(
+        {
+            "pair_count": pair_count,
+            "cce_level": float(cce_level),
+            "cce_delta": float(cce_delta),
+            "prev_cce_level": prev_level,
+        }
+    )
+
+    return FilingScore(best_row=enriched_best, evidence_rows=evidences, pair_count=pair_count)
 
 
 def extract_filing_features(
@@ -547,22 +649,29 @@ def extract_filing_features(
     prev_row: Optional[dict] = None
 
     if prev_meta is not None:
-        prev_score = score_filing(ticker, cik, prev_meta, ua, api_base, as_of, None)
+        prev_score = score_filing(ticker, cik, prev_meta, ua, api_base, as_of, None, None)
         prev_row = prev_score.best_row
 
-    score = score_filing(ticker, cik, latest, ua, api_base, as_of, prev_meta)
+    score = score_filing(ticker, cik, latest, ua, api_base, as_of, prev_meta, prev_row)
     best_row = score.best_row
 
     if best_row is None:
         return None, score.evidence_rows, prev_row
 
-    prev_cce = float(prev_row["CCE"]) if (prev_row is not None and "CCE" in prev_row) else None
-    if prev_cce is not None:
-        best_row["cce_delta"] = float(best_row["CCE"] - prev_cce)
-        best_row["prev_cce"] = prev_cce
-    else:
-        best_row["cce_delta"] = 0.0
-        best_row["prev_cce"] = None
+    if "pair_count" not in best_row:
+        best_row["pair_count"] = score.pair_count
+
+    if "cce_level" not in best_row:
+        best_row["cce_level"] = float(best_row.get("CCE", 0.0))
+
+    if "cce_delta" not in best_row:
+        prev_cce = float(prev_row.get("cce_level", prev_row.get("CCE", 0.0))) if prev_row else None
+        if prev_cce is not None:
+            best_row["cce_delta"] = float(best_row.get("cce_level", best_row.get("CCE", 0.0)) - prev_cce)
+            best_row["prev_cce_level"] = prev_cce
+        else:
+            best_row["cce_delta"] = 0.0
+            best_row["prev_cce_level"] = None
 
     best_row["prev_form"] = prev_meta.get("form") if prev_meta else None
     best_row["prev_filing_date"] = str(prev_meta.get("date")) if prev_meta else None
