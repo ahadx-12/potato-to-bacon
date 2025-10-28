@@ -1,5 +1,9 @@
-"""Finance-specific helpers for CALE."""
+"""Finance utilities for offline covenant extraction tests."""
 
-from .numeric import extract_numeric_covenants
-
-__all__ = ["extract_numeric_covenants"]
+__all__ = [
+    "authority",
+    "dedup",
+    "docio",
+    "sectionizer",
+    "tables",
+]

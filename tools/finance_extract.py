@@ -3,14 +3,17 @@
 
 from __future__ import annotations
 
+import argparse
+import collections
 import datetime as dt
 import hashlib
 import importlib
 import importlib.util
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Deque, Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 import requests
@@ -27,6 +30,9 @@ from tools.sec_fetch import (
     load_submissions,
     pick_last_10k_10q_before,
 )
+
+from potatobacon.cale.finance import authority, dedup, docio, sectionizer, tables
+from potatobacon.cale.finance.docio import Doc
 
 CFG_PATH = Path("configs/finance.yml")
 
@@ -594,3 +600,136 @@ def top_evidence_sentences(evidence_rows: Sequence[dict], limit: int = 3) -> Lis
             }
         )
     return out[:limit]
+
+
+# ---------------------------------------------------------------------------
+# Offline covenant pipeline used in tests
+# ---------------------------------------------------------------------------
+
+
+NUMERIC_RE = re.compile(r"\b\d+(?:\.\d+)?\b")
+NUMERIC_RANGE_RE = re.compile(r"\b\d+(?:\.\d+)?\s*(?:to|-)\s*\d+(?:\.\d+)?\b", re.I)
+COVENANT_WORDS = re.compile(
+    r"\b(covenant|leverage|coverage|ratio|restricted payments?|liens?|indebtedness|liquidity)\b",
+    re.I,
+)
+
+
+def extract_numeric_covenants(sentence: str) -> List[dict]:
+    """Return covenant candidates from *sentence*.
+
+    The function favours strings that include both numeric material and
+    covenant-style keywords. It returns lightweight dictionaries that the test
+    pipeline can enrich further.
+    """
+
+    text = sentence.strip()
+    if not text:
+        return []
+    if not COVENANT_WORDS.search(text):
+        return []
+    numbers = []
+    numbers.extend(NUMERIC_RANGE_RE.findall(text))
+    numbers.extend(NUMERIC_RE.findall(text))
+    if not numbers:
+        return []
+    return [{"sentence": text, "numbers": numbers}]
+
+
+def _iter_section_blocks(doc: Doc, section: sectionizer.Section) -> List[int]:
+    end = max(section.start_block, section.end_block)
+    return list(range(section.start_block, min(len(doc.blocks), end)))
+
+
+def run_local_pipeline(files: Sequence[str], baseline_pairs: int = 10) -> Dict[str, object]:
+    """Execute the offline pipeline for the supplied ``files``."""
+
+    docs = [docio.load_doc(path) for path in files]
+    dedup_cache: Set[str] = set()
+    dedup_order: Deque[str] = collections.deque()
+    evidence: List[dict] = []
+    table_records = 0
+    total_sections = 0
+    anchor_total = 0
+    anchor_resolved = 0
+
+    for doc in docs:
+        sections = sectionizer.find_sections(doc, CFG)
+        total_sections += len(sections)
+        for section in sections:
+            block_indices = _iter_section_blocks(doc, section)
+            range_anchor = authority.link_range(doc, section.start_block, section.end_block - 1)
+            default_anchor = section.anchor or range_anchor.get("anchor")
+            default_title = range_anchor.get("section_title") or section.title
+            for block_idx in block_indices:
+                block = doc.blocks[block_idx]
+                link_info = authority.link_block(doc, block_idx)
+                anchor_total += 1
+                if link_info.get("anchor"):
+                    anchor_resolved += 1
+                block_anchor = link_info.get("anchor") or default_anchor
+                block_title = link_info.get("section_title") or default_title
+                if block.kind == "table" and block.table:
+                    for sentence, cell_meta in tables.flatten(block):
+                        table_records += 1
+                        for result in extract_numeric_covenants(sentence):
+                            if dedup.is_duplicate(result["sentence"], dedup_cache, dedup_order):
+                                continue
+                            row = {
+                                "sentence": result["sentence"],
+                                "numbers": result["numbers"],
+                                "section_key": section.key,
+                                "section_title": block_title,
+                                "anchor": block_anchor,
+                                "doc_kind": section.doc_kind,
+                                "source_path": doc.src_path,
+                                "qualifiers": {"section": block_title},
+                                "table_cell_meta": cell_meta,
+                            }
+                            evidence.append(row)
+                else:
+                    text = block.text.strip()
+                    if not text:
+                        continue
+                    for result in extract_numeric_covenants(text):
+                        if dedup.is_duplicate(result["sentence"], dedup_cache, dedup_order):
+                            continue
+                        row = {
+                            "sentence": result["sentence"],
+                            "numbers": result["numbers"],
+                            "section_key": section.key,
+                            "section_title": block_title,
+                            "anchor": block_anchor,
+                            "doc_kind": section.doc_kind,
+                            "source_path": doc.src_path,
+                            "qualifiers": {"section": block_title},
+                        }
+                        evidence.append(row)
+
+    anchor_ratio = (anchor_resolved / anchor_total) if anchor_total else 1.0
+    summary = {
+        "sectionizer": {"pass": total_sections > 0, "count": total_sections},
+        "table_parsing": {"pass": table_records > 0, "records": table_records},
+        "authority_links": {"pass": anchor_ratio >= 0.95, "resolved": anchor_resolved, "total": anchor_total},
+        "numeric_pairs": len(evidence),
+        "baseline_pairs": baseline_pairs,
+        "evidence": evidence,
+    }
+    return summary
+
+
+def main(argv: Optional[Sequence[str]] = None, files: Optional[Sequence[str]] = None) -> Dict[str, object]:
+    """CLI entry-point used by tests to exercise the offline pipeline."""
+
+    if files is None:
+        parser = argparse.ArgumentParser(description="Offline finance extractor")
+        parser.add_argument("files", nargs="+", help="Local filing paths")
+        args = parser.parse_args(argv)
+        files = args.files
+    summary = run_local_pipeline(files)
+    print(json.dumps(summary, indent=2, sort_keys=True))
+    return summary
+
+
+if __name__ == "__main__":
+    main()
