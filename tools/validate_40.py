@@ -1,4 +1,4 @@
-import csv, json, subprocess, sys
+import csv, json, os, subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -10,6 +10,8 @@ EVENTS = Path("data/events/events.csv")
 CONTROLS = Path("data/events/controls.csv")
 REPORT_DIR = Path("reports/leverage_alpha")
 REPORT_DIR.mkdir(parents=True, exist_ok=True)
+
+SKIP_EVENT_STUDY = os.environ.get("CALE_SKIP_EVENT_STUDY") not in (None, "", "0", "false", "False")
 
 def _rows(path: Path):
     with path.open() as f:
@@ -26,6 +28,9 @@ def ensure_filings():
 
 def run_validation():
     # Assumes API is running locally OR your event scripts call the engine directly; if you need local API, start it before running this.
+    if SKIP_EVENT_STUDY:
+        print("[RUN] Skipping event studies (CALE_SKIP_EVENT_STUDY=1)")
+        return
     cmd1 = ["python","tools/event_study.py","--events-csv","data/events/events.csv","--controls-csv","data/events/controls.csv","--api-base","http://127.0.0.1:8000","--user-agent",UA_DEFAULT]
     cmd2 = ["python","tools/event_study_delta.py","--events-csv","data/events/events.csv","--controls-csv","data/events/controls.csv","--api-base","http://127.0.0.1:8000","--user-agent",UA_DEFAULT]
     print("[RUN]"," ".join(cmd1));  rc1 = subprocess.call(cmd1)
