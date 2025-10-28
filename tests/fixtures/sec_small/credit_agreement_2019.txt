@@ -1,0 +1,12 @@
+CREDIT AGREEMENT
+
+ARTICLE VI COVENANTS
+Borrower shall maintain liquidity of not less than $25,000,000.
+Section 6.02 Leverage Ratio. The Consolidated Leverage Ratio shall not exceed 4.00 to 1.00.
+
++----------+--------------+----------------+
+| Period   | Max Leverage | Min Liquidity  |
++----------+--------------+----------------+
+| Q3 2019  | 4.00x        | $30 million    |
+| Q4 2019  | 3.75x        | $32 million    |
++----------+--------------+----------------+

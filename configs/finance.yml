@@ -41,3 +41,31 @@ ablation:
 notes:
   # ΔCCE is current_filing_CCE - previous_filing_CCE for the same ticker.
   # If no previous filing found, set dCCE = 0 and mark has_prev = 0.
+sectionizer:
+  positive_keywords:
+    - "covenants?"
+    - "financial covenant"
+    - "negative covenant"
+    - "restricted payments?"
+    - "limitations? on indebtedness"
+    - "leverage"
+    - "interest coverage"
+  metric_keywords:
+    - "leverage"
+    - "coverage"
+    - "liquidity"
+    - "ratio"
+  negative_keywords:
+    - "risk factors?"
+    - "management discussion"
+    - "market risk"
+  window_sizes: [3, 8, 20]
+  weights:
+    header_match: 1.0
+    metric_density: 0.6
+    negative_penalty: 0.9
+    doc_kind_boost:
+      INDENTURE: 0.6
+      CREDIT_AGREEMENT: 0.6
+      default: 0.0
+  min_score: 0.9
