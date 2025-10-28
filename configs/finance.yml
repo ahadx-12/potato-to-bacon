@@ -36,7 +36,7 @@ ablation:
   max_iter: 2000       # GD iterations
   lr: 0.05             # learning rate
   seed: 42             # reproducibility
-  feature_set: ["C","Ab","Dv","B","dCCE","S","Dt"]
+  feature_set: ["CCE","dCCE","S","B"]
 
 notes:
   # ΔCCE is current_filing_CCE - previous_filing_CCE for the same ticker.

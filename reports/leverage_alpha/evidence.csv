@@ -1,0 +1,15 @@
+ticker,filing,sentence,cce_raw,cce_delta,weight
+BBBY,10-Q 2022-12-20,The Company MUST maintain a consolidated leverage ratio below 4.0x under its credit agreement.,0.17775000000000002,0.011027398724329202,0.315
+BBBY,10-Q 2022-12-20,Management MAY incur additional borrowings subject to lender consent unless the leverage ratio exceeds 4.25x.,0.17775000000000002,0.011027398724329202,0.315
+MPW,10-Q 2023-05-15,The borrower MUST maintain an interest coverage ratio above 3.0x across all secured loans.,0.38499999999999995,-0.015636506965249264,0.4692
+MPW,10-Q 2023-05-15,The borrower MAY incur secured debt subject to lender approval unless a default exists.,0.38499999999999995,-0.015636506965249264,0.4692
+UPST,10-Q 2023-07-20,The company MUST maintain a minimum unrestricted cash balance of $100 million.,0.24,0.12775984752036165,0.33705
+UPST,10-Q 2023-07-20,The company MAY borrow additional funds subject to covenant compliance unless the fixed charge coverage ratio falls below 1.5x.,0.24,0.12775984752036165,0.33705
+AAPL,10-Q 2023-02-28,The company MUST maintain prudent liquidity consistent with its investment grade rating.,0.020000000000000004,0.21205840314319552,1.2305000000000001
+AAPL,10-Q 2023-02-28,The company MAY issue notes for strategic investments in accordance with board-approved policies.,0.020000000000000004,0.21205840314319552,1.2305000000000001
+MSFT,10-Q 2023-04-20,The company MUST maintain strong cash flow generation to fund strategic investments.,0.0,-0.039755574297103025,1.1500000000000001
+MSFT,10-Q 2023-04-20,The company MAY issue notes within authorized limits.,0.0,-0.039755574297103025,1.1500000000000001
+JNJ,10-Q 2023-04-10,The company MUST maintain financial flexibility to pursue R&D investments.,0.0,0.04598779511777401,0.34500000000000003
+JNJ,10-Q 2023-04-10,The company MAY borrow under its revolving credit agreement subject to customary approvals.,0.0,0.04598779511777401,0.34500000000000003
+JNJ,10-Q 2023-04-10,"The company MUST comply with its credit agreements, which are not restrictive.",0.0,0.04598779511777401,1.1500000000000001
+JNJ,10-Q 2023-04-10,The company MAY borrow under its revolving credit agreement.,0.0,0.04598779511777401,1.1500000000000001
