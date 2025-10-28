@@ -1,0 +1,5 @@
+The Company shall maintain minimum liquidity of $350 million at all times.
+The Company shall not pay dividends in excess of $10 million per quarter.
+However, the foregoing shall not be required if the Company's liquidity shall fall below $300M.
+The Company must deliver monthly compliance certificates to the Agent.
+Notwithstanding the preceding sentence, no certificate is required if EBITDA is negative for two consecutive quarters.
