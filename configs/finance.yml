@@ -41,3 +41,45 @@ ablation:
 notes:
   # ΔCCE is current_filing_CCE - previous_filing_CCE for the same ticker.
   # If no previous filing found, set dCCE = 0 and mark has_prev = 0.
+
+metric_aliases:
+  total leverage: ["LEVERAGE", "TOTAL"]
+  total leverage ratio: ["LEVERAGE", "TOTAL"]
+  net leverage: ["LEVERAGE", "NET"]
+  secured leverage: ["LEVERAGE", "SECURED"]
+  first lien leverage: ["LEVERAGE", "FIRST_LIEN"]
+  first-lien leverage: ["LEVERAGE", "FIRST_LIEN"]
+  first lien net leverage: ["LEVERAGE", "FIRST_LIEN"]
+  first-lien net leverage: ["LEVERAGE", "FIRST_LIEN"]
+  senior secured leverage: ["LEVERAGE", "SENIOR_SECURED"]
+  senior secured net leverage: ["LEVERAGE", "SENIOR_SECURED"]
+  interest coverage: ["COVERAGE", "INTEREST"]
+  fixed charge coverage: ["COVERAGE", "FIXED_CHARGE"]
+  debt service coverage: ["COVERAGE", "DSCR"]
+  dscr: ["COVERAGE", "DSCR"]
+  minimum liquidity: ["LIQUIDITY_MIN", ""]
+  cash balance: ["LIQUIDITY_MIN", ""]
+  cash and cash equivalents: ["LIQUIDITY_MIN", ""]
+  capital expenditures: ["CAPEX_MAX", ""]
+  capex: ["CAPEX_MAX", ""]
+  investments: ["INVESTMENTS_MAX", ""]
+  restricted payments: ["RESTRICTED_PAYMENTS", ""]
+  dividends: ["RESTRICTED_PAYMENTS", "DIVIDENDS"]
+  tangible net worth: ["TANGIBLE_NET_WORTH", ""]
+  net working capital: ["NET_WORKING_CAPITAL", ""]
+  current ratio: ["CURRENT_RATIO", ""]
+  quick ratio: ["QUICK_RATIO", ""]
+  asset coverage: ["ASSET_COVERAGE", ""]
+  loan-to-value: ["LTV", ""]
+  loan to value: ["LTV", ""]
+  ltv: ["LTV", ""]
+
+qualifier_terms:
+  pro_forma: ["pro forma"]
+  ttm: ["trailing twelve months", "TTM"]
+  consolidated: ["consolidated"]
+  net: ["net"]
+  secured:
+    SENIOR: ["senior secured"]
+    FIRST_LIEN: ["first lien", "first-lien"]
+    SECURED: ["secured", "secured leverage"]

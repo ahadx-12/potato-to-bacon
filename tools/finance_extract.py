@@ -15,6 +15,12 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import requests
 
+try:
+    from potatobacon.cale.finance.numeric import extract_numeric_covenants
+except Exception:  # pragma: no cover - fallback when package not installed
+    def extract_numeric_covenants(_text: str) -> List[Dict[str, object]]:
+        return []
+
 from tools.sec_fetch import (
     TICKER_TO_CIK,
     ensure_filing_html,
@@ -428,8 +434,36 @@ def score_filing(
             "o_sentence": obligation,
             "p_sentence": permission,
             "section": "N/A",
-            "is_threshold": bool(THRESHOLD_PAT.search(obligation)),
+            "is_threshold": False,
         }
+
+        thresholds: List[Dict[str, object]] = []
+        try:
+            thresholds = extract_numeric_covenants(obligation)
+        except Exception:
+            thresholds = []
+
+        best_threshold: Optional[Dict[str, object]] = None
+        if thresholds:
+            thresholds_sorted = sorted(
+                thresholds,
+                key=lambda item: float(item.get("confidence", 0.0)),
+                reverse=True,
+            )
+            best_threshold = next(
+                (item for item in thresholds_sorted if float(item.get("confidence", 0.0)) >= 0.5),
+                None,
+            )
+
+        if best_threshold:
+            threshold_copy = dict(best_threshold)
+            qualifiers = dict(threshold_copy.get("qualifiers", {}) or {})
+            if row.get("section") and row["section"] != "N/A":
+                qualifiers.setdefault("section", row["section"])
+            threshold_copy["qualifiers"] = qualifiers
+            row["is_threshold"] = True
+            row["threshold"] = threshold_copy
+
         evidences.append(row)
         if best_row is None or row["CCE"] > best_row["CCE"]:
             best_row = row
