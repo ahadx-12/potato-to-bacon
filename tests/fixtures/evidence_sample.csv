@@ -1,0 +1,4 @@
+ticker,event_date,cce,full_text
+XYZ,2025-09-30,0.80,"The Company shall maintain minimum liquidity of $350 million at all times. However, the foregoing shall not be required if the Company's liquidity shall fall below $300M."
+ABC,2025-09-30,0.60,"The Company shall not pay dividends in excess of $10 million per quarter. Notwithstanding the preceding sentence, no certificate is required if EBITDA is negative for two consecutive quarters."
+DEF,2025-09-30,0.55,"Borrower will provide budgets to Lenders each January."
