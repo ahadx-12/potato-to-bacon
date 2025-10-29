@@ -29,6 +29,7 @@ dependencies = [
   "networkx>=3.2",
   "z3-solver==4.12.*",
   "scikit-learn>=1.4",
+  "pandas>=2.2,<3",
 ]
 [project.optional-dependencies]
 api = [

@@ -31,8 +31,22 @@ def run_validation():
     if SKIP_EVENT_STUDY:
         print("[RUN] Skipping event studies (CALE_SKIP_EVENT_STUDY=1)")
         return
-    cmd1 = ["python","tools/event_study.py","--events-csv","data/events/events.csv","--controls-csv","data/events/controls.csv","--api-base","http://127.0.0.1:8000","--user-agent",UA_DEFAULT]
-    cmd2 = ["python","tools/event_study_delta.py","--events-csv","data/events/events.csv","--controls-csv","data/events/controls.csv","--api-base","http://127.0.0.1:8000","--user-agent",UA_DEFAULT]
+    cmd1 = [
+        "python",
+        "tools/event_study.py",
+        "--events-csv",
+        "data/events/events.csv",
+        "--controls-csv",
+        "data/events/controls.csv",
+    ]
+    cmd2 = [
+        "python",
+        "tools/event_study_delta.py",
+        "--events-csv",
+        "data/events/events.csv",
+        "--controls-csv",
+        "data/events/controls.csv",
+    ]
     print("[RUN]"," ".join(cmd1));  rc1 = subprocess.call(cmd1)
     print("[RUN]"," ".join(cmd2));  rc2 = subprocess.call(cmd2)
     if rc1 or rc2: 
