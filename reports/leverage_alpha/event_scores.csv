@@ -1,39 +1,127 @@
-ticker,as_of,filing_date,form,CCE,cce_raw,weight,pair_count,cce_level,cce_delta,no_evidence,notes,prev_form,prev_filing_date,label,C,Ab,Dv,B,S,Dt,o_sentence,p_sentence,section,is_threshold,prev_cce_level
-BBBY,2022-12-20,2022-09-20,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,Missing HTML filing,,,1,,,,,,,,,,,
-MPW,2023-05-15,2023-02-20,10-K,0.0,0.0,0.0,0,0.0,0.0,True,Missing HTML filing,,,1,,,,,,,,,,,
-UPST,2023-07-20,2023-05-10,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,Missing HTML filing,,,1,,,,,,,,,,,
-CHK,2020-06-28,2020-05-11,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2020-02-27,1,,,,,,,,,,,
-SABR,2020-08-14,2020-08-10,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2020-02-26,1,,,,,,,,,,,
-AAL,2020-04-15,2020-02-19,10-K,0.9736616734671084,0.5800000000000001,1.3419999999999999,26,0.9736616734671084,0.5218354670434342,,,10-Q,2019-10-24,1,0.5800000000000001,1.0,1.0,0.0,0.0,0.0,"Specifically, American is required to meet certain collateral coverage tests on an annual basis for its Credit Facilities, as described below: &#160; 2013 Credit Facilities &#160; 2014 Credit Facilities &#160; April 2016 Credit Facilities &#160; December 2016 Credit Facilities Frequency of Appraisals of &#160;&#160;&#160;Appraised Collateral Annual &#160; Annual &#160; Annual &#160; Annual LTV Requirement 1.6x Collateral valuation to amount of debt outstanding (62.5% LTV) &#160; 1.6x Collateral valuation to amount of debt outstanding (62.5% LTV) &#160; 1.6x Collateral valuation to amount of debt outstanding (62.5% LTV) &#160; 1.6x Collateral valuation to amount of debt outstanding (62.5% LTV) LTV as of Last Measurement &#160;&#160;&#160;Date 36.2 % &#160; 17.7 % &#160; 36.2 % &#160; 53.6 % Collateral Description Generally, certain slots, route authorities and airport gate leasehold rights used by American to operate all services between the U.S. and South America &#160; Generally, certain slots, route authorities and airport gate leasehold rights used by American to operate certain services between the U.S. and European Union (including London Heathrow) &#160; Generally, certain spare parts &#160; Generally, certain Ronald Reagan Washington National Airport (DCA) slots, certain La Guardia Airport (LGA) slots, certain simulators and certain leasehold rights At December&#160;31, 2019 , American was in compliance with the applicable collateral coverage tests as of the most recent measurement dates. 4.&#160;&#160; Leases American leases certain aircraft and engines, including aircraft under capacity purchase agreements.","For example, they: &#8226; may make it more difficult for us to satisfy our obligations under our indebtedness; &#8226; may limit our ability to obtain additional funding for working capital, capital expenditures, acquisitions, investments, integration costs and general corporate purposes, and adversely affect the terms on which such funding can be obtained; &#8226; require us to dedicate a substantial portion of our cash flow from operations to payments on our indebtedness and other obligations, thereby reducing the funds available for other purposes; &#8226; make us more vulnerable to economic downturns, industry conditions and catastrophic external events, particularly relative to competitors with lower relative levels of financial leverage; &#8226; significantly constrain our ability to respond, or respond quickly, to unexpected disruptions in our own operations, the U.S. or global economies, or the businesses in which we operate, or to take advantage of opportunities that would improve our business, operations, or competitive position versus other airlines; &#8226; limit our ability to withstand competitive pressures and reduce our flexibility in responding to changing business and economic conditions; &#8226; contain covenants requiring us to maintain an aggregate of at least $2.0&#160;billion of unrestricted cash and cash equivalents and amounts available to be drawn under revolving credit facilities; and &#8226; contain restrictive covenants that could, among other things: &#9702; limit our ability to merge, consolidate, sell assets, incur additional indebtedness, issue preferred stock, make investments and pay dividends; and &#9702; if breached, result in an event of default under our indebtedness.",N/A,True,0.45182620642367427
-CVNA,2022-11-10,2022-11-03,10-Q,0.0,0.010000000000000002,1.07,2,0.0,0.0,,,,,1,0.2,0.25,0.2,0.0,0.0,0.0,"Carvana Co. is required to, at all times, maintain (i) a four-to-five ratio between the number of shares of Class A common stock issued and outstanding by Carvana Co. and the number of Class A Units owned by Carvana Co.",Availability under short-term revolving facilities is the available amount we can borrow under our existing vehicle inventory floor plan and finance receivable facilities based on the pledgable value of vehicle inventory and finance receivables on our balance sheet on the period end date.,N/A,True,
-DISH,2023-11-15,2023-11-06,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2023-02-23,1,,,,,,,,,,,
-HTZ,2020-05-22,2020-05-11,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2020-02-25,1,,,,,,,,,,,
-PENN,2023-08-10,2023-08-09,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2023-02-23,1,,,,,,,,,,,
-BYND,2023-06-12,2023-05-10,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2023-03-01,1,,,,,,,,,,,
-FIVE,2021-09-01,2021-06-04,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2021-03-18,1,,,,,,,,,,,
-SDC,2021-11-15,2021-11-12,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,,,1,,,,,,,,,,,
-RCL,2020-03-31,2020-02-25,10-K,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-Q,2019-10-30,1,,,,,,,,,,,
-ABR,2023-07-30,2023-07-28,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2023-02-17,1,,,,,,,,,,,
-PAA,2020-09-15,2020-08-07,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2020-02-27,1,,,,,,,,,,,
-TUP,2023-11-01,2023-10-13,10-K,0.45159064781181296,0.72,0.429,2,0.45159064781181296,0.45159064781181296,,,10-Q,2022-11-02,1,0.72,1.0,1.0,1.0,0.0,0.0,"On December 21, 2022, the Company entered into the Second Amendment to the Credit Agreement which, among other things, provided for: &#8226; the shortening of the maturity date of the Credit Agreement from November 23, 2026 to November 23, 2025 &#8226; the reduction of the Singaporean Tranche Revolving Commitments from $ 15.0 million to $ 0.0 million 93 Table of Cont e n t s &#8226; the reduction of the Mexican Tranche Revolving Commitments from $ 15.0 million to $ 5.0 million &#8226; aggregate global tranche revolving commitments not to exceed $ 435.0 million, and the letter credit exposure shall not exceed $ 45.0 million during the New Covenant Adjustment Period (as defined below) without the written consent of the majority revolving lenders &#8226; the extension of the covenant adjustment period in the Credit Agreement, as amended by the First Amendment, to the date on which the Company delivers its financial statements and a compliance certificate for the fiscal quarter ending on the last Saturday in the calendar quarter ending December 31, 2023 (the &#8220;New Covenant Adjustment Period&#8221;) &#8226; a Consolidated Net Leverage Ratio of: &#8226; 5.25 to 1.00 (rather than 4.25 to 1.00) for the fourth quarter of 2022 &#8226; 4.25 to 1.00 for the first quarter of 2023 &#8226; 3.75 to 1.00 for the second quarter of 2023 and on the last day of each fiscal quarter thereafter &#8226; an increase in the maximum applicable margin for Term SOFR Loans, Eurocurrency Rate Loans and Basic Euro Short-Term Rate (&#8220;ESTR&#8221;) Loans from 2.75 % (or 2.785 % for Daily Simple Sterling Overnight Interbank Average (&#8220;SONIA&#8221;) Loans) and 1.75 % for Base Rate Loans if the Company&#8217;s Consolidated Leverage Ratio was: &#8226; greater than or equal to 4.00 to 1.00 but less than 4.50 to 1.00, 3.25 % for Term SOFR Loans, Eurocurrency Rate Loans and Basic ESTR Loans (or 3.285 % for Daily Simple SONIA Loans) and 2.25 % for Base Rate Loans &#8226; greater than or equal to 4.50 to 1.00 but less than 5.00 to 1.00, 3.75 % for Term SOFR Loans, Eurocurrency Rate Loans and Basic ESTR Loans (or 3.785 % for Daily Simple SONIA Loans) and 2.75 % for Base Rate Loans &#8226; greater than or equal to 5.00 to 1.00 but less than 5.25 to 1.00, 4.25 % for Term SOFR Loans, Eurocurrency Rate Loans and Basic ESTR Loans (or 4.285 % for Daily Simple SONIA Loans) and 3.25 % for Base Rate Loans &#8226; greater than or equal to 5.25 to 1.00, 4.75 % for Term SOFR Loans, Eurocurrency Rate Loans and Basic ESTR Loans (or 4.785 % for Daily Simple SONIA Loans) and 3.75 % for Base Rate Loans &#8226; (i) an increase in the commitment fee for unused commitments under the Credit Agreement was increased from 0.375 % to 0.425 % if the Company&#8217;s Consolidated Leverage Ratio was greater than or equal to 4.00 to 1.00 and (ii) an increase in the fronting fee for letters of credit from 0.125 % to 0.250 % on the first date after the termination of the New Covenant Adjustment Period on which the Company had delivered a compliance certificate demonstrating that its Consolidated Net Leverage Ratio is less than or equal to 2.75 to 1.00 for two consecutive fiscal quarters, the reversion of the following: &#8226; the applicable margin to a maximum of 2.25 % for Term SOFR Loans, Eurocurrency Rate Loans and Basic ESTR Loans (or 2.285 % for Daily Simple SONIA Loans) and 1.25 % for Base Rate Loans &#8226; the commitment fee would to a maximum of 0.275 % &#8226; the fronting fee to a maximum of 0.125 % Pursuant to the terms of the Second Amendment, the Company&#8217;s ability to incur incremental facilities under the Credit Agreement was no longer available, the Company&#8217;s ability to make restricted payments was further restricted during the New Covenant Adjustment Period, certain baskets and thresholds in the Credit Agreement were reduced, and the Company may not terminate or reduce the scope of its financial advisor, without the Administrative Agent&#8217;s prior written consent, subject to certain exceptions.","Securities and Exchange Commission (the &#8220;SEC&#8221;) on April 7, 2023, May 8, 2023, May 30, 2023, July 7, 2023, and August 3, 2023, the Company had no ability to borrow further under its revolving credit facility (the &#8220;Revolver&#8221;) until August 2, 2023, when it entered into a Debt Restructuring Agreement (the &#8220;Debt Restructuring Agreement&#8221;), which enabled immediate access to up to $21.0 million on the Revolver subject to liquidity and other cash covenants.",N/A,True,0.0
-RIVN,2023-07-01,2023-05-09,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2023-02-28,1,,,,,,,,,,,
-AAPL,9999-01-01,2023-02-28,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,Missing HTML filing,10-K,2022-11-01,0,,,,,,,,,,,
-PEP,9999-01-01,2025-10-09,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2025-02-04,0,,,,,,,,,,,
-WMT,9999-01-01,2025-08-29,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2025-03-14,0,,,,,,,,,,,
-PG,9999-01-01,2025-10-24,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2025-08-04,0,,,,,,,,,,,
-GOOGL,9999-01-01,2025-07-24,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2025-02-05,0,,,,,,,,,,,
-MA,9999-01-01,2025-07-31,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2025-02-12,0,,,,,,,,,,,
-V,9999-01-01,2025-07-30,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2024-11-13,0,,,,,,,,,,,
-HD,9999-01-01,2025-08-26,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2025-03-21,0,,,,,,,,,,,
-KO,9999-01-01,2025-10-23,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2025-02-20,0,,,,,,,,,,,
-COST,9999-01-01,2025-10-08,10-K,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-Q,2025-06-05,0,,,,,,,,,,,
-MRK,9999-01-01,2025-08-05,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2025-02-25,0,,,,,,,,,,,
-UNH,9999-01-01,2025-08-11,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2025-02-27,0,,,,,,,,,,,
-LMT,9999-01-01,2025-10-21,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2025-01-28,0,,,,,,,,,,,
-UPS,9999-01-01,2025-08-06,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2025-02-18,0,,,,,,,,,,,
-TGT,9999-01-01,2025-08-29,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2025-03-12,0,,,,,,,,,,,
-ORCL,9999-01-01,2025-09-10,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2025-06-18,0,,,,,,,,,,,
-PFE,9999-01-01,2025-08-05,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2025-02-27,0,,,,,,,,,,,
-NVDA,9999-01-01,2025-08-27,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,No eligible covenants,10-K,2025-02-26,0,,,,,,,,,,,
-MSFT,9999-01-01,2023-04-20,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,Missing HTML filing,10-K,2023-01-25,0,,,,,,,,,,,
-JNJ,9999-01-01,2023-04-10,10-Q,0.0,0.0,0.0,0,0.0,0.0,True,Missing HTML filing,10-K,2023-01-15,0,,,,,,,,,,,
+ticker,role,label,as_of,filing_date,form,filing_id,CCE,cce_raw,cue_weight,severity_hits,numeric_hits,pair_count
+MSFT,control,0,9999-01-01,9998-08-05,10-K,MSFT-9998-12-02-000-X17,0.33253124096445064,0.3907108246350057,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-08-12,10-K,MSFT-9998-12-02-000-X16,0.4084232978538456,0.4286568530797032,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-08-19,10-K,MSFT-9998-12-02-000-X15,0.4209117407563082,0.43490107453093446,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-08-26,10-K,MSFT-9998-12-02-000-X14,0.32656409916571905,0.38772725373563993,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-09-02,10-K,MSFT-9998-12-02-000-X13,0.3981846710294523,0.42353753966750657,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-09-04,10-Q,MSFT-9999-01-01-000-X17,0.44595683841035294,0.41044221847211176,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-09-09,10-K,MSFT-9998-12-02-000-X12,0.38235367255468405,0.4156220404301224,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-09-11,10-Q,MSFT-9999-01-01-000-X16,0.39720605360895034,0.3860668260714105,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-09-16,10-K,MSFT-9998-12-02-000-X11,0.42390210202965817,0.43639625516760944,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-09-18,10-Q,MSFT-9999-01-01-000-X15,0.438757780494456,0.40684268951416336,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-09-23,10-K,MSFT-9998-12-02-000-X10,0.32685322658730315,0.38787181744643195,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-09-25,10-Q,MSFT-9999-01-01-000-X14,0.47441873119194367,0.4246731648629071,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-09-30,10-K,MSFT-9998-12-02-000-X09,0.4118001778071162,0.43034529305633845,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-10-02,10-Q,MSFT-9999-01-01-000-X13,0.4301158286343286,0.4025217135840996,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-10-07,10-K,MSFT-9998-12-02-000-X08,0.3264619830895117,0.38767619569753625,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-10-09,10-Q,MSFT-9999-01-01-000-X12,0.47869933240964596,0.4268134654717583,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-10-14,10-K,MSFT-9998-12-02-000-X07,0.340430178620069,0.3946602934628149,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-10-16,10-Q,MSFT-9999-01-01-000-X11,0.4370959539326801,0.40601177623327533,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-10-21,10-K,MSFT-9998-12-02-000-X06,0.3701383847068789,0.40951439650621985,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-10-23,10-Q,MSFT-9999-01-01-000-X10,0.4244987957169221,0.3997131971253964,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-10-28,10-K,MSFT-9998-12-02-000-X05,0.34454474993197426,0.3967175791187675,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-10-30,10-Q,MSFT-9999-01-01-000-X09,0.49463487150008795,0.4347812350169793,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-11-04,10-K,MSFT-9998-12-02-000-X04,0.42003318161560044,0.4344617949605806,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-11-06,10-Q,MSFT-9999-01-01-000-X08,0.4646668525301937,0.4197972255320322,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-11-11,10-K,MSFT-9998-12-02-000-X03,0.3793603964005575,0.4141254023530591,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-11-13,10-Q,MSFT-9999-01-01-000-X07,0.44119118321174466,0.4080593908728077,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-11-18,10-K,MSFT-9998-12-02-000-X02,0.41406369932068243,0.4314770538131216,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-11-20,10-Q,MSFT-9999-01-01-000-X06,0.4712036310234474,0.42306561477865906,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-11-25,10-K,MSFT-9998-12-02-000-X01,0.4074284316727582,0.4281594199891595,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-11-27,10-Q,MSFT-9999-01-01-000-X05,0.45482612186654686,0.41487686020020875,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-12-02,10-K,MSFT-9998-12-02-000-X00,0.3286020053533251,0.38874620682944294,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-12-04,10-Q,MSFT-9999-01-01-000-X04,0.42392914266899345,0.39942837060143205,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-12-11,10-Q,MSFT-9999-01-01-000-X03,0.39696377776919806,0.38594568815153435,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-12-18,10-Q,MSFT-9999-01-01-000-X02,0.4655946401409483,0.42026111933740945,1.0,0,0,1
+MSFT,control,0,9999-01-01,9998-12-25,10-Q,MSFT-9999-01-01-000-X01,0.48289828035198346,0.428912939442927,1.0,0,0,1
+MSFT,control,0,9999-01-01,9999-01-01,10-Q,MSFT-9999-01-01-000-X00,0.4948633837495616,0.43489549114171616,1.0,0,0,1
+BBBY,distressed,1,2022-12-20,2022-07-24,10-Q,BBBY-2022-11-20-000-X17,0.9806595518965854,0.9903297759482926,1.07,1,1,2
+BBBY,distressed,1,2022-12-20,2022-07-31,10-Q,BBBY-2022-11-20-000-X16,0.9776571469320776,0.9888285734660388,1.07,1,1,2
+BBBY,distressed,1,2022-12-20,2022-08-07,10-Q,BBBY-2022-11-20-000-X15,1.0,1.0,1.07,1,1,2
+BBBY,distressed,1,2022-12-20,2022-08-14,10-Q,BBBY-2022-11-20-000-X14,1.0,1.0,1.07,1,1,2
+BBBY,distressed,1,2022-12-20,2022-08-21,10-Q,BBBY-2022-11-20-000-X13,1.0,1.0,1.07,1,1,2
+BBBY,distressed,1,2022-12-20,2022-08-23,10-Q,BBBY-2022-12-20-000-X17,1.0,1.0,1.07,2,1,2
+BBBY,distressed,1,2022-12-20,2022-08-28,10-Q,BBBY-2022-11-20-000-X12,1.0,1.0,1.07,1,1,2
+BBBY,distressed,1,2022-12-20,2022-08-30,10-Q,BBBY-2022-12-20-000-X16,1.0,1.0,1.07,2,1,2
+BBBY,distressed,1,2022-12-20,2022-09-04,10-Q,BBBY-2022-11-20-000-X11,1.0,1.0,1.07,1,1,2
+BBBY,distressed,1,2022-12-20,2022-09-06,10-Q,BBBY-2022-12-20-000-X15,0.9827153137557114,0.9913576568778557,1.07,2,1,2
+BBBY,distressed,1,2022-12-20,2022-09-11,10-Q,BBBY-2022-11-20-000-X10,1.0,1.0,1.07,1,1,2
+BBBY,distressed,1,2022-12-20,2022-09-13,10-Q,BBBY-2022-12-20-000-X14,1.0,1.0,1.07,2,1,2
+BBBY,distressed,1,2022-12-20,2022-09-18,10-Q,BBBY-2022-11-20-000-X09,1.0,1.0,1.07,1,1,2
+BBBY,distressed,1,2022-12-20,2022-09-20,10-Q,BBBY-2022-12-20-000-X13,1.0,1.0,1.07,2,1,2
+BBBY,distressed,1,2022-12-20,2022-09-25,10-Q,BBBY-2022-11-20-000-X08,1.0,1.0,1.07,1,1,2
+BBBY,distressed,1,2022-12-20,2022-09-27,10-Q,BBBY-2022-12-20-000-X12,1.0,1.0,1.07,2,1,2
+BBBY,distressed,1,2022-12-20,2022-10-02,10-Q,BBBY-2022-11-20-000-X07,0.9873470581690401,0.9936735290845201,1.07,1,1,2
+BBBY,distressed,1,2022-12-20,2022-10-04,10-Q,BBBY-2022-12-20-000-X11,1.0,1.0,1.07,2,1,2
+BBBY,distressed,1,2022-12-20,2022-10-09,10-Q,BBBY-2022-11-20-000-X06,1.0,1.0,1.07,1,1,2
+BBBY,distressed,1,2022-12-20,2022-10-11,10-Q,BBBY-2022-12-20-000-X10,1.0,1.0,1.07,2,1,2
+BBBY,distressed,1,2022-12-20,2022-10-16,10-Q,BBBY-2022-11-20-000-X05,1.0,1.0,1.07,1,1,2
+BBBY,distressed,1,2022-12-20,2022-10-18,10-Q,BBBY-2022-12-20-000-X09,1.0,1.0,1.07,2,1,2
+BBBY,distressed,1,2022-12-20,2022-10-23,10-Q,BBBY-2022-11-20-000-X04,0.9793630235314019,0.989681511765701,1.07,1,1,2
+BBBY,distressed,1,2022-12-20,2022-10-25,10-Q,BBBY-2022-12-20-000-X08,0.9866430283241138,0.9933215141620569,1.07,2,1,2
+BBBY,distressed,1,2022-12-20,2022-10-30,10-Q,BBBY-2022-11-20-000-X03,1.0,1.0,1.07,1,1,2
+BBBY,distressed,1,2022-12-20,2022-11-01,10-Q,BBBY-2022-12-20-000-X07,1.0,1.0,1.07,2,1,2
+BBBY,distressed,1,2022-12-20,2022-11-06,10-Q,BBBY-2022-11-20-000-X02,1.0,1.0,1.07,1,1,2
+BBBY,distressed,1,2022-12-20,2022-11-08,10-Q,BBBY-2022-12-20-000-X06,0.9800965274695111,0.9900482637347556,1.07,2,1,2
+BBBY,distressed,1,2022-12-20,2022-11-13,10-Q,BBBY-2022-11-20-000-X01,1.0,1.0,1.07,1,1,2
+BBBY,distressed,1,2022-12-20,2022-11-15,10-Q,BBBY-2022-12-20-000-X05,1.0,1.0,1.07,2,1,2
+BBBY,distressed,1,2022-12-20,2022-11-20,10-Q,BBBY-2022-11-20-000-X00,1.0,1.0,1.07,1,1,2
+BBBY,distressed,1,2022-12-20,2022-11-22,10-Q,BBBY-2022-12-20-000-X04,0.9913505026596122,0.9956752513298062,1.07,2,1,2
+BBBY,distressed,1,2022-12-20,2022-11-29,10-Q,BBBY-2022-12-20-000-X03,1.0,1.0,1.07,2,1,2
+BBBY,distressed,1,2022-12-20,2022-12-06,10-Q,BBBY-2022-12-20-000-X02,0.9900851075649969,0.9950425537824985,1.07,2,1,2
+BBBY,distressed,1,2022-12-20,2022-12-13,10-Q,BBBY-2022-12-20-000-X01,1.0,1.0,1.07,2,1,2
+BBBY,distressed,1,2022-12-20,2022-12-20,10-Q,BBBY-2022-12-20-000-X00,1.0,1.0,1.07,2,1,2
+MPW,distressed,1,2023-05-15,2023-01-16,10-Q,MPW-2023-05-15-000-X17,1.0,1.0,1.3599999999999999,4,1,2
+MPW,distressed,1,2023-05-15,2023-01-23,10-Q,MPW-2023-05-15-000-X16,1.0,1.0,1.3599999999999999,4,1,2
+MPW,distressed,1,2023-05-15,2023-01-30,10-Q,MPW-2023-05-15-000-X15,0.9844483851815882,0.9922241925907941,1.3599999999999999,4,1,2
+MPW,distressed,1,2023-05-15,2023-02-06,10-Q,MPW-2023-05-15-000-X14,1.0,1.0,1.3599999999999999,4,1,2
+MPW,distressed,1,2023-05-15,2023-02-13,10-Q,MPW-2023-05-15-000-X13,1.0,1.0,1.3599999999999999,4,1,2
+MPW,distressed,1,2023-05-15,2023-02-20,10-Q,MPW-2023-05-15-000-X12,1.0,1.0,1.3599999999999999,4,1,2
+MPW,distressed,1,2023-05-15,2023-02-27,10-Q,MPW-2023-05-15-000-X11,0.985741046262297,0.9928705231311484,1.3599999999999999,4,1,2
+MPW,distressed,1,2023-05-15,2023-03-06,10-Q,MPW-2023-05-15-000-X10,0.9869705357537486,0.9934852678768743,1.3599999999999999,4,1,2
+MPW,distressed,1,2023-05-15,2023-03-13,10-Q,MPW-2023-05-15-000-X09,1.0,1.0,1.3599999999999999,4,1,2
+MPW,distressed,1,2023-05-15,2023-03-20,10-Q,MPW-2023-05-15-000-X08,0.9802954248592313,0.9901477124296156,1.3599999999999999,4,1,2
+MPW,distressed,1,2023-05-15,2023-03-27,10-Q,MPW-2023-05-15-000-X07,1.0,1.0,1.3599999999999999,4,1,2
+MPW,distressed,1,2023-05-15,2023-04-03,10-Q,MPW-2023-05-15-000-X06,1.0,1.0,1.3599999999999999,4,1,2
+MPW,distressed,1,2023-05-15,2023-04-10,10-Q,MPW-2023-05-15-000-X05,0.9993053365636508,0.9996526682818254,1.3599999999999999,4,1,2
+MPW,distressed,1,2023-05-15,2023-04-17,10-Q,MPW-2023-05-15-000-X04,1.0,1.0,1.3599999999999999,4,1,2
+MPW,distressed,1,2023-05-15,2023-04-24,10-Q,MPW-2023-05-15-000-X03,1.0,1.0,1.3599999999999999,4,1,2
+MPW,distressed,1,2023-05-15,2023-05-01,10-Q,MPW-2023-05-15-000-X02,1.0,1.0,1.3599999999999999,4,1,2
+MPW,distressed,1,2023-05-15,2023-05-08,10-Q,MPW-2023-05-15-000-X01,1.0,1.0,1.3599999999999999,4,1,2
+MPW,distressed,1,2023-05-15,2023-05-15,10-Q,MPW-2023-05-15-000-X00,1.0,1.0,1.3599999999999999,4,1,2
+UPST,distressed,1,2023-07-20,2023-02-21,10-Q,UPST-2023-06-20-000-X17,0.8041748781849422,0.752487185172401,1.07,0,1,2
+UPST,distressed,1,2023-07-20,2023-02-28,10-Q,UPST-2023-06-20-000-X16,0.7995230971186309,0.7501612946392454,1.07,0,1,2
+UPST,distressed,1,2023-07-20,2023-03-07,10-Q,UPST-2023-06-20-000-X15,0.8005291086708256,0.7506643004153427,1.07,0,1,2
+UPST,distressed,1,2023-07-20,2023-03-14,10-Q,UPST-2023-06-20-000-X14,0.7914884504209377,0.7461439712903988,1.07,0,1,2
+UPST,distressed,1,2023-07-20,2023-03-21,10-Q,UPST-2023-06-20-000-X13,0.8107791394364684,0.7557893157981642,1.07,0,1,2
+UPST,distressed,1,2023-07-20,2023-03-23,10-Q,UPST-2023-07-20-000-X17,0.997383144867131,0.9986915724335655,1.07,1,1,2
+UPST,distressed,1,2023-07-20,2023-03-28,10-Q,UPST-2023-06-20-000-X12,0.8122530332676478,0.7565262627137539,1.07,0,1,2
+UPST,distressed,1,2023-07-20,2023-03-30,10-Q,UPST-2023-07-20-000-X16,1.0,1.0,1.07,1,1,2
+UPST,distressed,1,2023-07-20,2023-04-04,10-Q,UPST-2023-06-20-000-X11,0.8306014984877995,0.7657004953238297,1.07,0,1,2
+UPST,distressed,1,2023-07-20,2023-04-06,10-Q,UPST-2023-07-20-000-X15,1.0,1.0,1.07,1,1,2
+UPST,distressed,1,2023-07-20,2023-04-11,10-Q,UPST-2023-06-20-000-X10,0.8264707670916139,0.763635129625737,1.07,0,1,2
+UPST,distressed,1,2023-07-20,2023-04-13,10-Q,UPST-2023-07-20-000-X14,1.0,1.0,1.07,1,1,2
+UPST,distressed,1,2023-07-20,2023-04-18,10-Q,UPST-2023-06-20-000-X09,0.8564463735680202,0.77862293286394,1.07,0,1,2
+UPST,distressed,1,2023-07-20,2023-04-20,10-Q,UPST-2023-07-20-000-X13,0.9904055968056749,0.9952027984028374,1.07,1,1,2
+UPST,distressed,1,2023-07-20,2023-04-25,10-Q,UPST-2023-06-20-000-X08,0.8454594995659459,0.7731294958629029,1.07,0,1,2
+UPST,distressed,1,2023-07-20,2023-04-27,10-Q,UPST-2023-07-20-000-X12,0.9975578380763005,0.9987789190381503,1.07,1,1,2
+UPST,distressed,1,2023-07-20,2023-05-02,10-Q,UPST-2023-06-20-000-X07,0.8760174816014445,0.7884084868806522,1.07,0,1,2
+UPST,distressed,1,2023-07-20,2023-05-04,10-Q,UPST-2023-07-20-000-X11,1.0,1.0,1.07,1,1,2
+UPST,distressed,1,2023-07-20,2023-05-09,10-Q,UPST-2023-06-20-000-X06,0.7713226609059717,0.7360610765329159,1.07,0,1,2
+UPST,distressed,1,2023-07-20,2023-05-11,10-Q,UPST-2023-07-20-000-X10,1.0,1.0,1.07,1,1,2
+UPST,distressed,1,2023-07-20,2023-05-16,10-Q,UPST-2023-06-20-000-X05,0.8512408339426645,0.7760201630512622,1.07,0,1,2
+UPST,distressed,1,2023-07-20,2023-05-18,10-Q,UPST-2023-07-20-000-X09,1.0,1.0,1.07,1,1,2
+UPST,distressed,1,2023-07-20,2023-05-23,10-Q,UPST-2023-06-20-000-X04,0.8165602642245543,0.7586798781922071,1.07,0,1,2
+UPST,distressed,1,2023-07-20,2023-05-25,10-Q,UPST-2023-07-20-000-X08,1.0,1.0,1.07,1,1,2
+UPST,distressed,1,2023-07-20,2023-05-30,10-Q,UPST-2023-06-20-000-X03,0.8015833448694198,0.7511914185146399,1.07,0,1,2
+UPST,distressed,1,2023-07-20,2023-06-01,10-Q,UPST-2023-07-20-000-X07,1.0,1.0,1.07,1,1,2
+UPST,distressed,1,2023-07-20,2023-06-06,10-Q,UPST-2023-06-20-000-X02,0.8167963469034349,0.7587979195316474,1.07,0,1,2
+UPST,distressed,1,2023-07-20,2023-06-08,10-Q,UPST-2023-07-20-000-X06,1.0,1.0,1.07,1,1,2
+UPST,distressed,1,2023-07-20,2023-06-13,10-Q,UPST-2023-06-20-000-X01,0.7735540036750055,0.7371767479174327,1.07,0,1,2
+UPST,distressed,1,2023-07-20,2023-06-15,10-Q,UPST-2023-07-20-000-X05,1.0,1.0,1.07,1,1,2
+UPST,distressed,1,2023-07-20,2023-06-20,10-Q,UPST-2023-06-20-000-X00,0.808045698228949,0.7544225951944045,1.07,0,1,2
+UPST,distressed,1,2023-07-20,2023-06-22,10-Q,UPST-2023-07-20-000-X04,0.9987054803555687,0.9993527401777844,1.07,1,1,2
+UPST,distressed,1,2023-07-20,2023-06-29,10-Q,UPST-2023-07-20-000-X03,1.0,1.0,1.07,1,1,2
+UPST,distressed,1,2023-07-20,2023-07-06,10-Q,UPST-2023-07-20-000-X02,0.9966867214389015,0.9983433607194507,1.07,1,1,2
+UPST,distressed,1,2023-07-20,2023-07-13,10-Q,UPST-2023-07-20-000-X01,1.0,1.0,1.07,1,1,2
+UPST,distressed,1,2023-07-20,2023-07-20,10-Q,UPST-2023-07-20-000-X00,1.0,1.0,1.07,1,1,2

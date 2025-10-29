@@ -1,51 +1,90 @@
-#!/usr/bin/env python3
-"""Lightweight repository audit to verify numeric covenant extraction wiring."""
+"""End-to-end repository audit for the offline CALE event study."""
 
 from __future__ import annotations
 
+import argparse
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import List
+import sys
+from typing import Dict
 
-from potatobacon.cale.finance.numeric import extract_numeric_covenants
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:  # pragma: no cover - defensive import path tweak
+    sys.path.insert(0, str(ROOT))
+
+import tools.event_study_core as core
+import tools.event_study_delta as event_study_delta
+
 
 REPORT_ROOT = Path("reports/audit")
 REPORT_ROOT.mkdir(parents=True, exist_ok=True)
-REPORT_DIR = REPORT_ROOT / datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-REPORT_DIR.mkdir(parents=True, exist_ok=True)
-REPORT_PATH = REPORT_DIR / "REPORT.json"
-
-SAMPLE_SENTENCES: List[str] = [
-    "Total leverage ratio shall not exceed 5.25x.",
-    "Restricted payments capped at the greater of (i) $100mm and (ii) 50% of Consolidated Net Income.",
-    "Minimum liquidity of $500 million maintained at all times.",
-]
 
 
-def run_finance_audit() -> dict:
-    """Run numeric extraction on sample obligations and summarize results."""
+def _format_float(value: float) -> str:
+    if value != value:  # NaN check
+        return "nan"
+    return f"{value:.3f}"
 
-    findings = []
-    for sent in SAMPLE_SENTENCES:
-        findings.extend(extract_numeric_covenants(sent))
-    numeric_pairs = sum(1 for item in findings if item.get("confidence", 0.0) >= 0.5)
-    status = "PASS" if numeric_pairs > 0 else "FAIL"
-    summary = {
-        "numeric_pairs": numeric_pairs,
-        "status": status,
-        "examples": findings,
-    }
-    return summary
+
+def _render_report(metrics: Dict[str, object], report_dir: Path) -> None:
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_md = report_dir / "REPORT.md"
+    baseline = metrics.get("baseline", {})
+    logistic = metrics.get("logistic", {})
+    density = metrics.get("evidence_density", {})
+    false_pos = metrics.get("false_positives_ig", {})
+    verdict = metrics.get("pass_fail", {}).get("verdict", "NOT_READY")
+
+    lines = ["# CALE Event Study Audit", "", f"Verdict: **{verdict}**", ""]
+    lines.append("## Metrics")
+    lines.append(f"- Baseline AUC: {_format_float(baseline.get('auc', float('nan')))}")
+    lines.append(f"- Logistic AUC: {_format_float(logistic.get('auc', float('nan')))}")
+    lines.append(f"- Baseline p-value: {_format_float(baseline.get('p_value', float('nan')))}")
+    fp_rate = false_pos.get("rate")
+    lines.append(f"- IG False-positive rate: {_format_float(fp_rate if fp_rate is not None else float('nan'))}")
+    lines.append(
+        "- Avg evidence pairs (distressed): "
+        f"{_format_float(density.get('avg_pairs_distressed', float('nan')))}"
+    )
+    lines.append(
+        "- Avg evidence pairs (control): "
+        f"{_format_float(density.get('avg_pairs_control', float('nan')))}"
+    )
+    lines.append(f"- Min pairs (distressed): {_format_float(density.get('min_pairs_distressed', float('nan')))}")
+    lines.append("")
+    lines.append("## Checklist")
+    for key in ("auc", "p_value", "fp_rate", "pair_density"):
+        status = "PASS" if metrics.get("pass_fail", {}).get(key, False) else "FAIL"
+        lines.append(f"- {key}: {status}")
+    lines.append("")
+    lines.append("Metrics payload saved to `reports/leverage_alpha/metrics.json`.")
+    report_md.write_text("\n".join(lines), encoding="utf-8")
+
+    (report_dir / "REPORT.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
 
 
 def main() -> None:
-    summary = run_finance_audit()
-    REPORT_PATH.write_text(json.dumps(summary, indent=2))
-    print(f"Numeric covenants: {summary['status']} (numeric_pairs={summary['numeric_pairs']})")
-    print("Checklist items 61-70: PASS")
-    print(f"Report written to {REPORT_PATH}")
+    parser = argparse.ArgumentParser(description=__doc__)
+    core.configure_cli(parser)
+    args = parser.parse_args()
+
+    if Path("reports/leverage_alpha/metrics.json").exists():
+        # Rebuild using supplied CLI to keep determinism.
+        metrics = core.run_event_study(args)
+    else:
+        metrics = core.run_event_study(args)
+
+    event_study_delta.run_delta(args)
+
+    report_dir = REPORT_ROOT / datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    _render_report(metrics, report_dir)
+
+    verdict = metrics.get("pass_fail", {}).get("verdict", "NOT_READY")
+    print(f"Executive summary: {verdict}")
+    print(f"Report written to {report_dir}")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - CLI entry point
     main()
+
