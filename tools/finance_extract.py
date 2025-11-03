@@ -11,12 +11,15 @@ import importlib
 import importlib.util
 import json
 import re
-from dataclasses import dataclass
+from collections import defaultdict
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Deque, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Deque, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 import requests
+
+from bs4 import BeautifulSoup
 
 try:
     from potatobacon.cale.finance.numeric import extract_numeric_covenants
@@ -32,13 +35,63 @@ from tools.sec_fetch import (
 )
 
 from potatobacon.cale.finance import authority, dedup, docio, sectionizer, tables
-from potatobacon.cale.finance.docio import Doc
+from potatobacon.cale.finance.docio import Doc, DocBlock
 
 CFG_PATH = Path("configs/finance.yml")
 
 # ---------------------------------------------------------------------------
 # Pattern banks & heuristics
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SectionContext:
+    """Metadata describing a detected finance-relevant section."""
+
+    key: str
+    title: str
+    canonical: str
+    weight_key: str
+    level: Optional[int] = None
+    path: Optional[str] = None
+    doc_kind: Optional[str] = None
+    anchor: Optional[str] = None
+    rank: Optional[int] = None
+    score: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class ExtractionPair:
+    """Container for an obligation/permission pair with section metadata."""
+
+    obligation: str
+    permission: str
+    section: Optional[SectionContext] = None
+    metadata: Dict[str, object] = field(default_factory=dict)
+
+    def __iter__(self) -> Iterable[str]:
+        return iter((self.obligation, self.permission))
+
+    def __getitem__(self, index: int) -> object:
+        if index == 0:
+            return self.obligation
+        if index == 1:
+            return self.permission
+        if index == 2:
+            return self.section
+        raise IndexError(index)
+
+
+@dataclass
+class SentenceInfo:
+    text: str
+    order: int
+    block_index: int
+    context: SectionContext
+    is_obligation: bool
+    is_permission: bool
+    has_coref: bool
+
 
 COVENANT_OBL = re.compile(
     r"\b(must|shall|required to)\b.*\b(maintain|comply|keep|meet|not exceed|remain(?:s)? (?:above|below))\b.*("
@@ -56,6 +109,13 @@ PERM_WEAK = re.compile(
     r"\b(may|permitted to|can)\b.*\b(borrow|incur (?:additional )?indebtedness|issue notes?|draw on (?:its )?credit (?:facility|facilities)|increase (?:its )?debt)\b",
     re.I,
 )
+
+PERM_RELIEF_VERB = re.compile(
+    r"\b(may|can|is permitted to)\b.*?(?:be\s+)?(waive(?:d)?|amend(?:ed)?|modif(?:y|ied)|forgiv(?:e|en)|consent(?:ed)? to)",
+    re.I,
+)
+
+RELIEF_OBJECT_RE = re.compile(r"\b(covenant|compliance|default|requirement)\b", re.I)
 
 ASPIRATIONAL = re.compile(
     r"\b(must|shall)\b.*\b(maintain|preserve|ensure|pursue|support|target|aim)\b.*\b(liquidity|cash flow|"
@@ -96,29 +156,338 @@ THRESHOLD_PAT = re.compile(
     re.I,
 )
 
+SENTENCE_SPLIT_RE = re.compile(r"(?<=[\.!?])\s+(?=[A-Z(])")
 
-def extract_pairs_from_html(html_text: str) -> List[Tuple[str, str]]:
-    """Return (obligation_sentence, permission_sentence) pairs using tightened heuristics."""
+HEADER_TAGS = ("h1", "h2", "h3", "h4", "h5", "h6")
+PARAGRAPH_TAGS = ("p", "li", "div")
+FINANCE_SECTION_KEYS: Set[str] = {
+    "CREDIT_AGREEMENT",
+    "INDENTURE_NOTES",
+    "LIQUIDITY",
+    "MDNA",
+    "NOTES_TO_FS",
+    "RISK_FACTORS",
+}
 
-    text = re.sub(r"<[^>]+>", " ", html_text)
+SEC_ITEM_RE = re.compile(r"item\s+(\d+[A-Z]?)", re.I)
+SEC_ITEM_CANONICAL = {
+    "1A": "RISK_FACTORS",
+    "2": "MDNA",
+    "7": "MDNA",
+    "7A": "RISK_FACTORS",
+    "8": "NOTES_TO_FS",
+}
+
+COREF_REF = re.compile(
+    r"\b(?:such|that|the foregoing) (?:covenant|obligation|restriction|requirement|provision)\b",
+    re.I,
+)
+
+SKIP_TAGS = {"script", "style", "nav", "footer", "header"}
+
+
+def _clean_text(text: str) -> str:
+    text = text.replace("\xa0", " ")
     text = re.sub(r"\s+", " ", text)
-    sentences = re.split(r"(?<=[\.!?])\s+(?=[A-Z(])", text)
-    obligations = [
-        sent
-        for sent in sentences
-        if COVENANT_OBL.search(sent) and not ASPIRATIONAL.search(sent)
-    ]
-    permissions = [
-        sent
-        for sent in sentences
-        if PERM_BYPASS.search(sent) or PERM_WEAK.search(sent)
-    ]
-    pairs: List[Tuple[str, str]] = []
-    for i, obligation in enumerate(obligations):
-        window_start = max(0, i - 3)
-        window_end = min(len(permissions), i + 4)
-        for perm in permissions[window_start:window_end]:
-            pairs.append((obligation, perm))
+    return text.strip()
+
+
+def _header_level_from_tag(tag: Optional[str]) -> Optional[int]:
+    if not tag:
+        return None
+    tag_lower = tag.lower()
+    if len(tag_lower) >= 2 and tag_lower[0] == "h" and tag_lower[1].isdigit():
+        try:
+            return int(tag_lower[1])
+        except ValueError:
+            return None
+    return None
+
+
+def _form_to_doc_kind(form: Optional[str]) -> str:
+    if not form:
+        return "OTHER"
+    upper = form.upper()
+    if "10-K" in upper:
+        return "10-K"
+    if "10-Q" in upper:
+        return "10-Q"
+    if "INDENTURE" in upper:
+        return "INDENTURE"
+    if "CREDIT" in upper or "LOAN" in upper:
+        return "CREDIT_AGREEMENT"
+    return "OTHER"
+
+
+def _canonicalize_section(title: str, doc_kind: str, path: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    candidates = [title]
+    if path and path not in candidates:
+        candidates.append(path)
+    for candidate in candidates:
+        upper = candidate.upper()
+        if "LIQUIDITY" in upper or "CAPITAL RESOURCES" in upper:
+            return "LIQUIDITY", "LIQUIDITY"
+        if ("MANAGEMENT" in upper and "DISCUSSION" in upper) or "MD&A" in upper:
+            return "MDNA", "MDNA"
+        if "RESULTS OF OPERATIONS" in upper or "FINANCIAL CONDITION" in upper:
+            return "MDNA", "MDNA"
+        if "RISK" in upper and "FACTOR" in upper:
+            return "RISK_FACTORS", "RISK_FACTORS"
+        if "NOTES" in upper and "FINANCIAL STATEMENT" in upper:
+            return "NOTES_TO_FS", "NOTES_TO_FS"
+        if "CREDIT" in upper and ("AGREEMENT" in upper or "FACILITY" in upper or "COVENANT" in upper):
+            return "CREDIT_AGREEMENT", "CREDIT_AGREEMENT"
+        if "INDENTURE" in upper:
+            return "INDENTURE_NOTES", "INDENTURE_NOTES"
+        if "DEBT" in upper and "COVENANT" in upper:
+            return "CREDIT_AGREEMENT", "CREDIT_AGREEMENT"
+    match = SEC_ITEM_RE.search(title.upper())
+    if not match and path:
+        match = SEC_ITEM_RE.search(path.upper())
+    if match:
+        canonical = SEC_ITEM_CANONICAL.get(match.group(1))
+        if canonical:
+            return canonical, canonical
+    if doc_kind in {"CREDIT_AGREEMENT", "INDENTURE"}:
+        return doc_kind, doc_kind
+    return None, None
+
+
+def _build_doc_from_html(html_text: str, form: Optional[str]) -> Doc:
+    soup = BeautifulSoup(html_text or "", "html.parser")
+    for tag in SKIP_TAGS:
+        for node in soup.find_all(tag):
+            node.decompose()
+    body = soup.body or soup
+    blocks: List[DocBlock] = []
+    header_stack: Dict[int, str] = {}
+
+    def current_path() -> Optional[str]:
+        if not header_stack:
+            return None
+        parts = [header_stack[level] for level in sorted(header_stack)]
+        return " > ".join(part for part in parts if part)
+
+    for element in body.find_all(list(HEADER_TAGS) + list(PARAGRAPH_TAGS), recursive=True):
+        if element.name in SKIP_TAGS:
+            continue
+        if element.name in HEADER_TAGS:
+            text = _clean_text(element.get_text(" ", strip=True))
+            if not text:
+                continue
+            level = _header_level_from_tag(element.name)
+            if level is not None:
+                for existing in list(header_stack.keys()):
+                    if existing >= level:
+                        header_stack.pop(existing, None)
+                header_stack[level] = text
+            path = current_path()
+            meta = {"html_tag": element.name}
+            if level is not None:
+                meta["level"] = level
+            if path:
+                meta["header_path"] = path
+            blocks.append(DocBlock("header", text=text, meta=meta))
+            continue
+        if element.find_parent("table") is not None:
+            continue
+        if element.name == "div" and element.find(list(HEADER_TAGS) + ["p", "li", "div"], recursive=False):
+            continue
+        if element.name == "li" and element.find("p"):
+            continue
+        text = _clean_text(element.get_text(" ", strip=True))
+        if not text:
+            continue
+        meta = {"html_tag": element.name}
+        path = current_path()
+        if path:
+            meta["header_path"] = path
+        if header_stack:
+            meta["level"] = max(header_stack)
+        blocks.append(DocBlock("paragraph", text=text, meta=meta))
+    doc_kind = _form_to_doc_kind(form)
+    return Doc(src_path="inline", doc_kind=doc_kind, blocks=blocks)
+
+
+def _assign_section_lookup(doc: Doc, sections: Sequence[sectionizer.Section]) -> Dict[int, SectionContext]:
+    lookup: Dict[int, SectionContext] = {}
+    rank = 0
+    for section in sections:
+        if section.start_block >= len(doc.blocks):
+            continue
+        header_block = doc.blocks[section.start_block]
+        path = header_block.meta.get("header_path") if isinstance(header_block.meta, dict) else None
+        level_meta = header_block.meta.get("level") if isinstance(header_block.meta, dict) else None
+        level = int(level_meta) if isinstance(level_meta, int) else None
+        if level is None:
+            level = _header_level_from_tag(header_block.meta.get("html_tag")) if isinstance(header_block.meta, dict) else None
+        canonical, weight_key = _canonicalize_section(section.title, doc.doc_kind, path)
+        if not canonical or canonical not in FINANCE_SECTION_KEYS:
+            continue
+        context = SectionContext(
+            key=section.key,
+            title=section.title,
+            canonical=canonical,
+            weight_key=weight_key or canonical,
+            level=level,
+            path=path or section.title,
+            doc_kind=doc.doc_kind,
+            anchor=section.anchor,
+            rank=rank,
+            score=section.score,
+        )
+        rank += 1
+        for idx in _iter_section_blocks(doc, section):
+            if idx >= len(doc.blocks):
+                break
+            block = doc.blocks[idx]
+            if block.kind != "paragraph":
+                continue
+            existing = lookup.get(idx)
+            if existing is None or (existing.score or -1.0) < (section.score or 0.0):
+                lookup[idx] = context
+    return lookup
+
+
+def _split_sentences(text: str) -> List[str]:
+    text = text.strip()
+    if not text:
+        return []
+    parts = SENTENCE_SPLIT_RE.split(text)
+    if len(parts) == 1:
+        return [parts[0].strip()] if parts[0].strip() else []
+    return [part.strip() for part in parts if part.strip()]
+
+
+def _fallback_section_lookup(doc: Doc) -> Dict[int, SectionContext]:
+    lookup: Dict[int, SectionContext] = {}
+    contexts: Dict[str, SectionContext] = {}
+    rank = 0
+    for idx, block in enumerate(doc.blocks):
+        if block.kind != "paragraph":
+            continue
+        meta = block.meta if isinstance(block.meta, dict) else {}
+        path = meta.get("header_path") or block.text
+        canonical, weight_key = _canonicalize_section(path, doc.doc_kind, path)
+        if not canonical or canonical not in FINANCE_SECTION_KEYS:
+            continue
+        key = f"{canonical}:{path}" if path else canonical
+        context = contexts.get(key)
+        if context is None:
+            level_meta = meta.get("level")
+            level = int(level_meta) if isinstance(level_meta, int) else None
+            context = SectionContext(
+                key=f"fallback-{rank}",
+                title=path,
+                canonical=canonical,
+                weight_key=weight_key or canonical,
+                level=level,
+                path=path,
+                doc_kind=doc.doc_kind,
+                anchor=None,
+                rank=rank,
+                score=None,
+            )
+            contexts[key] = context
+            rank += 1
+        lookup[idx] = context
+    return lookup
+
+
+def extract_pairs_from_html(html_text: str, form: Optional[str] = None) -> List[ExtractionPair]:
+    """Return obligation/permission pairs restricted to finance sections."""
+
+    doc = _build_doc_from_html(html_text, form)
+    sections = sectionizer.find_sections(doc, CFG)
+    section_lookup = _assign_section_lookup(doc, sections)
+    if not section_lookup:
+        section_lookup = _fallback_section_lookup(doc)
+    if not section_lookup:
+        return []
+
+    sentences: List[SentenceInfo] = []
+    order = 0
+    for idx, block in enumerate(doc.blocks):
+        context = section_lookup.get(idx)
+        if context is None or block.kind != "paragraph":
+            continue
+        for sentence in _split_sentences(block.text):
+            if not sentence:
+                continue
+            is_obligation = bool(COVENANT_OBL.search(sentence)) and not ASPIRATIONAL.search(sentence)
+            has_relief = bool(
+                PERM_RELIEF_VERB.search(sentence)
+                and RELIEF_OBJECT_RE.search(sentence)
+            )
+            is_permission = bool(
+                PERM_BYPASS.search(sentence)
+                or PERM_WEAK.search(sentence)
+                or has_relief
+            )
+            has_coref = bool(COREF_REF.search(sentence))
+            sentences.append(
+                SentenceInfo(
+                    text=sentence,
+                    order=order,
+                    block_index=idx,
+                    context=context,
+                    is_obligation=is_obligation,
+                    is_permission=is_permission,
+                    has_coref=has_coref,
+                )
+            )
+            order += 1
+
+    if not sentences:
+        return []
+
+    obligations_by_section: Dict[str, List[SentenceInfo]] = defaultdict(list)
+    permissions_by_section: Dict[str, List[SentenceInfo]] = defaultdict(list)
+    for info in sentences:
+        if info.is_obligation:
+            obligations_by_section[info.context.key].append(info)
+        if info.is_permission:
+            permissions_by_section[info.context.key].append(info)
+
+    pairs: List[ExtractionPair] = []
+    seen: Set[Tuple[str, str, str]] = set()
+    for section_key, perms in permissions_by_section.items():
+        obligations = obligations_by_section.get(section_key, [])
+        if not obligations:
+            continue
+        obligations_sorted = sorted(obligations, key=lambda item: item.order)
+        for perm in sorted(perms, key=lambda item: item.order):
+            candidate_obligations: List[SentenceInfo] = []
+            if perm.has_coref:
+                for obligation in reversed([item for item in obligations_sorted if item.order < perm.order]):
+                    candidate_obligations.append(obligation)
+                    break
+            if not candidate_obligations:
+                candidate_obligations = [
+                    obligation
+                    for obligation in obligations_sorted
+                    if abs(perm.order - obligation.order) <= 5
+                ]
+            if not candidate_obligations:
+                continue
+            for obligation in candidate_obligations[:4]:
+                pair_key = (obligation.text, perm.text, section_key)
+                if pair_key in seen:
+                    continue
+                seen.add(pair_key)
+                metadata = {
+                    "section_key": section_key,
+                    "clause_linked": perm.has_coref and obligation.order <= perm.order,
+                    "order_distance": perm.order - obligation.order,
+                }
+                pairs.append(
+                    ExtractionPair(
+                        obligation=obligation.text,
+                        permission=perm.text,
+                        section=obligation.context,
+                        metadata=metadata,
+                    )
+                )
     return pairs
 
 
@@ -198,7 +567,12 @@ def _cue_score(sent1: str, sent2: str) -> Tuple[float, Dict[str, object]]:
     }
 
 
-def _temporal_weight(form: str, prev_form: Optional[str], delta_days: Optional[int]) -> float:
+def _temporal_weight(
+    form: str,
+    prev_form: Optional[str],
+    delta_days: Optional[int],
+    section: Optional[SectionContext] = None,
+) -> float:
     weight = 1.0
     if prev_form and form != prev_form:
         weight += 0.05
@@ -209,11 +583,29 @@ def _temporal_weight(form: str, prev_form: Optional[str], delta_days: Optional[i
             weight += 0.05
         elif delta_days >= 270:
             weight -= 0.05
+    if section is not None:
+        if section.canonical in {"LIQUIDITY", "CREDIT_AGREEMENT"}:
+            weight += 0.05
+        elif section.canonical == "RISK_FACTORS":
+            weight -= 0.03
+        if section.rank is not None:
+            weight += max(0.0, 0.04 - 0.01 * min(section.rank, 4))
+        if section.level is not None:
+            if section.level <= 2:
+                weight += 0.05
+            elif section.level >= 5:
+                weight -= 0.04
     return max(0.1, weight)
 
 
-def _authority_balance(context: Optional[str]) -> float:
+def _authority_balance(context: Optional[str], section: Optional[SectionContext] = None) -> float:
     base_weight = 0.5
+    keys_to_consider: List[Optional[str]] = []
+    if section is not None:
+        keys_to_consider.extend([section.weight_key, section.canonical, section.doc_kind])
+    for key in keys_to_consider:
+        if key and key in AUTHORITY_WEIGHTS:
+            base_weight = max(base_weight, AUTHORITY_WEIGHTS[key])
     context_upper = (context or "").upper()
     mapping = [
         ("CREDIT", "CREDIT_AGREEMENT"),
@@ -226,9 +618,19 @@ def _authority_balance(context: Optional[str]) -> float:
         ("INDENTURE", "INDENTURE_NOTES"),
     ]
     for needle, key in mapping:
-        if needle in context_upper:
-            base_weight = AUTHORITY_WEIGHTS.get(key, base_weight)
+        if needle in context_upper and key in AUTHORITY_WEIGHTS:
+            base_weight = max(base_weight, AUTHORITY_WEIGHTS.get(key, base_weight))
             break
+    if section is not None:
+        if section.level is not None:
+            if section.level <= 2:
+                base_weight += 0.1
+            elif section.level >= 5:
+                base_weight -= 0.05
+        if section.rank is not None:
+            base_weight += max(0.0, 0.05 - 0.01 * min(section.rank, 5))
+        if section.canonical == "RISK_FACTORS":
+            base_weight -= 0.05
     max_w = AUTHORITY_MAX if AUTHORITY_MAX > 0 else 1.0
     return float(np.clip(base_weight / max_w, 0.1, 1.0))
 
@@ -350,7 +752,7 @@ def score_filing(
         }
         return FilingScore(best_row=empty_row, evidence_rows=[], pair_count=0)
 
-    pairs = extract_pairs_from_html(html)
+    pairs = extract_pairs_from_html(html, filing.get("form"))
     print(
         f"[extract] {ticker} {filing.get('form')} {filing.get('date')}: pairs={len(pairs)}"
     )
@@ -382,7 +784,10 @@ def score_filing(
         if isinstance(prev_date, dt.date):
             delta_days = (filing["date"] - prev_date).days
 
-    for obligation, permission in pairs[:60]:
+    for pair in pairs[:60]:
+        obligation = pair.obligation
+        permission = pair.permission
+        section = pair.section
         dv = compute_dv(obligation, permission)
         rule1 = {
             "text": obligation,
@@ -411,11 +816,17 @@ def score_filing(
         if C <= 0.0:
             C = _fallback_conflict(dv, cue_meta, obligation, permission)
         if Ab <= 0.0:
-            Ab = _authority_balance(f"{obligation} {permission}")
+            Ab = _authority_balance(f"{obligation} {permission}", section)
         cce_raw = float(np.clip(C * Ab * dv, 0.0, 1.0))
 
-        temporal_weight = _temporal_weight(filing["form"], prev_form, delta_days)
-        bypass = 1 if PERM_BYPASS.search(permission) else 0
+        temporal_weight = _temporal_weight(filing["form"], prev_form, delta_days, section)
+        bypass = 1 if (
+            PERM_BYPASS.search(permission)
+            or (
+                PERM_RELIEF_VERB.search(permission)
+                and RELIEF_OBJECT_RE.search(permission)
+            )
+        ) else 0
         bypass_weight = 0.3 if bypass else 1.0
         combo_weight = float(np.clip(cue_weight * temporal_weight * bypass_weight, 0.1, 3.0))
         jitter_seed = (obligation + "||" + permission).encode("utf-8")
@@ -439,7 +850,10 @@ def score_filing(
             "cue_meta": cue_meta,
             "o_sentence": obligation,
             "p_sentence": permission,
-            "section": "N/A",
+            "section": section.canonical if section else "N/A",
+            "section_title": section.title if section else None,
+            "section_path": section.path if section else None,
+            "section_rank": section.rank if section else None,
             "is_threshold": False,
         }
 
@@ -469,6 +883,8 @@ def score_filing(
             threshold_copy["qualifiers"] = qualifiers
             row["is_threshold"] = True
             row["threshold"] = threshold_copy
+        if pair.metadata:
+            row["pair_meta"] = pair.metadata
 
         evidences.append(row)
         if best_row is None or row["CCE"] > best_row["CCE"]:

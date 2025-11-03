@@ -380,11 +380,11 @@ def collect_filing_records(
                 html = path.read_text(encoding="utf-8", errors="ignore")
             except Exception:
                 continue
-            pairs = fx.extract_pairs_from_html(html)
+            form = _parse_form_from_name(path)
+            pairs = fx.extract_pairs_from_html(html, form)
             if not pairs:
                 continue
             filing_date = _parse_filing_date(as_of, base_index)
-            form = _parse_form_from_name(path)
             base_filing_id = _make_filing_id(ticker, filing_date, 0)
             filings_to_emit = clones_per_base
             for clone_idx in range(filings_to_emit):
@@ -398,17 +398,11 @@ def collect_filing_records(
                 best_conf = 0.0
                 best_bypass = 0.0
                 evidence_rows: List[FilingEvidence] = []
-                for obligation, permission in pairs:
-                    (
-                        score,
-                        raw_score,
-                        cue_weight,
-                        severity_hits,
-                        numeric_hits,
-                        numeric_strength,
-                        numeric_conf,
-                        bypass_proximity,
-                    ) = _compute_pair_score(obligation, permission, clone_rng)
+                for pair in pairs:
+                    obligation, permission = pair.obligation, pair.permission
+                    score, raw_score, cue_weight, severity_hits, numeric_hits = _compute_pair_score(
+                        obligation, permission, clone_rng
+                    )
                     filing_id = _make_filing_id(ticker, filing_date, clone_idx)
                     evidence_rows.append(
                         FilingEvidence(
