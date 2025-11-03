@@ -10,6 +10,7 @@ import platform
 import random
 import subprocess
 import sys
+import statistics
 from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -109,9 +110,21 @@ def _build_records(rows: Sequence[Dict[str, str]]) -> Tuple[List[esc.FilingRecor
         best_cue = 1.0
         best_sev = 0
         best_num = 0
+        best_strength = 0.0
+        best_conf = 0.0
+        best_bypass = 0.0
         evidence_rows: List[esc.FilingEvidence] = []
         for obligation, permission in pairs:
-            score, raw, cue, sev_hits, num_hits = esc._compute_pair_score(obligation, permission, rng)
+            (
+                score,
+                raw,
+                cue,
+                sev_hits,
+                num_hits,
+                numeric_strength,
+                numeric_conf,
+                bypass_proximity,
+            ) = esc._compute_pair_score(obligation, permission, rng)
             evidence = esc.FilingEvidence(
                 ticker=ticker,
                 filing_id=filing_id,
@@ -124,6 +137,9 @@ def _build_records(rows: Sequence[Dict[str, str]]) -> Tuple[List[esc.FilingRecor
                 cue_weight=cue,
                 severity_hits=sev_hits,
                 numeric_hits=num_hits,
+                numeric_strength=numeric_strength,
+                numeric_confidence=numeric_conf,
+                bypass_proximity=bypass_proximity,
             )
             evidence_rows.append(evidence)
             if score > best_score:
@@ -132,6 +148,9 @@ def _build_records(rows: Sequence[Dict[str, str]]) -> Tuple[List[esc.FilingRecor
                 best_cue = cue
                 best_sev = sev_hits
                 best_num = num_hits
+                best_strength = numeric_strength
+                best_conf = numeric_conf
+                best_bypass = bypass_proximity
         if not evidence_rows:
             continue
         record = esc.FilingRecord(
@@ -147,6 +166,9 @@ def _build_records(rows: Sequence[Dict[str, str]]) -> Tuple[List[esc.FilingRecor
             cue_weight=best_cue,
             severity_hits=best_sev,
             numeric_hits=best_num,
+            numeric_strength=best_strength,
+            numeric_confidence=best_conf,
+            bypass_proximity=best_bypass,
             pair_count=len(evidence_rows),
             evidence_rows=evidence_rows,
         )
@@ -165,15 +187,18 @@ def _write_evidence_csv(evidences: Sequence[esc.FilingEvidence]) -> None:
             "section",
             "pair",
             "cce",
-            "numeric_conf",
-            "authority",
+            "numeric_count",
+            "numeric_mean_norm",
+            "numeric_confidence",
+            "bypass_proximity",
             "has_bypass",
+            "authority",
             "snippet",
         ])
         for ev in evidences:
             pair = f"{ev.obligation} || {ev.permission}"
             snippet = pair.replace("\n", " ")[:600]
-            has_bypass = "yes" if "may" in ev.permission.lower() else "no"
+            has_bypass = "yes" if ev.bypass_proximity > 0 else "no"
             writer.writerow(
                 [
                     ev.ticker,
@@ -182,8 +207,11 @@ def _write_evidence_csv(evidences: Sequence[esc.FilingEvidence]) -> None:
                     pair[:200],
                     f"{ev.score:.3f}",
                     ev.numeric_hits,
-                    "n/a",
+                    f"{ev.numeric_strength:.3f}",
+                    f"{ev.numeric_confidence:.3f}",
+                    f"{ev.bypass_proximity:.3f}",
                     has_bypass,
+                    "n/a",
                     snippet,
                 ]
             )
@@ -325,6 +353,19 @@ def main() -> int:
         print(f"- Average evidence pairs per filing: {avg_pairs:.2f}")
     else:
         print("- Average evidence pairs per filing: n/a")
+
+    def _average_threshold(records: Sequence[esc.FilingRecord]) -> float:
+        values = [rec.numeric_strength for rec in records if rec.numeric_strength > 0]
+        if not values:
+            return 0.0
+        return float(statistics.fmean(values))
+
+    avg_dist_threshold = _average_threshold(distressed_records)
+    avg_ctrl_threshold = _average_threshold(control_records)
+    print(
+        "- Avg normalized numeric threshold (millions / ratio mix): "
+        f"distressed={avg_dist_threshold:.2f}, control={avg_ctrl_threshold:.2f}"
+    )
 
     print("\n### Baseline synthetic diagnostic (for comparison)")
     print(json.dumps(baseline_payload, indent=2, sort_keys=True))
