@@ -12,3 +12,6 @@ htmlcov/
 artifacts/
 data/sec/edgar/
 data/sec/submissions/
+data/sec_real/
+reports/realworld/
+src/potatobacon.egg-info/
