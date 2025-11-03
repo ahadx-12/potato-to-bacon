@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import os
 import platform
 import random
@@ -25,6 +26,36 @@ import tools.event_study_core as esc
 
 MANIFEST = Path("reports/realworld/manifest.csv")
 EVIDENCE = Path("reports/realworld/evidence.csv")
+RUNS_DIR = Path("reports/realworld/runs")
+HISTORY_CSV = Path("reports/realworld/history.csv")
+
+SUMMARY_FIELDS = [
+    "run_id",
+    "timestamp",
+    "git_sha",
+    "distressed_filings",
+    "control_filings",
+    "records_total",
+    "baseline_auc",
+    "baseline_auc_ci_low",
+    "baseline_auc_ci_high",
+    "logistic_auc",
+    "logistic_auc_ci_low",
+    "logistic_auc_ci_high",
+    "delta_auc",
+    "welch_p_value",
+    "welch_p_ci_low",
+    "welch_p_ci_high",
+    "ig_fp_rate",
+    "ig_fp_count",
+    "ig_fp_total",
+    "avg_pairs_distressed",
+    "avg_pairs_control",
+    "avg_pairs_overall",
+    "baseline_bootstrap_samples",
+    "logistic_bootstrap_samples",
+    "pvalue_bootstrap_samples",
+]
 
 DISTRESSED_SET = {ticker.upper() for ticker in DISTRESSED}
 CONTROL_SET = {ticker.upper() for ticker in CONTROL}
@@ -189,6 +220,109 @@ def _write_evidence_csv(evidences: Sequence[esc.FilingEvidence]) -> None:
             )
 
 
+def _coerce_ci(values: object) -> Tuple[float, float]:
+    if isinstance(values, (list, tuple)) and len(values) == 2:
+        try:
+            return float(values[0]), float(values[1])
+        except (TypeError, ValueError):
+            return float("nan"), float("nan")
+    return float("nan"), float("nan")
+
+
+def _append_history_row(row: Dict[str, object]) -> None:
+    HISTORY_CSV.parent.mkdir(parents=True, exist_ok=True)
+    file_exists = HISTORY_CSV.exists()
+    with HISTORY_CSV.open("a", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=SUMMARY_FIELDS)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow({key: row.get(key, "") for key in SUMMARY_FIELDS})
+
+
+def _persist_metrics(
+    *,
+    run_id: str,
+    timestamp: str,
+    git_sha: str,
+    metrics: Dict[str, object],
+    density: Dict[str, object],
+    fp_rates: Dict[str, object],
+    manifest_rows: Sequence[Dict[str, str]],
+    distressed_count: int,
+    control_count: int,
+    records_total: int,
+    avg_pairs_overall: float,
+) -> Dict[str, object]:
+    baseline = metrics.get("baseline", {}) if isinstance(metrics, dict) else {}
+    logistic = metrics.get("logistic", {}) if isinstance(metrics, dict) else {}
+    delta = metrics.get("delta", {}) if isinstance(metrics, dict) else {}
+
+    baseline_ci_low, baseline_ci_high = _coerce_ci(baseline.get("auc_ci"))
+    logistic_ci_low, logistic_ci_high = _coerce_ci(logistic.get("auc_ci"))
+    p_ci_low, p_ci_high = _coerce_ci(baseline.get("p_value_ci"))
+    bootstrap_counts = baseline.get("bootstrap_samples", {}) if isinstance(baseline.get("bootstrap_samples"), dict) else {}
+
+    summary_row: Dict[str, object] = {
+        "run_id": run_id,
+        "timestamp": timestamp,
+        "git_sha": git_sha,
+        "distressed_filings": distressed_count,
+        "control_filings": control_count,
+        "records_total": records_total,
+        "baseline_auc": baseline.get("auc"),
+        "baseline_auc_ci_low": baseline_ci_low,
+        "baseline_auc_ci_high": baseline_ci_high,
+        "logistic_auc": logistic.get("auc"),
+        "logistic_auc_ci_low": logistic_ci_low,
+        "logistic_auc_ci_high": logistic_ci_high,
+        "delta_auc": delta.get("auc"),
+        "welch_p_value": baseline.get("p_value"),
+        "welch_p_ci_low": p_ci_low,
+        "welch_p_ci_high": p_ci_high,
+        "ig_fp_rate": fp_rates.get("rate"),
+        "ig_fp_count": fp_rates.get("count"),
+        "ig_fp_total": fp_rates.get("total"),
+        "avg_pairs_distressed": density.get("avg_pairs_distressed"),
+        "avg_pairs_control": density.get("avg_pairs_control"),
+        "avg_pairs_overall": avg_pairs_overall,
+        "baseline_bootstrap_samples": bootstrap_counts.get("auc", 0),
+        "logistic_bootstrap_samples": bootstrap_counts.get("logistic", 0),
+        "pvalue_bootstrap_samples": bootstrap_counts.get("p_value", 0),
+    }
+
+    RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    json_path = RUNS_DIR / f"{run_id}_metrics.json"
+    csv_path = RUNS_DIR / f"{run_id}_metrics.csv"
+
+    payload = {
+        "run_id": run_id,
+        "timestamp": timestamp,
+        "git_sha": git_sha,
+        "summary": summary_row,
+        "manifest": list(manifest_rows),
+        "metrics": metrics,
+        "density": density,
+        "false_positives": fp_rates,
+    }
+
+    with json_path.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True)
+
+    with csv_path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=SUMMARY_FIELDS)
+        writer.writeheader()
+        writer.writerow({key: summary_row.get(key, "") for key in SUMMARY_FIELDS})
+
+    _append_history_row(summary_row)
+
+    return {
+        "summary": summary_row,
+        "json_path": str(json_path),
+        "csv_path": str(csv_path),
+        "history_path": str(HISTORY_CSV),
+    }
+
+
 def _run_baseline_metrics() -> Dict[str, object]:
     env = os.environ.copy()
     env.setdefault("PYTHONPATH", "src")
@@ -280,8 +414,33 @@ def main() -> int:
 
     top_evidence = _top_evidence_by_ticker([ev for ev in evidences if ev.ticker in DISTRESSED_SET])
 
-    now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    now_dt = datetime.now(UTC)
+    now = now_dt.isoformat().replace("+00:00", "Z")
+    run_id = now_dt.strftime("%Y%m%dT%H%M%SZ")
     git_sha = _git_sha()
+
+    avg_pairs_overall = float("nan")
+    if density:
+        try:
+            avg_dist = float(density.get("avg_pairs_distressed") or 0.0)
+            avg_ctrl = float(density.get("avg_pairs_control") or 0.0)
+            avg_pairs_overall = (avg_dist + avg_ctrl) / 2.0
+        except (TypeError, ValueError):
+            avg_pairs_overall = float("nan")
+
+    artifact_info = _persist_metrics(
+        run_id=run_id,
+        timestamp=now,
+        git_sha=git_sha,
+        metrics=metrics,
+        density=density,
+        fp_rates=fp_rates,
+        manifest_rows=rows,
+        distressed_count=len(distressed_records),
+        control_count=len(control_records),
+        records_total=len(records),
+        avg_pairs_overall=avg_pairs_overall,
+    )
 
     print("# CALE Real-World Validation (LAW + FINANCE)")
     print(f"_Run_: {now}")
@@ -318,11 +477,8 @@ def main() -> int:
         f"- Evidence density: avg distressed={density.get('avg_pairs_distressed')}, "
         f"avg control={density.get('avg_pairs_control')}, min distressed={density.get('min_pairs_distressed')}"
     )
-    if density:
-        avg_dist = float(density.get("avg_pairs_distressed") or 0.0)
-        avg_ctrl = float(density.get("avg_pairs_control") or 0.0)
-        avg_pairs = (avg_dist + avg_ctrl) / 2.0
-        print(f"- Average evidence pairs per filing: {avg_pairs:.2f}")
+    if density and not math.isnan(avg_pairs_overall):
+        print(f"- Average evidence pairs per filing: {avg_pairs_overall:.2f}")
     else:
         print("- Average evidence pairs per filing: n/a")
 
@@ -335,6 +491,11 @@ def main() -> int:
         for ev in evs:
             combo = f"{ev.obligation} || {ev.permission}"
             print(f"    - {ev.form} {ev.filing_date}: {_format_snippet(combo)} (CCE={ev.score:.3f})")
+
+    print("\n## Saved artifacts")
+    print(f"- Metrics JSON: {artifact_info['json_path']}")
+    print(f"- Metrics CSV: {artifact_info['csv_path']}")
+    print(f"- History CSV: {artifact_info['history_path']}")
 
     print("\n## LAW — Realistic Pairs (CLI)")
     for idx, payload in enumerate(law_outputs, start=1):
