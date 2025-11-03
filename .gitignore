@@ -13,5 +13,6 @@ artifacts/
 data/sec/edgar/
 data/sec/submissions/
 data/sec_real/
-reports/realworld/
+reports/realworld/*
+!reports/realworld/manifest.csv
 src/potatobacon.egg-info/
