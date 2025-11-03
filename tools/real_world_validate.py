@@ -94,7 +94,7 @@ def _build_records(rows: Sequence[Dict[str, str]]) -> Tuple[List[esc.FilingRecor
             print(f"[warn] Missing filing for {ticker}: {path}", file=sys.stderr)
             continue
         html = _load_html(path)
-        pairs = fx.extract_pairs_from_html(html)
+        pairs = fx.extract_pairs_from_html(html, form)
         if not pairs:
             continue
         rng = _rng_for_filing(idx, ticker, filed)
@@ -110,7 +110,8 @@ def _build_records(rows: Sequence[Dict[str, str]]) -> Tuple[List[esc.FilingRecor
         best_sev = 0
         best_num = 0
         evidence_rows: List[esc.FilingEvidence] = []
-        for obligation, permission in pairs:
+        for pair in pairs:
+            obligation, permission = pair.obligation, pair.permission
             score, raw, cue, sev_hits, num_hits = esc._compute_pair_score(obligation, permission, rng)
             evidence = esc.FilingEvidence(
                 ticker=ticker,
