@@ -1,8 +1,18 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import csv, json, argparse
+
+import argparse
+import csv
+import json
+import sys
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any, Dict, List
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC_DIR = ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
 from potatobacon.text.sentence_split import split_sentences
 from potatobacon.extract.bypass import detect_bypass
 from potatobacon.extract.linker import link_bypass_to_obligation
