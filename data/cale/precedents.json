@@ -1,0 +1,26 @@
+[
+  {
+    "id": "CAN_SUP_CT_2014_01",
+    "title": "R v Spencer",
+    "citation": "2014 SCC 43",
+    "summary": "Canadian Supreme Court case balancing privacy rights with investigative powers for digital records.",
+    "excerpt": "The Court held that subscriber information attracts a reasonable expectation of privacy, limiting warrantless disclosure to law enforcement.",
+    "vector": null
+  },
+  {
+    "id": "US_SCOTUS_1979_02",
+    "title": "Smith v. Maryland",
+    "citation": "442 U.S. 735 (1979)",
+    "summary": "U.S. precedent allowing limited warrantless pen register use during investigations.",
+    "excerpt": "Individuals assume the risk that the phone company will reveal dialed numbers to the police, diminishing privacy expectations.",
+    "vector": null
+  },
+  {
+    "id": "EU_CJEU_2016_03",
+    "title": "Tele2 Sverige AB v. Post- och telestyrelsen",
+    "citation": "Joined Cases C-203/15 and C-698/15",
+    "summary": "CJEU decision on data retention proportionality and safeguards for access to communications metadata.",
+    "excerpt": "General and indiscriminate retention of data is disproportionate unless accompanied by strict safeguards and judicial oversight.",
+    "vector": null
+  }
+]

@@ -18,6 +18,7 @@ import os
 from .parser import PredicateMapper, RuleParser
 from .symbolic import SymbolicConflictChecker
 from .embed import LegalEmbedder, FeatureEngine
+from .precedent import PrecedentIndex, load_precedent_cases
 from .graph import load_citation_graph, compute_authority_scores
 from .ccs import CCSCalculator
 from .types import LegalRule
@@ -63,6 +64,7 @@ class CALEServices:
     suggester: object  # AmendmentSuggester
     authority: Dict[str, float]
     corpus: List[LegalRule]
+    precedent_index: PrecedentIndex | None = None
 
     @property
     def symbolic(self) -> SymbolicConflictChecker:
@@ -143,6 +145,15 @@ def build_services(corpus_path: str | None = None, deterministic: bool = True) -
         predicate_mapper=mapper,
     )
 
+    precedent_index: PrecedentIndex | None = None
+    precedent_path = os.getenv("CALE_PRECEDENT_PATH", "data/cale/precedents.json")
+    try:
+        if Path(precedent_path).exists():
+            cases = load_precedent_cases(precedent_path, embedder=embedder)
+            precedent_index = PrecedentIndex(cases)
+    except Exception as exc:  # pragma: no cover - logging only
+        LOGGER.warning("Failed to load precedent index from %s: %s", precedent_path, exc)
+
     return CALEServices(
         mapper=mapper,
         parser=parser,
@@ -153,4 +164,5 @@ def build_services(corpus_path: str | None = None, deterministic: bool = True) -
         suggester=suggester,
         authority=authority,
         corpus=populated,
+        precedent_index=precedent_index,
     )
