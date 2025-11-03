@@ -1,0 +1,49 @@
+name: Real-world validation
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Cache SEC filings
+        uses: actions/cache@v3
+        with:
+          path: data/sec_real
+          key: sec-real-${{ hashFiles('tools/fetch_sec_real.py') }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+
+      - name: Fetch latest SEC manifest
+        run: python tools/fetch_sec_real.py
+
+      - name: Run real-world validation
+        run: python tools/real_world_validate.py | tee reports/realworld/latest.md
+
+      - name: Build trend dashboards
+        run: python tools/real_world_trends.py
+
+      - name: Upload validation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: realworld-validation
+          path: |
+            reports/realworld/latest.md
+            reports/realworld/dashboard.md
+            reports/realworld/dashboard.html
+            reports/realworld/history.csv
+            reports/realworld/runs
