@@ -92,7 +92,7 @@ class CALEEngine:
 
     def _compute_conflict_metrics(
         self, rule1: LegalRule, rule2: LegalRule
-    ) -> tuple[float, float, float, float]:
+    ) -> tuple[float, float, float, float, float]:
         if not self.services:
             raise RuntimeError("CALE services not initialised")
 
@@ -123,11 +123,25 @@ class CALEEngine:
         delta_year = float(getattr(rule2, "enactment_year", 0) - getattr(rule1, "enactment_year", 0))
         authority_balance = _sigmoid((prior2 - prior1) + gamma * delta_year)
 
-        return conflict_intensity, semantic_overlap, temporal_drift, authority_balance
+        return (
+            symbolic,
+            conflict_intensity,
+            semantic_overlap,
+            temporal_drift,
+            authority_balance,
+        )
 
-    def _prepare_analysis(self, rule1: LegalRule, rule2: LegalRule) -> ConflictAnalysis:
+    def _prepare_analysis(
+        self, rule1: LegalRule, rule2: LegalRule
+    ) -> tuple[ConflictAnalysis, Mapping[str, float]]:
         metrics = self._compute_conflict_metrics(rule1, rule2)
-        conflict_intensity, semantic_overlap, temporal_drift, authority_balance = metrics
+        (
+            symbolic_conflict,
+            conflict_intensity,
+            semantic_overlap,
+            temporal_drift,
+            authority_balance,
+        ) = metrics
         analysis = self.services.calculator.compute_multiperspective(
             rule1, rule2, conflict_intensity
         )
@@ -135,22 +149,37 @@ class CALEEngine:
         analysis.K = float(semantic_overlap)
         analysis.TD = float(temporal_drift)
         analysis.H = float(authority_balance)
-        return analysis
+        analysis_metadata = {
+            "symbolic_conflict": float(symbolic_conflict),
+            "contextual_similarity": float(semantic_overlap),
+            "temporal_drift": float(temporal_drift),
+            "authority": float(authority_balance),
+        }
+        return analysis, analysis_metadata
 
     # ------------------------------------------------------------------
     # Serialisation helpers
     # ------------------------------------------------------------------
-    def _analysis_summary(self, analysis: ConflictAnalysis) -> dict[str, Any]:
+    def _analysis_summary(
+        self, analysis: ConflictAnalysis, components: Mapping[str, float]
+    ) -> dict[str, Any]:
+        scores = {
+            "textualist": _as_float(analysis.CCS_textualist),
+            "living": _as_float(analysis.CCS_living),
+            "pragmatic": _as_float(analysis.CCS_pragmatic),
+        }
         return {
             "conflict_intensity": _as_float(analysis.CI),
             "semantic_overlap": _as_float(analysis.K),
             "temporal_drift": _as_float(analysis.TD),
             "authority_balance": _as_float(analysis.H),
-            "ccs_scores": {
-                "textualist": _as_float(analysis.CCS_textualist),
-                "living": _as_float(analysis.CCS_living),
-                "pragmatic": _as_float(analysis.CCS_pragmatic),
+            "components": {
+                key: _as_float(value)
+                for key, value in components.items()
             },
+            "variance": _as_float(analysis.variance),
+            "ccs_scores": scores,
+            "conflict_scores": scores,
         }
 
     def _suggestion_summary(
@@ -215,8 +244,8 @@ class CALEEngine:
 
         rule1 = self._ensure_rule(rule1_payload, "R1")
         rule2 = self._ensure_rule(rule2_payload, "R2")
-        analysis = self._prepare_analysis(rule1, rule2)
-        return self._analysis_summary(analysis)
+        analysis, components = self._prepare_analysis(rule1, rule2)
+        return self._analysis_summary(analysis, components)
 
     def suggest(
         self, rule1_payload: Mapping[str, Any], rule2_payload: Mapping[str, Any]
@@ -226,10 +255,10 @@ class CALEEngine:
 
         rule1 = self._ensure_rule(rule1_payload, "R1")
         rule2 = self._ensure_rule(rule2_payload, "R2")
-        analysis = self._prepare_analysis(rule1, rule2)
+        analysis, components = self._prepare_analysis(rule1, rule2)
         suggestion = self.services.suggester.suggest_amendment(rule1, rule2, analysis)
 
-        result = self._analysis_summary(analysis)
+        result = self._analysis_summary(analysis, components)
         result.update(self._suggestion_summary(analysis, suggestion))
         return result
 FINANCE_CONFIG_PATH = Path("configs/finance.yml")

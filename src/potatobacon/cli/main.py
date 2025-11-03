@@ -9,6 +9,11 @@ import click
 from ..cale.engine import CALEEngine
 
 
+DEFAULT_RULE1_TEXT = "Organizations MUST collect personal data IF consent."
+DEFAULT_RULE2_TEXT = "Security agencies MUST NOT collect personal data IF emergency."
+DEFAULT_JURISDICTION = "Canada.Federal"
+
+
 @click.group()
 def cli() -> None:
     """Potato-to-Bacon command suite."""
@@ -20,12 +25,25 @@ def law() -> None:
 
 
 @law.command("sanity-check")
-@click.option("--rule1", "rule1_text", required=True, help="Text of the first rule.")
-@click.option("--rule2", "rule2_text", required=True, help="Text of the second rule.")
+@click.option(
+    "--rule1",
+    "rule1_text",
+    default=DEFAULT_RULE1_TEXT,
+    show_default=True,
+    help="Text of the first rule.",
+)
+@click.option(
+    "--rule2",
+    "rule2_text",
+    default=DEFAULT_RULE2_TEXT,
+    show_default=True,
+    help="Text of the second rule.",
+)
 @click.option(
     "--jurisdiction",
     "jurisdiction",
-    required=True,
+    default=DEFAULT_JURISDICTION,
+    show_default=True,
     help="Jurisdiction shared by both rules.",
 )
 @click.option(
