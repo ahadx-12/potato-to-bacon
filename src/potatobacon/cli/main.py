@@ -84,6 +84,18 @@ def law() -> None:
     type=int,
     help="Enactment year for the second rule.",
 )
+@click.option(
+    "--emit-precedents/--no-emit-precedents",
+    default=False,
+    show_default=True,
+    help="Include precedent matches and excerpts in the response payload.",
+)
+@click.option(
+    "--emit-confidence/--no-emit-confidence",
+    default=False,
+    show_default=True,
+    help="Include calibrated confidence estimates in the response payload.",
+)
 def sanity_check(
     rule1_text: str,
     rule2_text: str,
@@ -94,6 +106,8 @@ def sanity_check(
     rule2_statute: str,
     rule2_section: str,
     rule2_year: int,
+    emit_precedents: bool,
+    emit_confidence: bool,
 ) -> None:
     """Run the CALE engine for the provided rule pair and emit structured JSON."""
 
@@ -117,6 +131,12 @@ def sanity_check(
     }
 
     result = engine.suggest(rule1_payload, rule2_payload)
+    if not emit_precedents:
+        result.pop("precedent_matches", None)
+        result.pop("precedent_context", None)
+        result.pop("precedent_similarity", None)
+    if not emit_confidence:
+        result.pop("calibration_confidence", None)
     payload = {
         "rule1": rule1_payload,
         "rule2": rule2_payload,

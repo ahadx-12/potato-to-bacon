@@ -199,28 +199,35 @@ class SuggestedAmendmentSummary(BaseModel):
 
 
 class SuggestionResponse(BaseModel):
-    conflict_intensity: float
-    semantic_overlap: float
-    temporal_drift: float
-    authority_balance: float
-    ccs_scores: CCScores
-    suggested_amendment: SuggestedAmendmentSummary
     precedent_count: int
     candidates_considered: int
     suggestions: List[SuggestionItem]
     best: SuggestionItem
 
 
-def _cale_services() -> CALEServices:
+def _ensure_bootstrap() -> CALEServices:
     services: CALEServices | None = getattr(app.state, "cale", None)
-    if services is None:
-        raise HTTPException(status_code=503, detail="CALE not initialised")
+    engine: CALEEngine | None = getattr(app.state, "cale_engine", None)
+    if services is None or engine is None:
+        try:
+            services = build_services()
+            engine = CALEEngine(services)
+        except Exception as exc:  # pragma: no cover - defensive bootstrap
+            logger.exception("CALE bootstrap failed during request")
+            raise HTTPException(status_code=503, detail="CALE not initialised") from exc
+        app.state.cale = services
+        app.state.cale_engine = engine
     if not services.corpus:
         raise HTTPException(status_code=503, detail="CALE corpus empty / suggester not fitted")
     return services
 
 
+def _cale_services() -> CALEServices:
+    return _ensure_bootstrap()
+
+
 def _cale_engine() -> CALEEngine:
+    _ensure_bootstrap()
     engine: CALEEngine | None = getattr(app.state, "cale_engine", None)
     if engine is None:
         raise HTTPException(status_code=503, detail="CALE engine not initialised")
@@ -239,12 +246,8 @@ def _parse_and_populate_rule(inp: RuleInput, services: CALEServices) -> LegalRul
 # -----------------------------------------------------------------------------
 @app.get("/health")
 def health() -> Dict[str, Any]:
-    services = getattr(app.state, "cale", None)
-    if services is None:
-        raise HTTPException(status_code=503, detail="CALE not initialised")
-    if not services.corpus:
-        raise HTTPException(status_code=503, detail="CALE corpus empty / suggester not fitted")
-    return {"status": "ok", "corpus": len(services.corpus)}
+    services = _ensure_bootstrap()
+    return {"ok": True, "status": "ok", "corpus": len(services.corpus)}
 
 
 @app.get("/v1/health")

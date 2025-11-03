@@ -8,7 +8,7 @@ import importlib.util
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Mapping, MutableMapping
+from typing import Any, Mapping, MutableMapping, Sequence
 
 import numpy as np
 
@@ -74,6 +74,14 @@ class CALEEngine:
         authority = config.get("authority", DEFAULT_WEIGHTS["authority"])
         return alpha, beta, eta, gamma, authority
 
+    def _calibration_threshold(self) -> float:
+        config = _load_finance_config()
+        return float(
+            config.get(
+                "calibration_threshold", DEFAULT_WEIGHTS["calibration_threshold"]
+            )
+        )
+
     @staticmethod
     def _semantic_overlap(rule1: LegalRule, rule2: LegalRule) -> float:
         vec1 = getattr(rule1, "interpretive_vec", None)
@@ -133,7 +141,7 @@ class CALEEngine:
 
     def _prepare_analysis(
         self, rule1: LegalRule, rule2: LegalRule
-    ) -> tuple[ConflictAnalysis, Mapping[str, float]]:
+    ) -> tuple[ConflictAnalysis, Mapping[str, float], Mapping[str, Any]]:
         metrics = self._compute_conflict_metrics(rule1, rule2)
         (
             symbolic_conflict,
@@ -142,6 +150,21 @@ class CALEEngine:
             temporal_drift,
             authority_balance,
         ) = metrics
+
+        raw_semantic_overlap = float(semantic_overlap)
+        precedent_matches: Sequence[Mapping[str, Any]] = ()
+        precedent_similarity = 0.0
+        if self.services and getattr(self.services, "precedent_index", None):
+            precedent_matches = self.services.precedent_index.search(rule1, rule2, top_k=3)
+            if precedent_matches:
+                similarities = [
+                    float(match.get("similarity", 0.0)) for match in precedent_matches
+                ]
+                precedent_similarity = float(sum(similarities) / len(similarities))
+                semantic_overlap = float(
+                    0.7 * float(semantic_overlap) + 0.3 * precedent_similarity
+                )
+
         analysis = self.services.calculator.compute_multiperspective(
             rule1, rule2, conflict_intensity
         )
@@ -149,26 +172,44 @@ class CALEEngine:
         analysis.K = float(semantic_overlap)
         analysis.TD = float(temporal_drift)
         analysis.H = float(authority_balance)
-        analysis_metadata = {
+
+        components = {
             "symbolic_conflict": float(symbolic_conflict),
             "contextual_similarity": float(semantic_overlap),
             "temporal_drift": float(temporal_drift),
             "authority": float(authority_balance),
         }
-        return analysis, analysis_metadata
+
+        calibration_threshold = self._calibration_threshold()
+        calibration_confidence = _sigmoid(
+            (float(conflict_intensity) - calibration_threshold) * 5.0
+        )
+
+        metadata: dict[str, Any] = {
+            "precedent_matches": [dict(match) for match in precedent_matches],
+            "precedent_similarity": float(precedent_similarity),
+            "raw_semantic_overlap": raw_semantic_overlap,
+            "calibration_confidence": float(calibration_confidence),
+            "calibration_threshold": float(calibration_threshold),
+        }
+
+        return analysis, components, metadata
 
     # ------------------------------------------------------------------
     # Serialisation helpers
     # ------------------------------------------------------------------
     def _analysis_summary(
-        self, analysis: ConflictAnalysis, components: Mapping[str, float]
+        self,
+        analysis: ConflictAnalysis,
+        components: Mapping[str, float],
+        metadata: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         scores = {
             "textualist": _as_float(analysis.CCS_textualist),
             "living": _as_float(analysis.CCS_living),
             "pragmatic": _as_float(analysis.CCS_pragmatic),
         }
-        return {
+        summary: dict[str, Any] = {
             "conflict_intensity": _as_float(analysis.CI),
             "semantic_overlap": _as_float(analysis.K),
             "temporal_drift": _as_float(analysis.TD),
@@ -181,11 +222,24 @@ class CALEEngine:
             "ccs_scores": scores,
             "conflict_scores": scores,
         }
+        if metadata:
+            if "precedent_similarity" in metadata:
+                summary["precedent_similarity"] = _as_float(
+                    metadata["precedent_similarity"]
+                )
+            if metadata.get("precedent_matches"):
+                summary["precedent_matches"] = list(metadata["precedent_matches"])
+            if "calibration_confidence" in metadata:
+                summary["calibration_confidence"] = _as_float(
+                    metadata["calibration_confidence"]
+                )
+        return summary
 
     def _suggestion_summary(
         self,
         analysis: ConflictAnalysis,
         suggestion: Mapping[str, Any],
+        metadata: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         best = suggestion.get("best")
         if not best:
@@ -221,7 +275,27 @@ class CALEEngine:
         else:
             justification_text = "No automated amendment identified"
 
-        return {
+        precedent_context: Mapping[str, Any] | None = None
+        if metadata and metadata.get("precedent_matches"):
+            matches = list(metadata["precedent_matches"])
+            top_match = matches[0]
+            precedent_context = {
+                "highlight": {
+                    "id": top_match.get("id"),
+                    "title": top_match.get("title"),
+                    "citation": top_match.get("citation"),
+                    "similarity": float(top_match.get("similarity", 0.0)),
+                    "excerpt": top_match.get("excerpt", ""),
+                },
+                "matches": matches,
+            }
+            if precedent_context["highlight"].get("title"):
+                justification_text = (
+                    f"{justification_text}; aligned with "
+                    f"{precedent_context['highlight']['title']}"
+                )
+
+        result = {
             "precedent_count": int(suggestion.get("precedent_count", 0)),
             "candidates_considered": int(suggestion.get("candidates_considered", 0)),
             "suggestions": list(suggestion.get("suggestions", [])),
@@ -232,6 +306,9 @@ class CALEEngine:
                 "justification": justification_text,
             },
         }
+        if precedent_context:
+            result["precedent_context"] = precedent_context
+        return result
 
     # ------------------------------------------------------------------
     # Public API
@@ -244,8 +321,8 @@ class CALEEngine:
 
         rule1 = self._ensure_rule(rule1_payload, "R1")
         rule2 = self._ensure_rule(rule2_payload, "R2")
-        analysis, components = self._prepare_analysis(rule1, rule2)
-        return self._analysis_summary(analysis, components)
+        analysis, components, metadata = self._prepare_analysis(rule1, rule2)
+        return self._analysis_summary(analysis, components, metadata)
 
     def suggest(
         self, rule1_payload: Mapping[str, Any], rule2_payload: Mapping[str, Any]
@@ -255,11 +332,11 @@ class CALEEngine:
 
         rule1 = self._ensure_rule(rule1_payload, "R1")
         rule2 = self._ensure_rule(rule2_payload, "R2")
-        analysis, components = self._prepare_analysis(rule1, rule2)
+        analysis, components, metadata = self._prepare_analysis(rule1, rule2)
         suggestion = self.services.suggester.suggest_amendment(rule1, rule2, analysis)
 
-        result = self._analysis_summary(analysis, components)
-        result.update(self._suggestion_summary(analysis, suggestion))
+        result = self._analysis_summary(analysis, components, metadata)
+        result.update(self._suggestion_summary(analysis, suggestion, metadata))
         return result
 FINANCE_CONFIG_PATH = Path("configs/finance.yml")
 
@@ -276,6 +353,8 @@ DEFAULT_WEIGHTS = {
         "LIQUIDITY": 0.6,
         "MDNA": 0.4,
     },
+    "min_semantic_overlap": 0.25,
+    "calibration_threshold": 0.5,
 }
 
 EXC_TERMS = (
@@ -339,14 +418,27 @@ def _load_finance_config() -> Mapping[str, Any]:
     except Exception:
         return DEFAULT_WEIGHTS
     weights = data.get("weights", {})
+    signals = data.get("signals", {})
     authority = dict(DEFAULT_WEIGHTS["authority"])
     authority.update(weights.get("authority", {}))
     return {
         "alpha": float(weights.get("alpha", DEFAULT_WEIGHTS["alpha"])),
         "beta": float(weights.get("beta", DEFAULT_WEIGHTS["beta"])),
         "eta": float(weights.get("eta", DEFAULT_WEIGHTS["eta"])),
-        "temporal_gamma": float(weights.get("temporal_gamma", DEFAULT_WEIGHTS["temporal_gamma"])),
+        "temporal_gamma": float(
+            weights.get("temporal_gamma", DEFAULT_WEIGHTS["temporal_gamma"])
+        ),
         "authority": authority,
+        "min_semantic_overlap": float(
+            signals.get(
+                "min_semantic_overlap", DEFAULT_WEIGHTS["min_semantic_overlap"]
+            )
+        ),
+        "calibration_threshold": float(
+            signals.get(
+                "calibration_threshold", DEFAULT_WEIGHTS["calibration_threshold"]
+            )
+        ),
     }
 
 
