@@ -567,6 +567,80 @@ def _feature_matrix(records: Sequence[FilingRecord]) -> Tuple[np.ndarray, np.nda
     return X, y, names
 
 
+def _ci_from_samples(samples: Sequence[float], alpha: float = 0.05) -> Tuple[float, float]:
+    arr = np.array([val for val in samples if not math.isnan(val)], dtype=float)
+    if arr.size == 0:
+        return float("nan"), float("nan")
+    lower = float(np.quantile(arr, alpha / 2.0))
+    upper = float(np.quantile(arr, 1.0 - alpha / 2.0))
+    return lower, upper
+
+
+def _bootstrap_metrics(
+    X: np.ndarray,
+    y: np.ndarray,
+    *,
+    alpha: float = 0.05,
+    n_bootstrap: int = 400,
+    seed: int = 2024,
+) -> Dict[str, object]:
+    n = y.shape[0]
+    if n == 0 or len(np.unique(y)) < 2:
+        return {
+            "baseline_auc_ci": (float("nan"), float("nan")),
+            "logistic_auc_ci": (float("nan"), float("nan")),
+            "p_value_ci": (float("nan"), float("nan")),
+            "effective_samples": {"auc": 0, "logistic": 0, "p_value": 0},
+        }
+
+    rng = np.random.default_rng(seed)
+    baseline_samples: List[float] = []
+    logistic_samples: List[float] = []
+    pvalue_samples: List[float] = []
+
+    for _ in range(n_bootstrap):
+        indices = rng.integers(0, n, size=n)
+        sample_y = y[indices]
+        if len(np.unique(sample_y)) < 2:
+            continue
+        sample_X = X[indices]
+        baseline_scores = sample_X[:, 1]
+        baseline_samples.append(compute_auc(sample_y, baseline_scores))
+
+        distressed = baseline_scores[sample_y == 1]
+        controls = baseline_scores[sample_y == 0]
+        if len(distressed) >= 2 and len(controls) >= 2:
+            pvalue = welch_pvalue(distressed, controls)
+            if not math.isnan(pvalue):
+                pvalue_samples.append(pvalue)
+
+        scaler = sample_X.copy()
+        if scaler.shape[1] > 1:
+            mean = scaler[:, 1:].mean(axis=0)
+            std = scaler[:, 1:].std(axis=0) + 1e-6
+            scaler[:, 1:] = (scaler[:, 1:] - mean) / std
+
+        logi = Logistic(seed=int(rng.integers(1, 1_000_000_000)))
+        logi.fit(scaler, sample_y)
+        logistic_scores = logi.predict_proba(scaler)
+        logistic_samples.append(compute_auc(sample_y, logistic_scores))
+
+    baseline_ci = _ci_from_samples(baseline_samples, alpha=alpha)
+    logistic_ci = _ci_from_samples(logistic_samples, alpha=alpha)
+    pvalue_ci = _ci_from_samples(pvalue_samples, alpha=alpha)
+
+    return {
+        "baseline_auc_ci": baseline_ci,
+        "logistic_auc_ci": logistic_ci,
+        "p_value_ci": pvalue_ci,
+        "effective_samples": {
+            "auc": len(baseline_samples),
+            "logistic": len(logistic_samples),
+            "p_value": len(pvalue_samples),
+        },
+    }
+
+
 def compute_metrics(records: Sequence[FilingRecord]) -> Tuple[Dict[str, object], np.ndarray, np.ndarray, Dict[str, int]]:
     if not records:
         return {}, np.zeros(0), np.zeros(0), {}
@@ -600,6 +674,8 @@ def compute_metrics(records: Sequence[FilingRecord]) -> Tuple[Dict[str, object],
 
     weights = logi.w if logi.w is not None else np.zeros(X.shape[1], dtype=float)
 
+    bootstrap = _bootstrap_metrics(X, y)
+
     metrics = {
         "baseline": {
             "auc": float(auc_baseline),
@@ -608,11 +684,15 @@ def compute_metrics(records: Sequence[FilingRecord]) -> Tuple[Dict[str, object],
             "p_value": float(p_value),
             "counts": baseline_counts,
             "confusion_matrix": baseline_matrix,
+            "auc_ci": list(bootstrap["baseline_auc_ci"]),
+            "p_value_ci": list(bootstrap["p_value_ci"]),
+            "bootstrap_samples": bootstrap["effective_samples"],
         },
         "logistic": {
             "auc": float(auc_logistic),
             "counts": logistic_counts,
             "confusion_matrix": logistic_matrix,
+            "auc_ci": list(bootstrap["logistic_auc_ci"]),
         },
         "delta": {
             "auc": float(auc_delta),
