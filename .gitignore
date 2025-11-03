@@ -16,3 +16,6 @@ data/sec_real/
 data/cache/
 reports/realworld/
 src/potatobacon.egg-info/
+# Ignore trained model artifacts
+models/finance/pipeline.joblib
+models/finance/metadata.json
