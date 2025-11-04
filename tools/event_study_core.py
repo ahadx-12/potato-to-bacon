@@ -33,7 +33,7 @@ import statistics
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -45,6 +45,29 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from potatobacon.cale.finance.numeric import extract_numeric_covenants
+
+MODEL_DIR = Path(__file__).resolve().parent.parent / "models" / "finance"
+MODEL_METADATA_PATH = MODEL_DIR / "model_metadata.json"
+
+EVIDENCE_SUMMARY_COLUMNS: Sequence[Tuple[str, Sequence[str]]] = (
+    ("CCE", ("mean", "max")),
+    ("cce_raw", ("mean", "max")),
+    ("weight", ("mean", "max")),
+    ("severity_hits", ("mean", "max", "sum")),
+    ("numeric_hits", ("mean", "max", "sum")),
+    ("numeric_strength", ("mean", "max")),
+    ("numeric_confidence", ("mean", "max")),
+    ("bypass_proximity", ("mean", "max", "min")),
+)
+
+DERIVED_FEATURE_NAMES = sorted(
+    ["ev_count"]
+    + [
+        f"ev_{column}_{stat}"
+        for column, stats in EVIDENCE_SUMMARY_COLUMNS
+        for stat in stats
+    ]
+)
 
 
 # ---------------------------------------------------------------------------
@@ -527,8 +550,44 @@ class Logistic:
         return self._sigmoid(X @ self.w)
 
 
+def _summarise_evidence_features(evidence_rows: Sequence[FilingEvidence]) -> Dict[str, float]:
+    summary: Dict[str, float] = {name: 0.0 for name in DERIVED_FEATURE_NAMES}
+    summary["ev_count"] = float(len(evidence_rows))
+    if not evidence_rows:
+        return summary
+
+    values: Dict[str, List[float]] = {
+        column: [] for column, _ in EVIDENCE_SUMMARY_COLUMNS
+    }
+
+    for ev in evidence_rows:
+        values["CCE"].append(float(ev.score))
+        values["cce_raw"].append(float(ev.raw_score))
+        values["weight"].append(float(ev.cue_weight))
+        values["severity_hits"].append(float(ev.severity_hits))
+        values["numeric_hits"].append(float(ev.numeric_hits))
+        values["numeric_strength"].append(float(ev.numeric_strength))
+        values["numeric_confidence"].append(float(ev.numeric_confidence))
+        values["bypass_proximity"].append(float(ev.bypass_proximity))
+
+    for column, stats in EVIDENCE_SUMMARY_COLUMNS:
+        column_values = np.array(values[column], dtype=float)
+        if column_values.size == 0:
+            continue
+        if "mean" in stats:
+            summary[f"ev_{column}_mean"] = float(column_values.mean())
+        if "max" in stats:
+            summary[f"ev_{column}_max"] = float(column_values.max())
+        if "sum" in stats:
+            summary[f"ev_{column}_sum"] = float(column_values.sum())
+        if "min" in stats:
+            summary[f"ev_{column}_min"] = float(column_values.min())
+    return summary
+
+
 def _feature_matrix(records: Sequence[FilingRecord]) -> Tuple[np.ndarray, np.ndarray, List[str]]:
     features: List[List[float]] = []
+    derived_names = list(DERIVED_FEATURE_NAMES)
     names = [
         "bias",
         "CCE",
@@ -540,8 +599,10 @@ def _feature_matrix(records: Sequence[FilingRecord]) -> Tuple[np.ndarray, np.nda
         "numeric_confidence",
         "bypass_proximity",
         "pair_count",
+        *derived_names,
     ]
     for rec in records:
+        evidence_summary = _summarise_evidence_features(rec.evidence_rows)
         features.append(
             [
                 1.0,
@@ -554,11 +615,58 @@ def _feature_matrix(records: Sequence[FilingRecord]) -> Tuple[np.ndarray, np.nda
                 float(rec.numeric_confidence),
                 float(rec.bypass_proximity),
                 float(rec.pair_count),
+                *[evidence_summary[name] for name in derived_names],
             ]
         )
     X = np.array(features, dtype=float)
     y = np.array([rec.label for rec in records], dtype=float)
     return X, y, names
+
+
+def _predict_model_scores(model: Any, X: np.ndarray) -> np.ndarray:
+    if hasattr(model, "predict_proba"):
+        proba = model.predict_proba(X)
+        if isinstance(proba, np.ndarray) and proba.ndim == 2 and proba.shape[1] >= 2:
+            return proba[:, 1]
+    if hasattr(model, "decision_function"):
+        decision = model.decision_function(X)
+        if isinstance(decision, np.ndarray):
+            if decision.ndim == 1:
+                return 1.0 / (1.0 + np.exp(-decision))
+            if decision.ndim == 2 and decision.shape[1] >= 2:
+                return 1.0 / (1.0 + np.exp(-decision[:, 1]))
+    if hasattr(model, "predict"):
+        preds = model.predict(X)
+        if isinstance(preds, np.ndarray):
+            return preds.astype(float)
+    raise TypeError("Model does not expose predict_proba, decision_function, or predict")
+
+
+def _load_calibrated_model(feature_names: Sequence[str]) -> Optional[Tuple[Any, Dict[str, Any]]]:
+    if not MODEL_METADATA_PATH.exists():
+        return None
+    try:
+        with MODEL_METADATA_PATH.open("r", encoding="utf-8") as handle:
+            metadata = json.load(handle)
+    except Exception:
+        return None
+    expected_features = metadata.get("feature_names")
+    if not isinstance(expected_features, list) or not expected_features:
+        return None
+    if not set(expected_features).issubset(set(feature_names)):
+        return None
+    model_path = MODEL_DIR / str(metadata.get("model_path", ""))
+    if not model_path.exists():
+        return None
+    try:
+        import joblib  # type: ignore[import-not-found]
+    except Exception:
+        return None
+    try:
+        model = joblib.load(model_path)
+    except Exception:
+        return None
+    return model, metadata
 
 
 def _ci_from_samples(samples: Sequence[float], alpha: float = 0.05) -> Tuple[float, float]:
@@ -670,7 +778,7 @@ def compute_metrics(records: Sequence[FilingRecord]) -> Tuple[Dict[str, object],
 
     bootstrap = _bootstrap_metrics(X, y)
 
-    metrics = {
+    metrics: Dict[str, Any] = {
         "baseline": {
             "auc": float(auc_baseline),
             "distressed_mean": float(distressed.mean()) if len(distressed) else float("nan"),
@@ -698,6 +806,50 @@ def compute_metrics(records: Sequence[FilingRecord]) -> Tuple[Dict[str, object],
             "std": list(map(float, std)),
         },
     }
+
+    calibrated_scores: Optional[np.ndarray] = None
+    calibrated_counts: Dict[str, int] = {}
+    loaded = _load_calibrated_model(feature_names[1:])
+    if loaded is not None:
+        model, metadata = loaded
+        feature_index = {name: idx for idx, name in enumerate(feature_names)}
+        expected = metadata.get("feature_names", [])
+        if not isinstance(expected, list) or not expected:
+            aligned = None
+        else:
+            try:
+                aligned = np.column_stack([X[:, feature_index[name]] for name in expected])
+            except KeyError:
+                aligned = None
+        if aligned is not None:
+            try:
+                calibrated_scores = _predict_model_scores(model, aligned)
+            except Exception:
+                calibrated_scores = None
+        if calibrated_scores is not None:
+            auc_calibrated = compute_auc(y, calibrated_scores)
+            p_val_calibrated = welch_pvalue(
+                calibrated_scores[y == 1], calibrated_scores[y == 0]
+            )
+            calibrated_counts = confusion_counts(y, calibrated_scores)
+            calibrated_matrix = [
+                [calibrated_counts.get("tn", 0), calibrated_counts.get("fp", 0)],
+                [calibrated_counts.get("fn", 0), calibrated_counts.get("tp", 0)],
+            ]
+            metrics["calibrated"] = {
+                "auc": float(auc_calibrated),
+                "p_value": float(p_val_calibrated),
+                "counts": calibrated_counts,
+                "confusion_matrix": calibrated_matrix,
+                "metadata": {
+                    "model_path": metadata.get("model_path"),
+                    "model_type": metadata.get("model_type"),
+                    "train_metrics": metadata.get("train_metrics"),
+                    "cv_results": metadata.get("cv_results"),
+                    "feature_names": metadata.get("feature_names"),
+                    "feature_stats": metadata.get("feature_stats"),
+                },
+            }
     return metrics, baseline, logistic_scores, baseline_counts
 
 
