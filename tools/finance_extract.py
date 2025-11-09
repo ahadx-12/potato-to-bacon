@@ -11,6 +11,7 @@ import importlib
 import importlib.util
 import json
 import re
+import statistics
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -42,6 +43,70 @@ CFG_PATH = Path("configs/finance.yml")
 # ---------------------------------------------------------------------------
 # Pattern banks & heuristics
 # ---------------------------------------------------------------------------
+
+
+DEFAULT_FINANCE_TERMS: Tuple[str, ...] = (
+    "covenant",
+    "debt",
+    "liquidity",
+    "ratio",
+    "credit facility",
+    "borrowing",
+    "leverage",
+    "default",
+    "revolver",
+    "senior notes",
+    "maturities",
+    "ebitda add-back",
+)
+
+DEFAULT_TOC_PATTERNS: Tuple[str, ...] = (
+    "table of contents",
+    "index of",
+    "where you can find",
+    "forward-looking statements",
+)
+
+DEFAULT_BYPASS_CUES: Tuple[str, ...] = (
+    "except that",
+    "provided, however",
+    "provided however",
+    "notwithstanding",
+    "basket",
+)
+
+DEFAULT_NEGATION_TERMS: Tuple[str, ...] = (
+    "except that",
+    "provided, however",
+    "provided however",
+    "notwithstanding",
+    "unless",
+    "except to the extent",
+    "other than",
+    "save for",
+    "basket",
+)
+
+DEFAULT_SECTION_ALIASES: Dict[str, Tuple[str, ...]] = {
+    "CREDIT_AGREEMENT": (
+        "credit agreement",
+        "covenants",
+        "revolver",
+        "ebitda add-backs",
+        "ebitda add backs",
+        "liquidity and capital resources — borrowings",
+        "liquidity and capital resources - borrowings",
+        "debt maturities",
+        "credit agreement exhibit",
+        "exhibit 10",
+    ),
+    "INDENTURE_NOTES": ("senior notes", "indenture"),
+    "LIQUIDITY": (
+        "liquidity and capital resources",
+        "debt maturities",
+        "borrowings",
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -91,6 +156,30 @@ class SentenceInfo:
     is_obligation: bool
     is_permission: bool
     has_coref: bool
+    obligation_rules: Tuple[str, ...] = field(default_factory=tuple)
+    permission_rules: Tuple[str, ...] = field(default_factory=tuple)
+    bypass_terms: Tuple[str, ...] = field(default_factory=tuple)
+    lexicon_hits: Tuple[str, ...] = field(default_factory=tuple)
+
+
+def _normalize_match_text(value: str) -> str:
+    """Normalise a string for substring comparisons."""
+
+    value = value.upper()
+    value = re.sub(r"[\u2010-\u2015]", "-", value)
+    value = re.sub(r"[^A-Z0-9\- ]+", " ", value)
+    value = re.sub(r"\s+", " ", value)
+    return value.strip()
+
+
+def _compile_phrase(phrase: str) -> re.Pattern[str]:
+    """Compile a loosely matched phrase regex (ignoring punctuation)."""
+
+    tokens = re.findall(r"[A-Za-z0-9']+", phrase)
+    if not tokens:
+        return re.compile(re.escape(phrase), re.I)
+    pattern = r"\b" + r"\W+".join(re.escape(token) for token in tokens) + r"\b"
+    return re.compile(pattern, re.I)
 
 
 COVENANT_OBL = re.compile(
@@ -221,17 +310,6 @@ COREF_REF = re.compile(
 
 SKIP_TAGS = {"script", "style", "nav", "footer", "header"}
 
-FALLBACK_KEYWORDS = (
-    "covenant",
-    "debt",
-    "liquidity",
-    "credit",
-    "borrowing",
-    "leverage",
-    "default",
-)
-
-
 def _clean_text(text: str) -> str:
     text = text.replace("\xa0", " ")
     text = re.sub(r"\s+", " ", text)
@@ -270,6 +348,10 @@ def _canonicalize_section(title: str, doc_kind: str, path: Optional[str]) -> Tup
     if path and path not in candidates:
         candidates.append(path)
     for candidate in candidates:
+        normalized = _normalize_match_text(candidate)
+        for alias, canonical in SECTION_ALIAS_INDEX:
+            if alias and alias in normalized:
+                return canonical, canonical
         upper = candidate.upper()
         if "LIQUIDITY" in upper or "CAPITAL RESOURCES" in upper:
             return "LIQUIDITY", "LIQUIDITY"
@@ -379,11 +461,20 @@ def extract_pairs_from_doc(doc: Doc) -> List[ExtractionPair]:
             if not sentence:
                 continue
             positive_cue = any(pat.search(sentence) for pat in POS_LEVERAGE_CUES)
+            lexicon_hits = _collect_finance_hits(sentence)
+            obligation_rules: List[str] = []
+            permission_rules: List[str] = []
             is_obligation = (
                 (COVENANT_OBL.search(sentence) is not None)
                 or (COMPLIANCE_OBL.search(sentence) is not None)
                 or positive_cue
             ) and not ASPIRATIONAL.search(sentence)
+            if COVENANT_OBL.search(sentence):
+                obligation_rules.append("covenant_obligation")
+            if COMPLIANCE_OBL.search(sentence):
+                obligation_rules.append("compliance_status")
+            if positive_cue:
+                obligation_rules.append("positive_liquidity_cue")
             has_relief = bool(
                 PERM_RELIEF_VERB.search(sentence)
                 and RELIEF_OBJECT_RE.search(sentence)
@@ -393,6 +484,19 @@ def extract_pairs_from_doc(doc: Doc) -> List[ExtractionPair]:
                 or PERM_WEAK.search(sentence)
                 or has_relief
             )
+            if PERM_BYPASS.search(sentence):
+                permission_rules.append("permission_bypass")
+            if PERM_WEAK.search(sentence):
+                permission_rules.append("permission_weak")
+            if has_relief:
+                permission_rules.append("relief_object")
+            bypass_terms = _extract_bypass_terms(sentence)
+            if bypass_terms:
+                permission_rules.append("bypass_lexicon")
+            if is_obligation and not obligation_rules and lexicon_hits:
+                obligation_rules.append("lexicon_seed")
+            if is_permission and not permission_rules and lexicon_hits:
+                permission_rules.append("lexicon_seed")
             has_coref = bool(COREF_REF.search(sentence))
             sentences.append(
                 SentenceInfo(
@@ -403,6 +507,10 @@ def extract_pairs_from_doc(doc: Doc) -> List[ExtractionPair]:
                     is_obligation=is_obligation,
                     is_permission=is_permission,
                     has_coref=has_coref,
+                    obligation_rules=tuple(sorted(set(obligation_rules))),
+                    permission_rules=tuple(sorted(set(permission_rules))),
+                    bypass_terms=bypass_terms,
+                    lexicon_hits=lexicon_hits,
                 )
             )
             order += 1
@@ -416,8 +524,8 @@ def extract_pairs_from_doc(doc: Doc) -> List[ExtractionPair]:
             text = block.text.strip()
             if not text:
                 continue
-            lower = text.lower()
-            if not any(keyword in lower for keyword in FALLBACK_KEYWORDS):
+            hits = _collect_finance_hits(text)
+            if not hits:
                 continue
             info = SentenceInfo(
                 text=text,
@@ -427,6 +535,8 @@ def extract_pairs_from_doc(doc: Doc) -> List[ExtractionPair]:
                 is_obligation=True,
                 is_permission=False,
                 has_coref=False,
+                obligation_rules=("fallback_section",),
+                lexicon_hits=hits,
             )
             sentences.append(info)
             fallback_order += 1
@@ -471,10 +581,35 @@ def extract_pairs_from_doc(doc: Doc) -> List[ExtractionPair]:
                 if pair_key in seen:
                     continue
                 seen.add(pair_key)
+                numeric_hits, numeric_strength, numeric_conf, numeric_negations = summarise_numeric_covenants(
+                    obligation.text, perm.text
+                )
+                combined_bypass = tuple(
+                    sorted(set(obligation.bypass_terms + perm.bypass_terms))
+                )
                 metadata = {
                     "section_key": section_key,
+                    "section_canonical": obligation.context.canonical,
+                    "section_title": obligation.context.title,
+                    "section_path": obligation.context.path,
+                    "section_rank": obligation.context.rank,
+                    "section_level": obligation.context.level,
                     "clause_linked": perm.has_coref and obligation.order <= perm.order,
                     "order_distance": perm.order - obligation.order,
+                    "link_strategy": "coreference"
+                    if perm.has_coref and obligation.order <= perm.order
+                    else "window",
+                    "obligation_rules": list(obligation.obligation_rules),
+                    "permission_rules": list(perm.permission_rules),
+                    "obligation_lexicon_hits": list(obligation.lexicon_hits),
+                    "permission_lexicon_hits": list(perm.lexicon_hits),
+                    "obligation_block_index": obligation.block_index,
+                    "permission_block_index": perm.block_index,
+                    "bypass_terms": list(combined_bypass),
+                    "numeric_hits": numeric_hits,
+                    "numeric_strength": numeric_strength,
+                    "numeric_confidence": numeric_conf,
+                    "numeric_negations": numeric_negations,
                 }
                 pairs.append(
                     ExtractionPair(
@@ -493,6 +628,9 @@ def extract_pairs_from_doc(doc: Doc) -> List[ExtractionPair]:
                 if pair_key in seen:
                     continue
                 seen.add(pair_key)
+                numeric_hits, numeric_strength, numeric_conf, numeric_negations = summarise_numeric_covenants(
+                    obligation.text, obligation.text
+                )
                 pairs.append(
                     ExtractionPair(
                         obligation=obligation.text,
@@ -500,6 +638,23 @@ def extract_pairs_from_doc(doc: Doc) -> List[ExtractionPair]:
                         section=obligation.context,
                         metadata={
                             "section_key": section_key,
+                            "section_canonical": obligation.context.canonical,
+                            "section_title": obligation.context.title,
+                            "section_path": obligation.context.path,
+                            "section_rank": obligation.context.rank,
+                            "section_level": obligation.context.level,
+                            "link_strategy": "synthetic",
+                            "obligation_rules": list(obligation.obligation_rules),
+                            "permission_rules": ["synthetic"],
+                            "obligation_lexicon_hits": list(obligation.lexicon_hits),
+                            "permission_lexicon_hits": list(obligation.lexicon_hits),
+                            "obligation_block_index": obligation.block_index,
+                            "permission_block_index": obligation.block_index,
+                            "bypass_terms": list(obligation.bypass_terms),
+                            "numeric_hits": numeric_hits,
+                            "numeric_strength": numeric_strength,
+                            "numeric_confidence": numeric_conf,
+                            "numeric_negations": numeric_negations,
                             "synthetic_permission": True,
                         },
                     )
@@ -557,6 +712,56 @@ def _split_sentences(text: str) -> List[str]:
     return [part.strip() for part in parts if part.strip()]
 
 
+TOC_LEADER_RE = re.compile(r"\.{2,}\s*\d{1,3}$")
+TOC_ITEM_RE = re.compile(r"^(?:item|part)\s+\d+[A-Z]?(?:\.|\s|$)", re.I)
+
+
+def _collect_finance_hits(text: str) -> Tuple[str, ...]:
+    lowered = text.lower()
+    hits: Set[str] = set()
+    for term in FINANCE_TERMS:
+        if not term:
+            continue
+        if " " in term:
+            if term in lowered:
+                hits.add(term)
+            continue
+        pattern = re.compile(rf"\\b{re.escape(term)}\\b")
+        if pattern.search(lowered):
+            hits.add(term)
+    return tuple(sorted(hits))
+
+
+def _extract_bypass_terms(text: str) -> Tuple[str, ...]:
+    found: Set[str] = set()
+    for pattern, label in BYPASS_REGEXES:
+        if pattern.search(text):
+            found.add(label)
+    return tuple(sorted(found))
+
+
+def _looks_like_toc(text: Optional[str]) -> bool:
+    if not text:
+        return False
+    stripped = text.strip()
+    if not stripped:
+        return False
+    for pattern in TOC_REGEXES:
+        if pattern.search(stripped):
+            return True
+    if TOC_LEADER_RE.search(stripped):
+        return True
+    if TOC_ITEM_RE.search(stripped) and TOC_LEADER_RE.search(stripped):
+        return True
+    segments = [segment.strip() for segment in stripped.split(">") if segment.strip()]
+    for segment in segments:
+        if TOC_ITEM_RE.search(segment) and TOC_LEADER_RE.search(segment):
+            return True
+    if stripped.count(".") >= 2 and sum(ch.isdigit() for ch in stripped[-6:]) >= 2:
+        return True
+    return False
+
+
 def _fallback_section_lookup(doc: Doc) -> Dict[int, SectionContext]:
     lookup: Dict[int, SectionContext] = {}
     contexts: Dict[str, SectionContext] = {}
@@ -566,6 +771,9 @@ def _fallback_section_lookup(doc: Doc) -> Dict[int, SectionContext]:
             continue
         meta = block.meta if isinstance(block.meta, dict) else {}
         path = meta.get("header_path") or block.text
+        text = block.text or ""
+        if (_looks_like_toc(path) or _looks_like_toc(text)) and not _collect_finance_hits(text):
+            continue
         canonical, weight_key = _canonicalize_section(path, doc.doc_kind, path)
         if not canonical or canonical not in FINANCE_SECTION_KEYS:
             continue
@@ -606,6 +814,107 @@ def damp_investment_grade(ticker: str, cce: float) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Numeric normalisation helpers
+# ---------------------------------------------------------------------------
+
+
+NUMERIC_WINDOW_CHARS = 48
+
+
+def _normalize_numeric_scalar(value: Optional[object], unit: Optional[str]) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        scalar = float(value)
+    except (TypeError, ValueError):
+        return None
+    unit_norm = (unit or "").upper()
+    if unit_norm in {"USD", "$"}:
+        return scalar / 1_000_000.0
+    if unit_norm in {"PERCENT", "%"}:
+        return scalar / 100.0
+    if unit_norm == "BPS":
+        return scalar / 10_000.0
+    return scalar
+
+
+def _normalize_numeric_entry(entry: Dict[str, object], default_unit: Optional[str] = None) -> List[float]:
+    unit = entry.get("unit") if isinstance(entry, dict) else None
+    if unit is None:
+        unit = default_unit
+    values: List[float] = []
+    if isinstance(entry, dict):
+        primary = _normalize_numeric_scalar(entry.get("value"), unit)
+        if primary is not None:
+            values.append(primary)
+        min_value = _normalize_numeric_scalar(entry.get("min"), unit)
+        max_value = _normalize_numeric_scalar(entry.get("max"), unit)
+        if min_value is not None and max_value is not None:
+            values.append(0.5 * (min_value + max_value))
+        elif min_value is not None:
+            values.append(min_value)
+        elif max_value is not None:
+            values.append(max_value)
+        legs = entry.get("legs") if isinstance(entry.get("legs"), list) else []
+        for leg in legs:
+            if isinstance(leg, dict):
+                values.extend(_normalize_numeric_entry(leg, unit))
+    return [float(v) for v in values if isinstance(v, (int, float))]
+
+
+def _has_negation_window(sentence: str, spans: Sequence[Sequence[int]]) -> bool:
+    lowered = sentence.lower()
+    if not lowered:
+        return False
+    for span in spans:
+        if not isinstance(span, (list, tuple)) or len(span) != 2:
+            continue
+        try:
+            start, end = int(span[0]), int(span[1])
+        except (TypeError, ValueError):
+            continue
+        window_start = max(0, start - NUMERIC_WINDOW_CHARS)
+        window_end = min(len(sentence), end + NUMERIC_WINDOW_CHARS)
+        window = lowered[window_start:window_end]
+        if any(term in window for term in NEGATION_TERMS):
+            return True
+    return False
+
+
+def summarise_numeric_covenants(obligation: str, permission: str) -> Tuple[int, float, float, int]:
+    results: List[Dict[str, object]] = []
+    for text in (obligation, permission):
+        try:
+            results.extend(extract_numeric_covenants(text))
+        except Exception:
+            continue
+    count = len(results)
+    if count == 0:
+        return 0, 0.0, 0.0, 0
+    values: List[float] = []
+    confidences: List[float] = []
+    negated = 0
+    for item in results:
+        values.extend(_normalize_numeric_entry(item))
+        conf = item.get("confidence")
+        try:
+            confidences.append(float(conf))
+        except (TypeError, ValueError):
+            pass
+        raw = item.get("raw") if isinstance(item.get("raw"), dict) else {}
+        sentence = str(raw.get("sentence", ""))
+        spans = raw.get("spans") if isinstance(raw, dict) else []
+        if sentence and _has_negation_window(sentence, spans if isinstance(spans, list) else []):
+            negated += 1
+    avg_value = float(statistics.fmean(values)) if values else 0.0
+    avg_conf = float(statistics.fmean(confidences)) if confidences else 0.0
+    if negated and avg_value:
+        penalty = max(0.2, 1.0 - 0.25 * min(negated, 3))
+        avg_value *= penalty
+    return count, avg_value, avg_conf, negated
+
+
+# ---------------------------------------------------------------------------
 # Config helpers
 # ---------------------------------------------------------------------------
 
@@ -643,6 +952,77 @@ def _load_config() -> Dict[str, object]:
 
 
 CFG = _load_config()
+
+
+def _iter_config_list(value: object) -> Iterable[str]:
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            if item is None:
+                continue
+            text = str(item).strip()
+            if text:
+                yield text
+
+
+LEXICON_CFG = CFG.get("lexicon", {}) if isinstance(CFG.get("lexicon"), dict) else {}
+
+FINANCE_TERMS: Tuple[str, ...] = tuple(
+    sorted(
+        {
+            term.lower()
+            for term in DEFAULT_FINANCE_TERMS
+        }
+        | {term.lower() for term in _iter_config_list(LEXICON_CFG.get("finance_terms"))}
+    )
+)
+
+FALLBACK_KEYWORDS: Tuple[str, ...] = FINANCE_TERMS
+
+TOC_PATTERN_STRINGS: Tuple[str, ...] = tuple(
+    list(DEFAULT_TOC_PATTERNS) + list(_iter_config_list(LEXICON_CFG.get("toc_patterns")))
+)
+TOC_REGEXES: Tuple[re.Pattern[str], ...] = tuple(_compile_phrase(item) for item in TOC_PATTERN_STRINGS)
+
+BYPASS_TERMS: Tuple[str, ...] = tuple(
+    sorted(
+        {
+            term.lower()
+            for term in DEFAULT_BYPASS_CUES
+        }
+        | {term.lower() for term in _iter_config_list(LEXICON_CFG.get("bypass_cues"))}
+    )
+)
+BYPASS_REGEXES: Tuple[Tuple[re.Pattern[str], str], ...] = tuple(
+    (_compile_phrase(term), term) for term in BYPASS_TERMS
+)
+
+NEGATION_TERMS: Tuple[str, ...] = tuple(
+    sorted(
+        {
+            term.lower()
+            for term in DEFAULT_NEGATION_TERMS
+        }
+        | {term.lower() for term in _iter_config_list(LEXICON_CFG.get("negation_terms"))}
+    )
+)
+
+SECTION_ALIAS_MAP: Dict[str, Set[str]] = {}
+for key, phrases in DEFAULT_SECTION_ALIASES.items():
+    SECTION_ALIAS_MAP[key.upper()] = {phrase for phrase in phrases}
+if isinstance(LEXICON_CFG.get("section_aliases"), dict):
+    for canonical, phrases in LEXICON_CFG["section_aliases"].items():
+        key = str(canonical).upper()
+        entries = SECTION_ALIAS_MAP.setdefault(key, set())
+        for phrase in _iter_config_list(phrases):
+            entries.add(phrase)
+
+SECTION_ALIAS_INDEX: List[Tuple[str, str]] = []
+for canonical, phrases in SECTION_ALIAS_MAP.items():
+    for phrase in phrases:
+        normalized = _normalize_match_text(phrase)
+        if normalized:
+            SECTION_ALIAS_INDEX.append((normalized, canonical))
+SECTION_ALIAS_INDEX.sort(key=lambda item: (-len(item[0]), item[1]))
 
 AUTHORITY_WEIGHTS: Dict[str, float] = (
     CFG.get("weights", {}).get("authority", {}) if isinstance(CFG.get("weights"), dict) else {}

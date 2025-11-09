@@ -90,7 +90,7 @@ def _load_manifest(path: Path) -> pd.DataFrame:
     df["path"] = df["path"].astype(str)
     df = df[df["path"].map(lambda p: Path(p).exists())]
     if df.empty:
-        raise RuntimeError("Manifest is empty after filtering existing filings")
+        print("[warn] evaluation manifest is empty after filtering existing filings", file=sys.stderr)
     return df
 
 
@@ -147,6 +147,46 @@ def _aggregate_doc_text(doc: object) -> str:
     return "\n".join(parts)
 
 
+def _pair_provenance(pair: fx.ExtractionPair) -> Dict[str, object]:
+    metadata = dict(getattr(pair, "metadata", {}) or {})
+    section = pair.section
+    section_payload = {
+        "canonical": getattr(section, "canonical", None),
+        "title": getattr(section, "title", None),
+        "path": getattr(section, "path", None),
+        "rank": getattr(section, "rank", None),
+        "level": getattr(section, "level", None),
+    }
+    provenance = {
+        "section": section_payload,
+        "section_key": metadata.get("section_key"),
+        "link_strategy": metadata.get("link_strategy"),
+        "clause_linked": metadata.get("clause_linked"),
+        "order_distance": metadata.get("order_distance"),
+        "rules": {
+            "obligation": list(metadata.get("obligation_rules", [])),
+            "permission": list(metadata.get("permission_rules", [])),
+        },
+        "lexicon": {
+            "obligation": list(metadata.get("obligation_lexicon_hits", [])),
+            "permission": list(metadata.get("permission_lexicon_hits", [])),
+        },
+        "bypass_terms": list(metadata.get("bypass_terms", [])),
+        "numeric": {
+            "hits": metadata.get("numeric_hits"),
+            "strength": metadata.get("numeric_strength"),
+            "confidence": metadata.get("numeric_confidence"),
+            "negations": metadata.get("numeric_negations"),
+        },
+        "blocks": {
+            "obligation": metadata.get("obligation_block_index"),
+            "permission": metadata.get("permission_block_index"),
+        },
+        "synthetic_permission": bool(metadata.get("synthetic_permission", False)),
+    }
+    return provenance
+
+
 def _evidence_to_dict(ev: esc.FilingEvidence) -> Dict[str, object]:
     return {
         "ticker": ev.ticker,
@@ -163,6 +203,7 @@ def _evidence_to_dict(ev: esc.FilingEvidence) -> Dict[str, object]:
         "numeric_strength": ev.numeric_strength,
         "numeric_confidence": ev.numeric_confidence,
         "bypass_proximity": ev.bypass_proximity,
+        "provenance": ev.provenance,
     }
 
 
@@ -182,6 +223,7 @@ def _evidence_from_dict(data: Dict[str, object]) -> esc.FilingEvidence:
         numeric_strength=float(data.get("numeric_strength", 0.0)),
         numeric_confidence=float(data.get("numeric_confidence", 0.0)),
         bypass_proximity=float(data.get("bypass_proximity", 0.0)),
+        provenance=dict(data.get("provenance", {})),
     )
 
 
@@ -236,10 +278,22 @@ def _record_from_dict(data: Dict[str, object]) -> esc.FilingRecord:
 
 
 def _serialise_processed(processed: Dict[str, object]) -> Dict[str, object]:
+    filed_value = processed.get("filed")
+    if hasattr(filed_value, "isoformat"):
+        filed_str = getattr(filed_value, "isoformat")()
+    else:
+        filed_str = str(filed_value or "")
+
     payload: Dict[str, object] = {
         "status": "ok",
         "record": _record_to_dict(processed["record"]),
         "text": processed.get("text", ""),
+        "filed": filed_str,
+        "ticker": processed.get("ticker"),
+        "label": processed.get("label"),
+        "role": processed.get("role"),
+        "path": processed.get("path"),
+        "md5": processed.get("md5"),
     }
     evidence = processed.get("evidence", [])
     payload["evidence"] = [
@@ -251,6 +305,7 @@ def _serialise_processed(processed: Dict[str, object]) -> Dict[str, object]:
             "obligation": getattr(best_pair, "obligation", ""),
             "permission": getattr(best_pair, "permission", ""),
             "metadata": getattr(best_pair, "metadata", {}),
+            "provenance": processed.get("best_provenance", {}),
         }
     return payload
 
@@ -274,7 +329,14 @@ def _deserialise_processed(data: Dict[str, object]) -> Dict[str, object]:
         "record": record,
         "evidence": evidence,
         "best_pair": best_pair,
+        "best_provenance": dict(best_payload.get("provenance", {})),
         "text": str(data.get("text", "")),
+        "filed": data.get("filed"),
+        "ticker": data.get("ticker"),
+        "label": data.get("label"),
+        "role": data.get("role"),
+        "path": data.get("path"),
+        "md5": data.get("md5"),
     }
 
 
@@ -286,8 +348,6 @@ def _process_filing(row: pd.Series, seed: int) -> Optional[Dict[str, object]]:
     form = row.get("form")
     doc = fx._build_doc_from_html(html, form)  # type: ignore[attr-defined]
     pairs = fx.extract_pairs_from_doc(doc)
-    if not pairs:
-        return None
     filed = str(row.get("filed", ""))
     role, label = _label_for_ticker(str(row.get("ticker", "")))
     rng = _rng_for_filing(seed, str(row.get("ticker", "")), filed)
@@ -303,14 +363,15 @@ def _process_filing(row: pd.Series, seed: int) -> Optional[Dict[str, object]]:
         "num_conf": 0.0,
         "bypass": 0.0,
         "pair": None,
+        "provenance": {},
     }
 
     for pair in pairs:
         score, raw, cue, sev, num_hits, num_strength, num_conf, bypass = esc._compute_pair_score(  # type: ignore[attr-defined]
-            pair.obligation,
-            pair.permission,
+            pair,
             rng,
         )
+        provenance = _pair_provenance(pair)
         evidence_rows.append(
             esc.FilingEvidence(
                 ticker=str(row.get("ticker", "")).upper(),
@@ -327,6 +388,7 @@ def _process_filing(row: pd.Series, seed: int) -> Optional[Dict[str, object]]:
                 numeric_strength=num_strength,
                 numeric_confidence=num_conf,
                 bypass_proximity=bypass,
+                provenance=provenance,
             )
         )
         if score > best["score"]:
@@ -341,11 +403,9 @@ def _process_filing(row: pd.Series, seed: int) -> Optional[Dict[str, object]]:
                     "num_conf": num_conf,
                     "bypass": bypass,
                     "pair": pair,
+                    "provenance": provenance,
                 }
             )
-
-    if not evidence_rows:
-        return None
 
     try:
         filing_date = pd.to_datetime(filed).date()
@@ -376,6 +436,7 @@ def _process_filing(row: pd.Series, seed: int) -> Optional[Dict[str, object]]:
         "record": record,
         "evidence": evidence_rows,
         "best_pair": best["pair"],
+        "best_provenance": best.get("provenance", {}),
         "text": _aggregate_doc_text(doc),
         "md5": row.get("md5"),
         "path": str(path),
@@ -393,7 +454,116 @@ def _feature_dataframe(records: Sequence[esc.FilingRecord]) -> Tuple[pd.DataFram
     return df, y
 
 
-def _train_test_split(rows: List[Dict[str, object]]) -> Tuple[List[int], List[int]]:
+def _row_year(row: Dict[str, object]) -> Optional[int]:
+    filed = row.get("filed")
+    if filed is None:
+        return None
+    if isinstance(filed, (dt.datetime, dt.date)):
+        return filed.year
+    try:
+        ts = pd.to_datetime(filed)
+    except Exception:
+        return None
+    if pd.isna(ts):
+        return None
+    return int(ts.year)
+
+
+def _issuer_split_stats(
+    rows: List[Dict[str, object]], train_idx: Sequence[int], test_idx: Sequence[int]
+) -> Tuple[float, List[str], List[str], List[str]]:
+    train_tickers = {str(rows[idx].get("ticker", "")).upper() for idx in train_idx if rows[idx].get("ticker")}
+    test_tickers = {str(rows[idx].get("ticker", "")).upper() for idx in test_idx if rows[idx].get("ticker")}
+    exclusive = sorted(ticker for ticker in test_tickers if ticker not in train_tickers)
+    ratio = len(exclusive) / len(test_tickers) if test_tickers else 0.0
+    return ratio, exclusive, sorted(test_tickers), sorted(train_tickers)
+
+
+def _strict_time_split(
+    rows: List[Dict[str, object]],
+    *,
+    min_test: int = 30,
+    issuer_ratio: float = 0.2,
+) -> Tuple[List[int], List[int], Dict[str, object]]:
+    years = sorted({year for row in rows if (year := _row_year(row)) is not None})
+    if len(years) < 2:
+        raise RuntimeError("Temporal split requires filings across at least two years")
+
+    def split_for_year(cutoff_year: int) -> Tuple[List[int], List[int]]:
+        train: List[int] = []
+        test: List[int] = []
+        for idx, row in enumerate(rows):
+            year = _row_year(row)
+            if year is None:
+                train.append(idx)
+                continue
+            if year <= cutoff_year:
+                train.append(idx)
+            else:
+                test.append(idx)
+        return train, test
+
+    initial_cutoff: Optional[int] = None
+    for candidate in years[:-1]:
+        train_idx, test_idx = split_for_year(candidate)
+        if len(test_idx) >= min_test:
+            initial_cutoff = candidate
+    if initial_cutoff is None:
+        initial_cutoff = years[-2]
+    train_idx, test_idx = split_for_year(initial_cutoff)
+    if len(test_idx) < min_test:
+        raise RuntimeError("Unable to satisfy minimum test size with temporal split")
+
+    ratio, exclusive, test_issuers, train_issuers = _issuer_split_stats(rows, train_idx, test_idx)
+    cutoff_year = initial_cutoff
+    adjustments: List[Dict[str, object]] = []
+    current_index = years.index(initial_cutoff)
+    while ratio < issuer_ratio and current_index < len(years) - 1:
+        next_cutoff = years[current_index + 1]
+        candidate_train, candidate_test = split_for_year(next_cutoff)
+        if len(candidate_test) < min_test:
+            adjustments.append(
+                {
+                    "cutoff_year": next_cutoff,
+                    "action": "halt",
+                    "reason": "min_test",
+                    "test_size": len(candidate_test),
+                }
+            )
+            break
+        cutoff_year = next_cutoff
+        train_idx, test_idx = candidate_train, candidate_test
+        ratio, exclusive, test_issuers, train_issuers = _issuer_split_stats(rows, train_idx, test_idx)
+        adjustments.append(
+            {
+                "cutoff_year": cutoff_year,
+                "issuer_ratio": ratio,
+                "test_size": len(test_idx),
+            }
+        )
+        current_index += 1
+
+    print(
+        f"[split] cutoff_year={cutoff_year} test_size={len(test_idx)} issuer_ratio={ratio:.1%} exclusive_test={len(exclusive)}",
+        flush=True,
+    )
+
+    metadata = {
+        "strategy": "temporal_cutoff",
+        "initial_cutoff_year": initial_cutoff,
+        "cutoff_year": cutoff_year,
+        "min_test": min_test,
+        "issuer_ratio_target": issuer_ratio,
+        "issuer_ratio": ratio,
+        "exclusive_test_issuers": exclusive,
+        "test_issuers": test_issuers,
+        "train_issuers": train_issuers,
+        "adjustments": adjustments,
+    }
+    return sorted(set(train_idx)), sorted(set(test_idx)), metadata
+
+
+def _legacy_split(rows: List[Dict[str, object]]) -> Tuple[List[int], List[int]]:
     by_ticker: Dict[str, List[Tuple[int, pd.Timestamp]]] = defaultdict(list)
     for idx, row in enumerate(rows):
         filed = row["filed"]
@@ -411,6 +581,20 @@ def _train_test_split(rows: List[Dict[str, object]]) -> Tuple[List[int], List[in
         for idx, _ in entries[-cutoff:]:
             test_indices.append(idx)
     return sorted(set(train_indices)), sorted(set(test_indices))
+
+
+def _random_train_test_split(rows: List[Dict[str, object]], seed: int) -> Tuple[List[int], List[int]]:
+    rng = np.random.default_rng(seed)
+    indices = np.arange(len(rows))
+    if len(indices) == 0:
+        return [], []
+    rng.shuffle(indices)
+    cutoff = max(1, len(indices) // 3)
+    test_idx = sorted(indices[:cutoff].tolist())
+    train_idx = sorted(indices[cutoff:].tolist())
+    if not train_idx:
+        train_idx, test_idx = test_idx, []
+    return train_idx, test_idx
 
 
 def _bootstrap_auc(y_true: np.ndarray, scores: np.ndarray, *, seed: int, n: int = 2000) -> Tuple[Tuple[float, float], int]:
@@ -1007,14 +1191,17 @@ def evaluate(
                 "test": 0,
                 "distressed": 0,
                 "controls": 0,
+                "train_breakdown": {"total": 0, "by_role": {}, "by_issuer": {}, "by_year": {}},
+                "test_breakdown": {"total": 0, "by_role": {}, "by_issuer": {}, "by_year": {}},
             },
             "metrics": {},
             "train_indices": [],
             "test_indices": [],
-            "label_shuffle_auc": math.nan,
+            "label_shuffle": {"auc": math.nan, "seed": None},
             "welch": {"statistic": math.nan, "p_value": math.nan},
             "ablations": {},
             "similarity": {"max_cross_split": math.nan, "pair": (-1, -1)},
+            "permutation_importance": [],
             "rows": [],
             "features": {},
             "fingerprint": {},
@@ -1165,9 +1352,75 @@ def evaluate(
             "ev_severity_hits_sum",
         ],
     }
-    ablations = _ablation_scores(features_df, y, train_idx, test_idx, ablation_groups, seed=seed + 2)
+    ablations = (
+        _ablation_scores(features_df, y, train_idx, test_idx, ablation_groups, seed=seed + 2)
+        if not baseline_only
+        else {}
+    )
 
-    similarity, pair_idx = _tfidf_similarity(rows, train_idx, test_idx)
+    permutation_table: List[Dict[str, object]] = []
+    if not baseline_only and logistic_model is not None:
+        try:
+            perm = permutation_importance(
+                logistic_model,
+                X_test,
+                y[test_idx],
+                n_repeats=64,
+                random_state=seed,
+                scoring="roc_auc",
+            )
+            for idx, feature in enumerate(features_df.columns):
+                permutation_table.append(
+                    {
+                        "feature": feature,
+                        "importance": float(perm.importances_mean[idx]),
+                        "std": float(perm.importances_std[idx]),
+                    }
+                )
+        except Exception:
+            permutation_table = []
+    permutation_table.sort(key=lambda item: abs(item.get("importance", 0.0)), reverse=True)
+    permutation_table = permutation_table[:10]
+
+    train_texts = [rows[idx]["text"] for idx in train_idx]
+    test_texts = [rows[idx]["text"] for idx in test_idx]
+    tfidf_similarity, tfidf_pair_local = max_cross_tfidf_similarity(train_texts, test_texts)
+    if not math.isnan(tfidf_similarity) and tfidf_pair_local != (-1, -1):
+        tfidf_pair = (train_idx[tfidf_pair_local[0]], test_idx[tfidf_pair_local[1]])
+    else:
+        tfidf_pair = (-1, -1)
+
+    minhash_similarity, minhash_pair_local = max_cross_minhash_similarity(train_texts, test_texts)
+    if not math.isnan(minhash_similarity) and minhash_pair_local != (-1, -1):
+        minhash_pair = (train_idx[minhash_pair_local[0]], test_idx[minhash_pair_local[1]])
+    else:
+        minhash_pair = (-1, -1)
+
+    def _split_counts(indices: Sequence[int]) -> Dict[str, object]:
+        subset = [rows[idx] for idx in indices]
+        frame = pd.DataFrame(
+            [
+                {
+                    "ticker": entry.get("ticker", "unknown"),
+                    "role": entry.get("role", "unknown"),
+                    "year": _row_year(entry),
+                }
+                for entry in subset
+            ]
+        )
+        if frame.empty:
+            return {
+                "total": 0,
+                "by_role": {},
+                "by_issuer": {},
+                "by_year": {},
+            }
+        return {
+            "total": int(len(indices)),
+            "by_role": {str(k): int(v) for k, v in frame["role"].value_counts().to_dict().items()},
+            "by_issuer": {str(k): int(v) for k, v in frame["ticker"].value_counts().to_dict().items()},
+            "by_year": {str(k): int(v) for k, v in frame["year"].value_counts().to_dict().items()},
+        }
 
     try:
         import regex as regex_mod  # type: ignore
@@ -1194,6 +1447,8 @@ def evaluate(
             "test": len(test_idx),
             "distressed": int(y.sum()),
             "controls": int(len(y) - y.sum()),
+            "train_breakdown": _split_counts(train_idx),
+            "test_breakdown": _split_counts(test_idx),
         },
         "train_indices": train_idx,
         "test_indices": test_idx,
@@ -1217,13 +1472,50 @@ def evaluate(
         },
         "ablations": ablations,
         "similarity": {
-            "max_cross_split": similarity,
-            "pair": pair_idx,
+            "tfidf": {
+                "max_cross_split": tfidf_similarity,
+                "pair": tfidf_pair,
+            },
+            "minhash": {
+                "max_cross_split": minhash_similarity,
+                "pair": minhash_pair,
+            },
         },
+        "permutation_importance": permutation_table,
         "rows": rows,
         "features": features_df.to_dict(orient="list"),
         "fingerprint": fingerprint_payload,
     }
+
+    dedup_info: Dict[str, object] = {"quarantined": 0, "decisions": []}
+    if decisions_path and decisions_path.exists():
+        try:
+            decisions_payload = json.loads(decisions_path.read_text(encoding="utf-8"))
+            if isinstance(decisions_payload, list):
+                dedup_info["decisions"] = decisions_payload
+        except Exception as exc:  # pragma: no cover - best effort to continue
+            print(f"[warn] failed to read dedup decisions: {exc}", file=sys.stderr)
+    if quarantine_path and quarantine_path.exists():
+        quarantine_df = pd.read_csv(quarantine_path)
+        dedup_info["quarantined"] = int(len(quarantine_df))
+        if not dedup_info["decisions"] and {
+            "duplicate_of",
+            "dedup_method",
+            "dedup_score",
+        }.issubset(set(quarantine_df.columns)):
+            dedup_info["decisions"] = [
+                {
+                    "kept_id": row.get("duplicate_of"),
+                    "removed_id": row.get("filing_id") or row.get("path"),
+                    "kept_path": row.get("duplicate_path"),
+                    "removed_path": row.get("path"),
+                    "method": row.get("dedup_method"),
+                    "score": row.get("dedup_score"),
+                    "rationale": row.get("dedup_rationale"),
+                }
+                for _, row in quarantine_df.iterrows()
+            ]
+    outputs["dedup"] = dedup_info
     return outputs
 
 
@@ -1290,7 +1582,10 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", encoding="utf-8") as handle:
         json.dump(results, handle, indent=2, default=str)
-    print(json.dumps({k: v for k, v in results.items() if k not in {"rows", "features"}}, indent=2))
+    summary_payload = {
+        k: v for k, v in results.items() if k not in {"rows", "features"}
+    }
+    print(json.dumps(summary_payload, indent=2))
 
 
 if __name__ == "__main__":

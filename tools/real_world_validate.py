@@ -146,15 +146,17 @@ def _build_records(rows: Sequence[Dict[str, str]]) -> Tuple[List[esc.FilingRecor
         best_bypass = 0.0
         evidence_rows: List[esc.FilingEvidence] = []
         for pair in pairs:
-            obligation, permission = pair.obligation, pair.permission
-            score, raw, cue, sev_hits, num_hits = esc._compute_pair_score(obligation, permission, rng)
+            score, raw, cue, sev_hits, num_hits, numeric_strength, numeric_conf, bypass_proximity = esc._compute_pair_score(
+                pair,
+                rng,
+            )
             evidence = esc.FilingEvidence(
                 ticker=ticker,
                 filing_id=filing_id,
                 filing_date=filing_date.isoformat(),
                 form=form,
-                obligation=obligation.strip(),
-                permission=permission.strip(),
+                obligation=pair.obligation.strip(),
+                permission=pair.permission.strip(),
                 score=score,
                 raw_score=raw,
                 cue_weight=cue,
@@ -163,6 +165,7 @@ def _build_records(rows: Sequence[Dict[str, str]]) -> Tuple[List[esc.FilingRecor
                 numeric_strength=numeric_strength,
                 numeric_confidence=numeric_conf,
                 bypass_proximity=bypass_proximity,
+                provenance=dict(getattr(pair, "metadata", {})),
             )
             evidence_rows.append(evidence)
             if score > best_score:
@@ -222,11 +225,19 @@ def _write_evidence_csv(evidences: Sequence[esc.FilingEvidence]) -> None:
             pair = f"{ev.obligation} || {ev.permission}"
             snippet = pair.replace("\n", " ")[:600]
             has_bypass = "yes" if ev.bypass_proximity > 0 else "no"
+            provenance = ev.provenance if isinstance(ev.provenance, dict) else {}
+            section_info = provenance.get("section", {}) if isinstance(provenance.get("section"), dict) else {}
+            section_name = (
+                section_info.get("canonical")
+                or section_info.get("title")
+                or provenance.get("section_key")
+                or "Unknown"
+            )
             writer.writerow(
                 [
                     ev.ticker,
                     ev.filing_id,
-                    "Unknown",
+                    section_name,
                     pair[:200],
                     f"{ev.score:.3f}",
                     ev.numeric_hits,
@@ -234,7 +245,7 @@ def _write_evidence_csv(evidences: Sequence[esc.FilingEvidence]) -> None:
                     f"{ev.numeric_confidence:.3f}",
                     f"{ev.bypass_proximity:.3f}",
                     has_bypass,
-                    "n/a",
+                    section_info.get("canonical") or "n/a",
                     snippet,
                 ]
             )
