@@ -1,510 +1,356 @@
 #!/usr/bin/env python3
-"""SEC finance manifest deduplication with multi-modal similarity checks."""
+"""Deduplicate SEC manifests and maintain a reusable LSH cache."""
 
 from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import json
-import math
 import re
-import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Sequence, Tuple
+from typing import Dict, List, Sequence, Set, Tuple
 
-import numpy as np
 import pandas as pd
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.neighbors import NearestNeighbors
 
-MAX_HTML_CHARS = 3_500_000
-LARGE_PRIME = 4_294_967_311  # largest 32-bit prime
-NUM_PERMUTATIONS = 64
-NUM_BANDS = 8
-ROWS_PER_BAND = NUM_PERMUTATIONS // NUM_BANDS
+DEFAULT_MANIFEST = Path("data/sec_real/manifest.csv")
+DEFAULT_OUTPUT = Path("data/sec_real/manifest_dedup.csv")
+DEFAULT_QUARANTINE = Path("data/sec_real/manifest_quarantine.csv")
+DEFAULT_CACHE = Path("data/sec_real/lsh_cache.json")
+DEFAULT_MINHASH_PERMUTATIONS = 64
+DEFAULT_LSH_BAND_SIZE = 8
+DEFAULT_DUPLICATE_THRESHOLD = 0.9
+DEFAULT_MIN_SPLIT = 80
+
+TEXT_ENCODING_FALLBACKS = ("utf-8", "latin-1", "cp1252")
+TOKEN_PATTERN = re.compile(r"[a-z0-9]{3,}")
 
 
 @dataclass
-class FilingRecord:
-    idx: int
-    path: Path
-    ticker: str
-    filed: pd.Timestamp
-    form: str
-    row: pd.Series
-    md5_raw: str
-    md5_normalised: str
-    text: str
-    shingles: Optional[Tuple[int, ...]] = None
-    signature: Optional[np.ndarray] = None
+class ManifestRow:
+    data: Dict[str, str]
 
     @property
-    def row_id(self) -> str:
-        filed = self.filed.strftime("%Y-%m-%d") if not pd.isna(self.filed) else "unknown"
-        stem = self.path.stem
-        return f"{self.ticker}:{filed}:{stem}".lower()
+    def md5(self) -> str:
+        return self.data.get("md5", "")
+
+    @property
+    def path(self) -> Path:
+        return Path(self.data.get("path", ""))
+
+    @property
+    def filed(self) -> str:
+        return self.data.get("filed", "")
+
+    @property
+    def label(self) -> str:
+        return self.data.get("label", "") or "unknown"
+
+    @property
+    def key(self) -> str:
+        return self.md5 or f"{self.data.get('ticker','')}::{self.path.name}"
 
 
-@dataclass
-class DedupDecision:
-    kept_id: str
-    removed_id: str
-    kept_path: str
-    removed_path: str
-    method: str
-    score: float
-    rationale: str
+class SimpleMinHashLSH:
+    def __init__(
+        self,
+        cache_path: Path,
+        num_perm: int = DEFAULT_MINHASH_PERMUTATIONS,
+        band_size: int = DEFAULT_LSH_BAND_SIZE,
+    ) -> None:
+        if num_perm % band_size != 0:
+            raise ValueError("num_perm must be divisible by band_size")
+        self.cache_path = cache_path
+        self.num_perm = num_perm
+        self.band_size = band_size
+        self._signatures: Dict[str, List[int]] = {}
+        self._bands: Dict[str, Set[str]] = defaultdict(set)
+        self._load()
 
-
-def _load_manifest(path: Path) -> pd.DataFrame:
-    df = pd.read_csv(path)
-    if "path" not in df.columns:
-        raise ValueError("Manifest must contain a 'path' column")
-    if df.empty:
-        print("[warn] manifest is empty after verifying file paths", file=sys.stderr)
-        return df.reset_index(drop=True)
-    df = df[df["path"].notna()]
-    if df.empty:
-        print("[warn] manifest has no rows with valid paths", file=sys.stderr)
-        return df.reset_index(drop=True)
-    df["path"] = df["path"].astype(str)
-    df = df[df["path"].map(lambda p: Path(p).exists())]
-    if df.empty:
-        print("[warn] manifest paths do not exist locally", file=sys.stderr)
-    return df.reset_index(drop=True)
-
-
-def _read_html(path: Path) -> str:
-    html = path.read_text(encoding="utf-8", errors="ignore")
-    if len(html) > MAX_HTML_CHARS:
-        html = html[:MAX_HTML_CHARS]
-    return html
-
-
-def _normalise_html(html: str) -> str:
-    return re.sub(r"\s+", "", html).lower()
-
-
-def _strip_html(html: str) -> str:
-    text = re.sub(r"<script.*?>.*?</script>", " ", html, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r"<style.*?>.*?</style>", " ", text, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = re.sub(r"&nbsp;", " ", text, flags=re.IGNORECASE)
-    text = re.sub(r"&amp;", "&", text, flags=re.IGNORECASE)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip().lower()
-
-
-def _hash_string(value: str) -> int:
-    digest = hashlib.md5(value.encode("utf-8")).hexdigest()
-    return int(digest, 16) & 0xFFFFFFFF
-
-
-def _generate_permutations(num_perm: int = NUM_PERMUTATIONS) -> np.ndarray:
-    rng = np.random.default_rng(20240417)
-    a = rng.integers(1, LARGE_PRIME - 1, size=num_perm, dtype=np.int64)
-    b = rng.integers(0, LARGE_PRIME - 1, size=num_perm, dtype=np.int64)
-    return np.stack([a, b], axis=1)
-
-
-PERMUTATIONS = _generate_permutations()
-
-
-def _build_shingles(text: str) -> Tuple[int, ...]:
-    tokens = re.findall(r"\w+", text.lower())
-    shingles: List[int] = []
-    for n in range(3, 6):
-        if len(tokens) < n:
-            continue
-        for i in range(len(tokens) - n + 1):
-            shingle = " ".join(tokens[i : i + n])
-            shingles.append(_hash_string(shingle))
-    if not shingles:
-        return tuple()
-    return tuple(sorted(set(shingles)))
-
-
-def _minhash_signature(shingles: Tuple[int, ...]) -> np.ndarray:
-    if not shingles:
-        return np.full(NUM_PERMUTATIONS, LARGE_PRIME, dtype=np.uint64)
-    shingles_arr = np.fromiter(shingles, dtype=np.uint64)
-    a = PERMUTATIONS[:, 0].astype(np.uint64)
-    b = PERMUTATIONS[:, 1].astype(np.uint64)
-    signatures = (np.minimum.reduce(((a[:, None] * shingles_arr) + b[:, None]) % LARGE_PRIME, axis=1)).astype(
-        np.uint64
-    )
-    return signatures
-
-
-def _minhash_lsh_candidates(signatures: Dict[int, np.ndarray]) -> Iterator[Tuple[int, int]]:
-    buckets: Dict[Tuple[int, bytes], List[int]] = defaultdict(list)
-    for idx, signature in signatures.items():
-        for band in range(NUM_BANDS):
-            start = band * ROWS_PER_BAND
-            end = start + ROWS_PER_BAND
-            key = signature[start:end].tobytes()
-            buckets[(band, key)].append(idx)
-    for (_, _), indices in buckets.items():
-        if len(indices) < 2:
-            continue
-        for i in range(len(indices)):
-            for j in range(i + 1, len(indices)):
-                yield indices[i], indices[j]
-
-
-def _pair_identifier(record: FilingRecord) -> str:
-    if "filing_id" in record.row and not pd.isna(record.row["filing_id"]):
-        return str(record.row["filing_id"])
-    return record.row_id
-
-
-def _choose_preferred_idx(left_idx: int, right_idx: int, records: Sequence[FilingRecord]) -> Tuple[int, int]:
-    left = records[left_idx]
-    right = records[right_idx]
-    left_filed = left.filed
-    right_filed = right.filed
-    if pd.isna(left_filed) and pd.isna(right_filed):
-        return (left_idx, right_idx) if left.row_id <= right.row_id else (right_idx, left_idx)
-    if pd.isna(left_filed):
-        return right_idx, left_idx
-    if pd.isna(right_filed):
-        return left_idx, right_idx
-    if left_filed == right_filed:
-        return (left_idx, right_idx) if left.row_id <= right.row_id else (right_idx, left_idx)
-    return (left_idx, right_idx) if left_filed <= right_filed else (right_idx, left_idx)
-
-
-def _tfidf_near_duplicates(records: List[FilingRecord], threshold: float) -> List[Tuple[int, int, float]]:
-    if len(records) < 2:
-        return []
-    texts = [record.text for record in records]
-    vectorizer = TfidfVectorizer(max_features=10000, stop_words="english")
-    matrix = vectorizer.fit_transform(texts)
-    nn = NearestNeighbors(metric="cosine", algorithm="brute", radius=1.0 - threshold)
-    nn.fit(matrix)
-    pairs: List[Tuple[int, int, float]] = []
-    for idx, sparse_row in enumerate(matrix):
-        distances, neighbours = nn.radius_neighbors(sparse_row, return_distance=True)
-        if not len(neighbours):
-            continue
-        for dist, neighbour in zip(distances[0], neighbours[0]):
-            if neighbour <= idx:
-                continue
-            similarity = 1.0 - float(dist)
-            if similarity >= threshold:
-                pairs.append((idx, int(neighbour), similarity))
-    return pairs
-
-
-def _minhash_near_duplicates(records: List[FilingRecord], threshold: float) -> List[Tuple[int, int, float]]:
-    if len(records) < 2:
-        return []
-    signatures: Dict[int, np.ndarray] = {}
-    shingles_cache: Dict[int, Tuple[int, ...]] = {}
-    for idx, record in enumerate(records):
-        shingles = record.shingles if record.shingles is not None else _build_shingles(record.text)
-        record.shingles = shingles
-        signature = record.signature if record.signature is not None else _minhash_signature(shingles)
-        record.signature = signature
-        signatures[idx] = signature
-        shingles_cache[idx] = shingles
-
-    seen_pairs: set[Tuple[int, int]] = set()
-    results: List[Tuple[int, int, float]] = []
-    for left_idx, right_idx in _minhash_lsh_candidates(signatures):
-        key = (min(left_idx, right_idx), max(left_idx, right_idx))
-        if key in seen_pairs:
-            continue
-        seen_pairs.add(key)
-        left_shingles = shingles_cache[left_idx]
-        right_shingles = shingles_cache[right_idx]
-        if not left_shingles or not right_shingles:
-            continue
-        left_set = set(left_shingles)
-        right_set = set(right_shingles)
-        intersection = len(left_set & right_set)
-        union = len(left_set | right_set)
-        similarity = intersection / union if union else 0.0
-        if similarity >= threshold:
-            results.append((left_idx, right_idx, similarity))
-    return results
-
-
-def max_cross_tfidf_similarity(
-    train_texts: Sequence[str], test_texts: Sequence[str], max_features: int = 10000
-) -> Tuple[float, Tuple[int, int]]:
-    if not train_texts or not test_texts:
-        return (float("nan"), (-1, -1))
-    vectorizer = TfidfVectorizer(max_features=max_features, stop_words="english")
-    all_texts = list(train_texts) + list(test_texts)
-    matrix = vectorizer.fit_transform(all_texts)
-    train_matrix = matrix[: len(train_texts)]
-    test_matrix = matrix[len(train_texts) :]
-    sims = cosine_similarity(test_matrix, train_matrix)
-    if sims.size == 0:
-        return (float("nan"), (-1, -1))
-    max_pos = np.unravel_index(np.argmax(sims), sims.shape)
-    max_val = float(sims[max_pos])
-    return max_val, (int(max_pos[1]), int(max_pos[0]))
-
-
-def max_cross_minhash_similarity(train_texts: Sequence[str], test_texts: Sequence[str]) -> Tuple[float, Tuple[int, int]]:
-    if not train_texts or not test_texts:
-        return (float("nan"), (-1, -1))
-    train_shingles = [_build_shingles(text) for text in train_texts]
-    test_shingles = [_build_shingles(text) for text in test_texts]
-    max_score = float("nan")
-    best_pair = (-1, -1)
-    for test_idx, test_shingle in enumerate(test_shingles):
-        test_set = set(test_shingle)
-        if not test_set:
-            continue
-        for train_idx, train_shingle in enumerate(train_shingles):
-            train_set = set(train_shingle)
-            if not train_set:
-                continue
-            intersection = len(test_set & train_set)
-            union = len(test_set | train_set)
-            score = intersection / union if union else 0.0
-            if math.isnan(max_score) or score > max_score:
-                max_score = score
-                best_pair = (train_idx, test_idx)
-    return max_score, best_pair
-
-
-def _prepare_records(df: pd.DataFrame) -> List[FilingRecord]:
-    records: List[FilingRecord] = []
-    for idx, row in df.iterrows():
-        path = Path(str(row["path"]))
-        html = _read_html(path)
-        md5_raw = hashlib.md5(html.encode("utf-8")).hexdigest()
-        normalised = _normalise_html(html)
-        md5_normalised = hashlib.md5(normalised.encode("utf-8")).hexdigest()
-        text = _strip_html(html)
-        filed_raw = row.get("filed")
-        filed_ts: pd.Timestamp
+    # -- cache management -------------------------------------------------
+    def _load(self) -> None:
+        if not self.cache_path.exists():
+            return
         try:
-            filed_ts = pd.to_datetime(filed_raw)
-        except Exception:
-            filed_ts = pd.NaT
-        ticker = str(row.get("ticker", "")).strip().upper()
-        form = str(row.get("form", "")).strip()
-        records.append(
-            FilingRecord(
-                idx=idx,
-                path=path,
-                ticker=ticker,
-                filed=filed_ts,
-                form=form,
-                row=row,
-                md5_raw=md5_raw,
-                md5_normalised=md5_normalised,
-                text=text,
-            )
-        )
-    return records
-
-
-def _apply_duplicate_rules(records: List[FilingRecord], threshold: float) -> Tuple[List[FilingRecord], List[DedupDecision]]:
-    keep_flags = [True] * len(records)
-    decisions: List[DedupDecision] = []
-
-    def _mark_duplicate(keep_idx: int, drop_idx: int, method: str, score: float, rationale: str) -> None:
-        if drop_idx == keep_idx or not keep_flags[drop_idx]:
+            with self.cache_path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except (json.JSONDecodeError, OSError):
             return
-        keep_record = records[keep_idx]
-        drop_record = records[drop_idx]
-        if not keep_flags[keep_idx]:
-            return
-        keep_flags[drop_idx] = False
-        decisions.append(
-            DedupDecision(
-                kept_id=_pair_identifier(keep_record),
-                removed_id=_pair_identifier(drop_record),
-                kept_path=str(keep_record.path),
-                removed_path=str(drop_record.path),
-                method=method,
-                score=score,
-                rationale=rationale,
-            )
-        )
-
-    # Raw MD5 duplicates
-    seen_md5: Dict[str, int] = {}
-    for idx, record in enumerate(records):
-        key = record.md5_raw
-        if key in seen_md5:
-            keep_idx, drop_idx = _choose_preferred_idx(seen_md5[key], idx, records)
-            seen_md5[key] = keep_idx
-            _mark_duplicate(keep_idx, drop_idx, "md5_raw", 1.0, "identical raw HTML")
-        else:
-            seen_md5[key] = idx
-
-    # Normalised MD5 duplicates
-    seen_norm: Dict[str, int] = {}
-    for idx, record in enumerate(records):
-        if not keep_flags[idx]:
-            continue
-        key = record.md5_normalised
-        if key in seen_norm:
-            keep_idx, drop_idx = _choose_preferred_idx(seen_norm[key], idx, records)
-            seen_norm[key] = keep_idx
-            _mark_duplicate(keep_idx, drop_idx, "md5_normalised", 1.0, "identical normalised HTML")
-        else:
-            seen_norm[key] = idx
-
-    # TF-IDF duplicates
-    kept_indices = [i for i, flag in enumerate(keep_flags) if flag]
-    kept_records = [records[i] for i in kept_indices]
-    tfidf_pairs = _tfidf_near_duplicates(kept_records, threshold)
-    for left_local, right_local, score in tfidf_pairs:
-        left_idx = kept_indices[left_local]
-        right_idx = kept_indices[right_local]
-        if not keep_flags[left_idx] or not keep_flags[right_idx]:
-            continue
-        keep_idx, drop_idx = _choose_preferred_idx(left_idx, right_idx, records)
-        _mark_duplicate(keep_idx, drop_idx, "tfidf", float(score), "cosine similarity above threshold")
-
-    kept_indices = [i for i, flag in enumerate(keep_flags) if flag]
-    kept_records = [records[i] for i in kept_indices]
-    minhash_pairs = _minhash_near_duplicates(kept_records, threshold)
-    for left_local, right_local, score in minhash_pairs:
-        left_idx = kept_indices[left_local]
-        right_idx = kept_indices[right_local]
-        if not keep_flags[left_idx] or not keep_flags[right_idx]:
-            continue
-        keep_idx, drop_idx = _choose_preferred_idx(left_idx, right_idx, records)
-        _mark_duplicate(keep_idx, drop_idx, "minhash", float(score), "3-5 gram MinHash similarity")
-
-    kept_records_final = [records[i] for i, flag in enumerate(keep_flags) if flag]
-    return kept_records_final, decisions
-
-
-def deduplicate_manifest(df: pd.DataFrame, threshold: float = 0.85) -> Tuple[pd.DataFrame, pd.DataFrame, List[DedupDecision]]:
-    records = _prepare_records(df)
-    kept_records, decisions = _apply_duplicate_rules(records, threshold)
-    kept_indices = [record.idx for record in kept_records]
-    kept_df = df.loc[kept_indices].copy()
-    kept_df.reset_index(drop=True, inplace=True)
-
-    if decisions:
-        removal_rows = []
-        for decision in decisions:
-            match = next((record for record in records if str(record.path) == decision.removed_path), None)
-            if match is None:
+        signatures = payload.get("signatures", {}) if isinstance(payload, dict) else {}
+        for doc_id, sig in signatures.items():
+            if not isinstance(sig, list):
                 continue
-            row_dict = match.row.to_dict()
-            row_dict.update(
+            signature = [int(value) for value in sig]
+            self._signatures[doc_id] = signature
+            self._index_signature(doc_id, signature)
+
+    def save(self) -> None:
+        if not self._signatures:
+            return
+        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.cache_path.open("w", encoding="utf-8") as handle:
+            json.dump(
                 {
-                    "duplicate_of": decision.kept_id,
-                    "duplicate_path": decision.kept_path,
-                    "dedup_method": decision.method,
-                    "dedup_score": decision.score,
-                    "dedup_rationale": decision.rationale,
-                }
+                    "num_perm": self.num_perm,
+                    "band_size": self.band_size,
+                    "signatures": self._signatures,
+                },
+                handle,
+                indent=2,
+                sort_keys=True,
             )
-            removal_rows.append(row_dict)
-        quarantine_df = pd.DataFrame(removal_rows)
-    else:
-        quarantine_df = pd.DataFrame(columns=list(df.columns) + [
-            "duplicate_of",
-            "duplicate_path",
-            "dedup_method",
-            "dedup_score",
-            "dedup_rationale",
-        ])
-    return kept_df, quarantine_df, decisions
+
+    # -- LSH primitives ---------------------------------------------------
+    def _index_signature(self, doc_id: str, signature: Sequence[int]) -> None:
+        for offset in range(0, self.num_perm, self.band_size):
+            band = signature[offset : offset + self.band_size]
+            band_key = f"{offset}:{','.join(map(str, band))}"
+            self._bands[band_key].add(doc_id)
+
+    def _compute_signature(self, shingles: Sequence[int]) -> Tuple[int, ...]:
+        if not shingles:
+            return tuple([2**32 - 1] * self.num_perm)
+        signature: List[int] = []
+        for idx in range(self.num_perm):
+            values = [(hash((idx, shingle)) & 0xFFFFFFFF) for shingle in shingles]
+            signature.append(min(values) if values else 2**32 - 1)
+        return tuple(signature)
+
+    def add(self, doc_id: str, shingles: Sequence[int]) -> None:
+        signature = list(self._compute_signature(shingles))
+        self._signatures[doc_id] = signature
+        self._index_signature(doc_id, signature)
+
+    def query(self, shingles: Sequence[int]) -> Set[str]:
+        signature = self._compute_signature(shingles)
+        candidates: Set[str] = set()
+        for offset in range(0, self.num_perm, self.band_size):
+            band = signature[offset : offset + self.band_size]
+            band_key = f"{offset}:{','.join(map(str, band))}"
+            candidates.update(self._bands.get(band_key, set()))
+        return candidates
 
 
-def _write_csv(path: Path, df: pd.DataFrame, *, header: Optional[List[str]] = None) -> None:
+def _load_manifest_rows(manifest_path: Path) -> Tuple[List[ManifestRow], List[str]]:
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"Manifest {manifest_path} does not exist")
+    df = pd.read_csv(manifest_path)
+    records = []
+    for row in df.to_dict("records"):
+        records.append(ManifestRow(data={key: str(value) if not pd.isna(value) else "" for key, value in row.items()}))
+    records.sort(key=lambda item: (item.filed, item.data.get("ticker", ""), item.data.get("form", "")))
+    return records, list(df.columns)
+
+
+def _read_text(path: Path) -> str:
+    if not path.exists():
+        return ""
+    for encoding in TEXT_ENCODING_FALLBACKS:
+        try:
+            return path.read_text(encoding=encoding)
+        except Exception:
+            continue
+    return ""
+
+
+def _tokenize(text: str) -> List[str]:
+    lowered = text.lower()
+    return TOKEN_PATTERN.findall(lowered)
+
+
+def _shingles(tokens: Sequence[str], size: int = 5) -> List[int]:
+    if len(tokens) < size:
+        return []
+    shingles: List[int] = []
+    for idx in range(len(tokens) - size + 1):
+        chunk = " ".join(tokens[idx : idx + size])
+        shingles.append(hash(chunk) & 0xFFFFFFFF)
+    return shingles
+
+
+def _jaccard(a: Sequence[int], b: Sequence[int]) -> float:
+    set_a = set(a)
+    set_b = set(b)
+    if not set_a and not set_b:
+        return 1.0
+    if not set_a or not set_b:
+        return 0.0
+    return len(set_a & set_b) / len(set_a | set_b)
+
+
+def _apply_quality_flag(row: Dict[str, str], reason: str) -> None:
+    existing = [flag for flag in (row.get("quality_flag") or "").split(";") if flag]
+    if reason not in existing:
+        existing.append(reason)
+    row["quality_flag"] = ";".join(existing)
+
+
+def _ensure_columns(row: Dict[str, str]) -> None:
+    for column in ("quality_flag", "split"):
+        row.setdefault(column, "")
+
+
+def _assign_splits(rows: List[Dict[str, str]], min_split: int = DEFAULT_MIN_SPLIT) -> None:
+    if not rows:
+        return
+    df = pd.DataFrame(rows)
+    df["filed"] = pd.to_datetime(df.get("filed", pd.Series([], dtype=str)), errors="coerce")
+    df = df.sort_values(["label", "filed", "ticker", "accession"], na_position="last")
+    assignments: Dict[int, str] = {}
+    counts = {"train": 0, "test": 0}
+    label_indices: Dict[str, List[int]] = {}
+    for label, group in df.groupby("label"):
+        indices = list(group.index)
+        label_indices[label] = indices
+        label_total = len(indices)
+        if label_total == 0:
+            continue
+        label_test_target = max(1 if label_total > 1 else 0, int(round(label_total * 0.3)))
+        label_train_target = max(label_total - label_test_target, 0)
+        if label_train_target == 0 and label_total > 1:
+            label_train_target = label_total - 1
+            label_test_target = 1
+        for position, idx in enumerate(indices):
+            if position < label_train_target:
+                assignments[idx] = "train"
+                counts["train"] += 1
+            else:
+                assignments[idx] = "test"
+                counts["test"] += 1
+
+    total = len(df)
+    min_split = min(min_split, total // 2) if total < min_split * 2 else min_split
+
+    def _adjust(target_split: str) -> None:
+        other_split = "test" if target_split == "train" else "train"
+        deficit = min_split - counts[target_split]
+        if deficit <= 0:
+            return
+        for label, indices in label_indices.items():
+            for idx in indices:
+                if assignments[idx] == other_split:
+                    # prevent draining a label entirely from the other split
+                    label_other_count = sum(1 for j in indices if assignments[j] == other_split)
+                    if label_other_count <= 1:
+                        continue
+                    assignments[idx] = target_split
+                    counts[target_split] += 1
+                    counts[other_split] -= 1
+                    deficit -= 1
+                    if deficit <= 0:
+                        return
+
+    if counts["train"] < min_split:
+        _adjust("train")
+    if counts["test"] < min_split:
+        _adjust("test")
+
+    df["split"] = df.index.map(assignments).fillna("train")
+    keyed = {
+        (str(row.get("accession", "")), str(row.get("md5", ""))): split
+        for (_, row), split in zip(df.iterrows(), df["split"].tolist())
+    }
+    for row in rows:
+        key = (row.get("accession", ""), row.get("md5", ""))
+        row["split"] = keyed.get(key, "train")
+
+
+def _write_csv(path: Path, rows: List[Dict[str, str]], fieldnames: Sequence[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    if df.empty:
-        columns = header if header is not None else df.columns.tolist()
-        with path.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.writer(handle)
-            writer.writerow(columns)
-    else:
-        df.to_csv(path, index=False, quoting=csv.QUOTE_NONNUMERIC)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(fieldnames))
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
 
 
-def _decisions_to_json(decisions: List[DedupDecision]) -> List[Dict[str, object]]:
-    return [
-        {
-            "kept_id": decision.kept_id,
-            "removed_id": decision.removed_id,
-            "kept_path": decision.kept_path,
-            "removed_path": decision.removed_path,
-            "method": decision.method,
-            "score": decision.score,
-            "rationale": decision.rationale,
-        }
-        for decision in decisions
-    ]
-
-
-def _infer_quarantine_path(manifest_path: Path) -> Path:
-    stem = manifest_path.stem
-    if stem.endswith("_dedup"):
-        return manifest_path.with_name(stem.replace("_dedup", "_quarantine") + manifest_path.suffix)
-    return manifest_path.with_name(stem + "_quarantine" + manifest_path.suffix)
-
-
-def main() -> None:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, required=True, help="Input manifest CSV")
-    parser.add_argument("--out", type=Path, required=True, help="Path to deduplicated manifest")
-    parser.add_argument(
-        "--quarantine",
-        type=Path,
-        default=None,
-        help="Optional path to quarantine CSV (duplicates). Defaults next to output.",
-    )
-    parser.add_argument("--thresh", type=float, default=0.85, help="Similarity threshold (default: 0.85)")
-    parser.add_argument(
-        "--decisions-json",
-        type=Path,
-        default=None,
-        help="Optional JSON file capturing dedup decisions for downstream reporting.",
-    )
-    args = parser.parse_args()
-
-    manifest = _load_manifest(args.manifest)
-    original_columns = manifest.columns.tolist()
-    kept_df, quarantine_df, decisions = deduplicate_manifest(manifest, threshold=args.thresh)
-
-    quarantine_path = args.quarantine or _infer_quarantine_path(args.out)
-    _write_csv(args.out, kept_df, header=original_columns)
-    quarantine_header = quarantine_df.columns.tolist() if not quarantine_df.empty else original_columns + [
-        "duplicate_of",
-        "duplicate_path",
-        "dedup_method",
-        "dedup_score",
-        "dedup_rationale",
-    ]
-    _write_csv(quarantine_path, quarantine_df, header=quarantine_header)
-
-    decisions_payload = _decisions_to_json(decisions)
-    if args.decisions_json is not None:
-        args.decisions_json.parent.mkdir(parents=True, exist_ok=True)
-        with args.decisions_json.open("w", encoding="utf-8") as handle:
-            json.dump(decisions_payload, handle, indent=2)
-
-    print(json.dumps(
-        {
-            "input_rows": int(len(manifest)),
-            "retained_rows": int(len(kept_df)),
-            "quarantined_rows": int(len(quarantine_df)),
-            "threshold": args.thresh,
-            "decisions": decisions_payload,
-        },
-        indent=2,
-    ))
+    parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
+    parser.add_argument("--out", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--quarantine", type=Path, default=DEFAULT_QUARANTINE)
+    parser.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
+    parser.add_argument("--duplicate-threshold", type=float, default=DEFAULT_DUPLICATE_THRESHOLD)
+    parser.add_argument("--min-split", type=int, default=DEFAULT_MIN_SPLIT)
+    return parser.parse_args(argv)
 
 
-if __name__ == "__main__":
-    main()
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_args(argv)
+    manifest_path: Path = args.manifest
+    cache_path: Path = args.cache
 
+    rows, base_fieldnames = _load_manifest_rows(manifest_path)
+    lsh = SimpleMinHashLSH(cache_path)
+
+    kept: List[Dict[str, str]] = []
+    quarantine: List[Dict[str, str]] = []
+    row_lookup: Dict[str, Dict[str, str]] = {}
+    shingles_cache: Dict[str, List[int]] = {}
+
+    for manifest_row in rows:
+        data = dict(manifest_row.data)
+        _ensure_columns(data)
+        text = _read_text(manifest_row.path)
+        if not text:
+            _apply_quality_flag(data, "missing-content")
+        tokens = _tokenize(text)
+        shingles = _shingles(tokens)
+        doc_id = manifest_row.key
+        if not shingles:
+            _apply_quality_flag(data, "insufficient-shingles")
+        candidates = lsh.query(shingles)
+        duplicate_of = None
+        for candidate in candidates:
+            if candidate == doc_id:
+                continue
+            reference = row_lookup.get(candidate)
+            if not reference:
+                continue
+            reference_shingles = shingles_cache.get(candidate)
+            if reference_shingles is None:
+                reference_text = _read_text(Path(reference.get("path", "")))
+                reference_tokens = _tokenize(reference_text)
+                reference_shingles = _shingles(reference_tokens)
+                shingles_cache[candidate] = reference_shingles
+            similarity = _jaccard(shingles, reference_shingles)
+            if similarity >= args.duplicate_threshold:
+                duplicate_of = candidate
+                break
+        if duplicate_of:
+            data["duplicate_of"] = duplicate_of
+            data["duplicate_reason"] = f"jaccard>={args.duplicate_threshold}"
+            quarantine.append(data)
+            continue
+        kept.append(data)
+        row_lookup[doc_id] = data
+        shingles_cache[doc_id] = shingles
+        lsh.add(doc_id, shingles)
+
+    _assign_splits(kept, min_split=args.min_split)
+    if kept:
+        additional_columns = sorted({key for row in kept for key in row.keys()} - set(base_fieldnames))
+        fieldnames = list(base_fieldnames) + [column for column in additional_columns if column not in base_fieldnames]
+        if "split" not in fieldnames:
+            fieldnames.append("split")
+    else:
+        fieldnames = list(base_fieldnames)
+    quarantine_fields = list({key for row in quarantine for key in row.keys()}) if quarantine else fieldnames
+
+    if kept:
+        _write_csv(Path(args.out), kept, fieldnames)
+    if quarantine:
+        _write_csv(Path(args.quarantine), quarantine, quarantine_fields)
+    lsh.save()
+
+    print(f"deduplicated manifest written to {Path(args.out).resolve()}")
+    if quarantine:
+        print(f"quarantined {len(quarantine)} suspected duplicates")
+    print(f"training split: {(len([row for row in kept if row.get('split') == 'train']))}")
+    print(f"test split: {(len([row for row in kept if row.get('split') == 'test']))}")
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - CLI helper
+    raise SystemExit(main())
