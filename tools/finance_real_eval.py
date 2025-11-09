@@ -30,6 +30,7 @@ from sklearn.metrics import (
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.inspection import permutation_importance
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:  # pragma: no cover - defensive import path tweak
@@ -110,6 +111,46 @@ def _aggregate_doc_text(doc: object) -> str:
     return "\n".join(parts)
 
 
+def _pair_provenance(pair: fx.ExtractionPair) -> Dict[str, object]:
+    metadata = dict(getattr(pair, "metadata", {}) or {})
+    section = pair.section
+    section_payload = {
+        "canonical": getattr(section, "canonical", None),
+        "title": getattr(section, "title", None),
+        "path": getattr(section, "path", None),
+        "rank": getattr(section, "rank", None),
+        "level": getattr(section, "level", None),
+    }
+    provenance = {
+        "section": section_payload,
+        "section_key": metadata.get("section_key"),
+        "link_strategy": metadata.get("link_strategy"),
+        "clause_linked": metadata.get("clause_linked"),
+        "order_distance": metadata.get("order_distance"),
+        "rules": {
+            "obligation": list(metadata.get("obligation_rules", [])),
+            "permission": list(metadata.get("permission_rules", [])),
+        },
+        "lexicon": {
+            "obligation": list(metadata.get("obligation_lexicon_hits", [])),
+            "permission": list(metadata.get("permission_lexicon_hits", [])),
+        },
+        "bypass_terms": list(metadata.get("bypass_terms", [])),
+        "numeric": {
+            "hits": metadata.get("numeric_hits"),
+            "strength": metadata.get("numeric_strength"),
+            "confidence": metadata.get("numeric_confidence"),
+            "negations": metadata.get("numeric_negations"),
+        },
+        "blocks": {
+            "obligation": metadata.get("obligation_block_index"),
+            "permission": metadata.get("permission_block_index"),
+        },
+        "synthetic_permission": bool(metadata.get("synthetic_permission", False)),
+    }
+    return provenance
+
+
 def _evidence_to_dict(ev: esc.FilingEvidence) -> Dict[str, object]:
     return {
         "ticker": ev.ticker,
@@ -126,6 +167,7 @@ def _evidence_to_dict(ev: esc.FilingEvidence) -> Dict[str, object]:
         "numeric_strength": ev.numeric_strength,
         "numeric_confidence": ev.numeric_confidence,
         "bypass_proximity": ev.bypass_proximity,
+        "provenance": ev.provenance,
     }
 
 
@@ -145,6 +187,7 @@ def _evidence_from_dict(data: Dict[str, object]) -> esc.FilingEvidence:
         numeric_strength=float(data.get("numeric_strength", 0.0)),
         numeric_confidence=float(data.get("numeric_confidence", 0.0)),
         bypass_proximity=float(data.get("bypass_proximity", 0.0)),
+        provenance=dict(data.get("provenance", {})),
     )
 
 
@@ -199,10 +242,22 @@ def _record_from_dict(data: Dict[str, object]) -> esc.FilingRecord:
 
 
 def _serialise_processed(processed: Dict[str, object]) -> Dict[str, object]:
+    filed_value = processed.get("filed")
+    if hasattr(filed_value, "isoformat"):
+        filed_str = getattr(filed_value, "isoformat")()
+    else:
+        filed_str = str(filed_value or "")
+
     payload: Dict[str, object] = {
         "status": "ok",
         "record": _record_to_dict(processed["record"]),
         "text": processed.get("text", ""),
+        "filed": filed_str,
+        "ticker": processed.get("ticker"),
+        "label": processed.get("label"),
+        "role": processed.get("role"),
+        "path": processed.get("path"),
+        "md5": processed.get("md5"),
     }
     evidence = processed.get("evidence", [])
     payload["evidence"] = [
@@ -214,6 +269,7 @@ def _serialise_processed(processed: Dict[str, object]) -> Dict[str, object]:
             "obligation": getattr(best_pair, "obligation", ""),
             "permission": getattr(best_pair, "permission", ""),
             "metadata": getattr(best_pair, "metadata", {}),
+            "provenance": processed.get("best_provenance", {}),
         }
     return payload
 
@@ -237,7 +293,14 @@ def _deserialise_processed(data: Dict[str, object]) -> Dict[str, object]:
         "record": record,
         "evidence": evidence,
         "best_pair": best_pair,
+        "best_provenance": dict(best_payload.get("provenance", {})),
         "text": str(data.get("text", "")),
+        "filed": data.get("filed"),
+        "ticker": data.get("ticker"),
+        "label": data.get("label"),
+        "role": data.get("role"),
+        "path": data.get("path"),
+        "md5": data.get("md5"),
     }
 
 
@@ -249,8 +312,6 @@ def _process_filing(row: pd.Series, seed: int) -> Optional[Dict[str, object]]:
     form = row.get("form")
     doc = fx._build_doc_from_html(html, form)  # type: ignore[attr-defined]
     pairs = fx.extract_pairs_from_doc(doc)
-    if not pairs:
-        return None
     filed = str(row.get("filed", ""))
     role, label = _label_for_ticker(str(row.get("ticker", "")))
     rng = _rng_for_filing(seed, str(row.get("ticker", "")), filed)
@@ -266,14 +327,15 @@ def _process_filing(row: pd.Series, seed: int) -> Optional[Dict[str, object]]:
         "num_conf": 0.0,
         "bypass": 0.0,
         "pair": None,
+        "provenance": {},
     }
 
     for pair in pairs:
         score, raw, cue, sev, num_hits, num_strength, num_conf, bypass = esc._compute_pair_score(  # type: ignore[attr-defined]
-            pair.obligation,
-            pair.permission,
+            pair,
             rng,
         )
+        provenance = _pair_provenance(pair)
         evidence_rows.append(
             esc.FilingEvidence(
                 ticker=str(row.get("ticker", "")).upper(),
@@ -290,6 +352,7 @@ def _process_filing(row: pd.Series, seed: int) -> Optional[Dict[str, object]]:
                 numeric_strength=num_strength,
                 numeric_confidence=num_conf,
                 bypass_proximity=bypass,
+                provenance=provenance,
             )
         )
         if score > best["score"]:
@@ -304,11 +367,9 @@ def _process_filing(row: pd.Series, seed: int) -> Optional[Dict[str, object]]:
                     "num_conf": num_conf,
                     "bypass": bypass,
                     "pair": pair,
+                    "provenance": provenance,
                 }
             )
-
-    if not evidence_rows:
-        return None
 
     try:
         filing_date = pd.to_datetime(filed).date()
@@ -339,6 +400,7 @@ def _process_filing(row: pd.Series, seed: int) -> Optional[Dict[str, object]]:
         "record": record,
         "evidence": evidence_rows,
         "best_pair": best["pair"],
+        "best_provenance": best.get("provenance", {}),
         "text": _aggregate_doc_text(doc),
         "md5": row.get("md5"),
         "path": str(path),
@@ -374,6 +436,20 @@ def _train_test_split(rows: List[Dict[str, object]]) -> Tuple[List[int], List[in
         for idx, _ in entries[-cutoff:]:
             test_indices.append(idx)
     return sorted(set(train_indices)), sorted(set(test_indices))
+
+
+def _random_train_test_split(rows: List[Dict[str, object]], seed: int) -> Tuple[List[int], List[int]]:
+    rng = np.random.default_rng(seed)
+    indices = np.arange(len(rows))
+    if len(indices) == 0:
+        return [], []
+    rng.shuffle(indices)
+    cutoff = max(1, len(indices) // 3)
+    test_idx = sorted(indices[:cutoff].tolist())
+    train_idx = sorted(indices[cutoff:].tolist())
+    if not train_idx:
+        train_idx, test_idx = test_idx, []
+    return train_idx, test_idx
 
 
 def _bootstrap_auc(y_true: np.ndarray, scores: np.ndarray, *, seed: int, n: int = 2000) -> Tuple[Tuple[float, float], int]:
@@ -495,7 +571,13 @@ def _ablation_scores(
     return results
 
 
-def evaluate(manifest_path: Path, seed: int = 13) -> Dict[str, object]:
+def evaluate(
+    manifest_path: Path,
+    seed: int = 13,
+    *,
+    baseline_only: bool = False,
+    time_split: bool = True,
+) -> Dict[str, object]:
     manifest = _load_manifest(manifest_path)
     rows: List[Dict[str, object]] = []
     total = len(manifest)
@@ -546,6 +628,7 @@ def evaluate(manifest_path: Path, seed: int = 13) -> Dict[str, object]:
             "ig_guardrail": {"rate": math.nan, "count": 0, "total": 0, "ci": [math.nan, math.nan]},
             "ablations": {},
             "similarity": {"max_cross_split": math.nan, "pair": (-1, -1)},
+            "permutation_importance": [],
             "rows": [],
             "features": {},
         }
@@ -553,7 +636,12 @@ def evaluate(manifest_path: Path, seed: int = 13) -> Dict[str, object]:
     records = [row["record"] for row in rows]
     features_df, y = _feature_dataframe(records)
     X = features_df.to_numpy(dtype=float)
-    train_idx, test_idx = _train_test_split(rows)
+    if time_split:
+        train_idx, test_idx = _train_test_split(rows)
+    else:
+        train_idx, test_idx = _random_train_test_split(rows, seed)
+    if (not train_idx or not test_idx) and time_split:
+        train_idx, test_idx = _random_train_test_split(rows, seed)
     if not train_idx or not test_idx:
         raise RuntimeError("Train/test split insufficient; need filings across time")
 
@@ -561,15 +649,25 @@ def evaluate(manifest_path: Path, seed: int = 13) -> Dict[str, object]:
     X_train = scaler.fit_transform(X[train_idx])
     X_test = scaler.transform(X[test_idx])
 
-    logistic = LogisticRegression(max_iter=4000, class_weight="balanced", solver="lbfgs", random_state=seed)
-    logistic.fit(X_train, y[train_idx])
-    logistic_scores = logistic.predict_proba(X_test)[:, 1]
-
-    gbr = GradientBoostingClassifier(random_state=seed)
-    gbr.fit(X[train_idx], y[train_idx])
-    gbr_scores = gbr.predict_proba(X[test_idx])[:, 1]
-
     baseline_scores = X[test_idx, features_df.columns.get_loc("CCE")]
+
+    logistic_scores: Optional[np.ndarray] = None
+    gbr_scores: Optional[np.ndarray] = None
+    logistic_model: Optional[LogisticRegression] = None
+
+    if not baseline_only:
+        logistic_model = LogisticRegression(
+            max_iter=4000,
+            class_weight="balanced",
+            solver="lbfgs",
+            random_state=seed,
+        )
+        logistic_model.fit(X_train, y[train_idx])
+        logistic_scores = logistic_model.predict_proba(X_test)[:, 1]
+
+        gbr = GradientBoostingClassifier(random_state=seed)
+        gbr.fit(X[train_idx], y[train_idx])
+        gbr_scores = gbr.predict_proba(X[test_idx])[:, 1]
 
     def _metrics(scores: np.ndarray) -> Dict[str, object]:
         roc = roc_auc_score(y[test_idx], scores)
@@ -598,13 +696,21 @@ def evaluate(manifest_path: Path, seed: int = 13) -> Dict[str, object]:
             "brier": brier,
         }
 
-    metrics = {
-        "baseline": _metrics(baseline_scores),
-        "logistic": _metrics(logistic_scores),
-        "gradient_boosting": _metrics(gbr_scores),
-    }
+    metrics: Dict[str, Dict[str, object]] = {"baseline": _metrics(baseline_scores)}
+    if logistic_scores is not None:
+        metrics["logistic"] = _metrics(logistic_scores)
+    else:
+        metrics["logistic"] = {}
+    if gbr_scores is not None:
+        metrics["gradient_boosting"] = _metrics(gbr_scores)
+    else:
+        metrics["gradient_boosting"] = {}
 
-    label_shuffle_auc = _label_shuffle_auc(X, y, train_idx, test_idx, seed=seed + 1)
+    label_shuffle_auc = (
+        _label_shuffle_auc(X, y, train_idx, test_idx, seed=seed + 1)
+        if not baseline_only
+        else math.nan
+    )
 
     distress_scores = features_df.iloc[test_idx]["CCE"].to_numpy()
     distress_labels = y[test_idx]
@@ -617,7 +723,14 @@ def evaluate(manifest_path: Path, seed: int = 13) -> Dict[str, object]:
     ig_total = 0
     if ig_mask:
         ig_total = sum(1 for idx in ig_mask if y[idx] == 0)
-        ig_preds = (logistic_scores[[test_idx.index(idx) for idx in ig_mask]] >= 0.5).astype(int)
+        ig_source = (
+            logistic_scores
+            if logistic_scores is not None
+            else baseline_scores
+        )
+        indices = [test_idx.index(idx) for idx in ig_mask]
+        ig_values = np.asarray(ig_source)[indices]
+        ig_preds = (ig_values >= 0.5).astype(int)
         ig_fp = int((ig_preds == 1).sum())
     ig_rate = ig_fp / ig_total if ig_total else math.nan
     ig_ci = _wilson_ci(ig_fp, ig_total) if ig_total else (math.nan, math.nan)
@@ -650,7 +763,35 @@ def evaluate(manifest_path: Path, seed: int = 13) -> Dict[str, object]:
             "ev_severity_hits_sum",
         ],
     }
-    ablations = _ablation_scores(features_df, y, train_idx, test_idx, ablation_groups, seed=seed + 2)
+    ablations = (
+        _ablation_scores(features_df, y, train_idx, test_idx, ablation_groups, seed=seed + 2)
+        if not baseline_only
+        else {}
+    )
+
+    permutation_table: List[Dict[str, object]] = []
+    if not baseline_only and logistic_model is not None:
+        try:
+            perm = permutation_importance(
+                logistic_model,
+                X_test,
+                y[test_idx],
+                n_repeats=64,
+                random_state=seed,
+                scoring="roc_auc",
+            )
+            for idx, feature in enumerate(features_df.columns):
+                permutation_table.append(
+                    {
+                        "feature": feature,
+                        "importance": float(perm.importances_mean[idx]),
+                        "std": float(perm.importances_std[idx]),
+                    }
+                )
+        except Exception:
+            permutation_table = []
+    permutation_table.sort(key=lambda item: abs(item.get("importance", 0.0)), reverse=True)
+    permutation_table = permutation_table[:10]
 
     similarity, pair_idx = _tfidf_similarity(rows, train_idx, test_idx)
 
@@ -681,6 +822,7 @@ def evaluate(manifest_path: Path, seed: int = 13) -> Dict[str, object]:
             "max_cross_split": similarity,
             "pair": pair_idx,
         },
+        "permutation_importance": permutation_table,
         "rows": rows,
         "features": features_df.to_dict(orient="list"),
     }
@@ -696,12 +838,37 @@ def main() -> None:
         help="Path to SEC manifest CSV",
     )
     parser.add_argument("--seed", type=int, default=13)
-    parser.add_argument("--output", type=Path, default=Path("reports/realworld/eval.json"))
+    parser.add_argument("--report", type=Path, help="Path to write evaluation report JSON")
+    parser.add_argument("--output", type=Path, help="Deprecated alias for --report")
+    parser.add_argument(
+        "--baseline-only",
+        action="store_true",
+        help="Skip modeling diagnostics and only compute baseline CCE metrics.",
+    )
+    parser.add_argument(
+        "--time-split",
+        dest="time_split",
+        action="store_true",
+        help="Use chronological split by ticker (default).",
+    )
+    parser.add_argument(
+        "--random-split",
+        dest="time_split",
+        action="store_false",
+        help="Use a random hold-out split instead of chronological ordering.",
+    )
+    parser.set_defaults(time_split=True)
     args = parser.parse_args()
 
-    results = evaluate(args.manifest, seed=args.seed)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    with args.output.open("w", encoding="utf-8") as handle:
+    results = evaluate(
+        args.manifest,
+        seed=args.seed,
+        baseline_only=args.baseline_only,
+        time_split=args.time_split,
+    )
+    report_path = args.report or args.output or Path("reports/realworld/eval.json")
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    with report_path.open("w", encoding="utf-8") as handle:
         json.dump(results, handle, indent=2, default=str)
     print(json.dumps({k: v for k, v in results.items() if k not in {"rows", "features"}}, indent=2))
 

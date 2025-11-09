@@ -31,7 +31,7 @@ import random
 import re
 import statistics
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -43,8 +43,6 @@ from tools.sec_fetch import TICKER_TO_CIK
 SRC_ROOT = Path(__file__).resolve().parent.parent / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
-
-from potatobacon.cale.finance.numeric import extract_numeric_covenants
 
 MODEL_DIR = Path(__file__).resolve().parent.parent / "models" / "finance"
 MODEL_METADATA_PATH = MODEL_DIR / "model_metadata.json"
@@ -107,6 +105,7 @@ class FilingEvidence:
     numeric_strength: float
     numeric_confidence: float
     bypass_proximity: float
+    provenance: Dict[str, object] = field(default_factory=dict)
 
     def to_row(self) -> Dict[str, object]:
         return {
@@ -242,76 +241,23 @@ def _parse_filing_date(event_date: dt.date, index: int) -> dt.date:
     return event_date - dt.timedelta(days=30 * index)
 
 
-def _severity_score(text: str) -> int:
+def _severity_score(text: str, metadata: Optional[Dict[str, object]] = None) -> Tuple[int, int]:
     hits = 0
+    lowered = text.lower()
     for pat in fx.NEG_LEVERAGE_CUES:
         if pat.search(text):
             hits += 1
     for keyword in ("must maintain", "breach", "default", "waiver", "exceed"):
-        if keyword in text.lower():
+        if keyword in lowered:
             hits += 1
-    return hits
-
-
-def _normalize_numeric_scalar(value: Optional[object], unit: Optional[str]) -> Optional[float]:
-    if value is None:
-        return None
-    try:
-        scalar = float(value)
-    except (TypeError, ValueError):
-        return None
-    unit_norm = (unit or "").upper()
-    if unit_norm == "USD":
-        return scalar / 1_000_000.0
-    return scalar
-
-
-def _normalize_numeric_entry(entry: Dict[str, object], default_unit: Optional[str] = None) -> List[float]:
-    unit = entry.get("unit") if isinstance(entry, dict) else None
-    if unit is None:
-        unit = default_unit
-    values: List[float] = []
-    if isinstance(entry, dict):
-        primary = _normalize_numeric_scalar(entry.get("value"), unit)
-        if primary is not None:
-            values.append(primary)
-        min_value = _normalize_numeric_scalar(entry.get("min"), unit)
-        max_value = _normalize_numeric_scalar(entry.get("max"), unit)
-        if min_value is not None and max_value is not None:
-            values.append(0.5 * (min_value + max_value))
-        elif min_value is not None:
-            values.append(min_value)
-        elif max_value is not None:
-            values.append(max_value)
-        legs = entry.get("legs") if isinstance(entry.get("legs"), list) else []
-        for leg in legs:
-            if isinstance(leg, dict):
-                values.extend(_normalize_numeric_entry(leg, unit))
-    return [float(v) for v in values if isinstance(v, (int, float))]
-
-
-def _summarise_numeric_covenants(obligation: str, permission: str) -> Tuple[int, float, float]:
-    results: List[Dict[str, object]] = []
-    for text in (obligation, permission):
-        try:
-            results.extend(extract_numeric_covenants(text))
-        except Exception:
-            continue
-    count = len(results)
-    if count == 0:
-        return 0, 0.0, 0.0
-    values: List[float] = []
-    confidences: List[float] = []
-    for item in results:
-        values.extend(_normalize_numeric_entry(item))
-        conf = item.get("confidence")
-        try:
-            confidences.append(float(conf))
-        except (TypeError, ValueError):
-            continue
-    avg_value = float(statistics.fmean(values)) if values else 0.0
-    avg_conf = float(statistics.fmean(confidences)) if confidences else 0.0
-    return count, avg_value, avg_conf
+    bypass_hits = 0
+    for pattern, _label in getattr(fx, "BYPASS_REGEXES", ()):  # type: ignore[attr-defined]
+        if pattern.search(text):
+            bypass_hits += 1
+    if metadata is not None:
+        bypass_hits = max(bypass_hits, len(metadata.get("bypass_terms", [])))
+    severity = max(0, hits - min(hits, bypass_hits))
+    return severity, bypass_hits
 
 
 DEBT_VERBS = {
@@ -339,11 +285,16 @@ DEBT_VERBS = {
 def _bypass_proximity(obligation: str, permission: str) -> float:
     combined = f"{obligation} {permission}".lower()
     tokens = re.findall(r"[a-z]+", combined)
-    bypass_positions = [
-        idx
-        for idx in range(len(tokens) - 1)
-        if tokens[idx] == "except" and tokens[idx + 1] == "that"
-    ]
+    bypass_positions: List[int] = []
+    for idx, token in enumerate(tokens):
+        if token == "except" and idx + 1 < len(tokens) and tokens[idx + 1] == "that":
+            bypass_positions.append(idx)
+        elif token == "provided" and idx + 1 < len(tokens) and tokens[idx + 1] == "however":
+            bypass_positions.append(idx)
+        elif token == "notwithstanding":
+            bypass_positions.append(idx)
+        elif token == "basket":
+            bypass_positions.append(idx)
     if not bypass_positions:
         return 0.0
     debt_positions = [idx for idx, token in enumerate(tokens) if token in DEBT_VERBS]
@@ -354,25 +305,51 @@ def _bypass_proximity(obligation: str, permission: str) -> float:
 
 
 def _compute_pair_score(
-    obligation: str, permission: str, rng: random.Random
+    pair: fx.ExtractionPair, rng: random.Random
 ) -> Tuple[float, float, float, int, int, float, float, float]:
+    obligation = pair.obligation
+    permission = pair.permission
+    metadata = getattr(pair, "metadata", {}) or {}
     cue_weight, cue_meta = fx._cue_score(obligation, permission)  # type: ignore[attr-defined]
     dv = fx.compute_dv(obligation, permission)
-    severity_hits = _severity_score(obligation + " " + permission)
-    numeric_hits, numeric_strength, numeric_conf = _summarise_numeric_covenants(
-        obligation, permission
-    )
+    severity_hits, bypass_hits = _severity_score(obligation + " " + permission, metadata)
+
+    numeric_hits_meta = metadata.get("numeric_hits")
+    numeric_strength_meta = metadata.get("numeric_strength")
+    numeric_conf_meta = metadata.get("numeric_confidence")
+    numeric_negations_meta = metadata.get("numeric_negations")
+    if numeric_hits_meta is None or numeric_strength_meta is None or numeric_conf_meta is None:
+        numeric_hits, numeric_strength, numeric_conf, numeric_negations = fx.summarise_numeric_covenants(  # type: ignore[attr-defined]
+            obligation,
+            permission,
+        )
+    else:
+        numeric_hits = int(numeric_hits_meta)
+        numeric_strength = float(numeric_strength_meta)
+        numeric_conf = float(numeric_conf_meta)
+        try:
+            numeric_negations = int(numeric_negations_meta)
+        except (TypeError, ValueError):
+            numeric_negations = 0
+
+    effective_numeric_hits = max(0, int(numeric_hits) - min(int(numeric_negations or 0), int(numeric_hits)))
+    if bypass_hits and severity_hits:
+        severity_hits = max(0, severity_hits - min(severity_hits, bypass_hits))
+
     bypass_score = _bypass_proximity(obligation, permission)
+    if bypass_hits:
+        bypass_score = max(bypass_score, min(1.0, 0.25 * bypass_hits))
+
     raw_score = float(np.clip(dv * cue_weight * (1 + 0.15 * severity_hits), 0.0, 1.0))
     jitter = rng.uniform(-0.05, 0.08)
-    boosted = raw_score + 0.04 * numeric_hits + 0.03 * severity_hits + jitter
+    boosted = raw_score + 0.04 * effective_numeric_hits + 0.03 * severity_hits + jitter
     score = float(np.clip(boosted, 0.0, 1.0))
     return (
         score,
         raw_score,
         cue_weight,
         severity_hits,
-        numeric_hits,
+        effective_numeric_hits,
         float(numeric_strength),
         float(numeric_conf),
         float(bypass_score),
@@ -422,9 +399,9 @@ def collect_filing_records(
                 best_bypass = 0.0
                 evidence_rows: List[FilingEvidence] = []
                 for pair in pairs:
-                    obligation, permission = pair.obligation, pair.permission
-                    score, raw_score, cue_weight, severity_hits, numeric_hits = _compute_pair_score(
-                        obligation, permission, clone_rng
+                    score, raw_score, cue_weight, severity_hits, numeric_hits, numeric_strength, numeric_conf, bypass_proximity = _compute_pair_score(
+                        pair,
+                        clone_rng,
                     )
                     filing_id = _make_filing_id(ticker, filing_date, clone_idx)
                     evidence_rows.append(
@@ -433,8 +410,8 @@ def collect_filing_records(
                             filing_id=filing_id,
                             filing_date=filing_date.isoformat(),
                             form=form,
-                            obligation=obligation,
-                            permission=permission,
+                            obligation=pair.obligation,
+                            permission=pair.permission,
                             score=score,
                             raw_score=raw_score,
                             cue_weight=cue_weight,
@@ -443,6 +420,7 @@ def collect_filing_records(
                             numeric_strength=numeric_strength,
                             numeric_confidence=numeric_conf,
                             bypass_proximity=bypass_proximity,
+                            provenance=dict(getattr(pair, "metadata", {})),
                         )
                     )
                     if score > best_score:
@@ -962,6 +940,7 @@ def build_records(
                             numeric_strength=e.numeric_strength,
                             numeric_confidence=e.numeric_confidence,
                             bypass_proximity=e.bypass_proximity,
+                            provenance=dict(e.provenance),
                         )
                         for e in rec.evidence_rows
                     ],
