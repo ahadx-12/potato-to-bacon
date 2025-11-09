@@ -18,7 +18,6 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 from sklearn.calibration import calibration_curve
-from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     average_precision_score,
@@ -27,17 +26,28 @@ from sklearn.metrics import (
     precision_recall_fscore_support,
     roc_auc_score,
 )
-from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import GradientBoostingClassifier
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:  # pragma: no cover - defensive import path tweak
     sys.path.insert(0, str(ROOT))
+SRC_DIR = ROOT / "src"
+if SRC_DIR.exists() and str(SRC_DIR) not in sys.path:  # pragma: no cover - ensure local package import
+    sys.path.insert(0, str(SRC_DIR))
 
 from tools import event_study_core as esc
 from tools import finance_extract as fx
-from tools.fetch_sec_real import CONTROL, DISTRESSED
+try:  # pragma: no cover - optional dependency for fetching SEC manifests
+    from tools.fetch_sec_real import CONTROL, DISTRESSED
+except ModuleNotFoundError:  # pragma: no cover - fallback when downloader not installed
+    print("[warn] sec_edgar_downloader not available; defaulting CONTROL/DISTRESSED lists to empty", file=sys.stderr)
+    CONTROL = []
+    DISTRESSED = []
+from tools.finance_dedup import (
+    max_cross_minhash_similarity,
+    max_cross_tfidf_similarity,
+)
 
 DISTRESSED_SET = {ticker.upper() for ticker in DISTRESSED}
 CONTROL_SET = {ticker.upper() for ticker in CONTROL}
@@ -53,7 +63,7 @@ def _load_manifest(path: Path) -> pd.DataFrame:
     df["path"] = df["path"].astype(str)
     df = df[df["path"].map(lambda p: Path(p).exists())]
     if df.empty:
-        raise RuntimeError("Manifest is empty after filtering existing filings")
+        print("[warn] evaluation manifest is empty after filtering existing filings", file=sys.stderr)
     return df
 
 
@@ -356,7 +366,116 @@ def _feature_dataframe(records: Sequence[esc.FilingRecord]) -> Tuple[pd.DataFram
     return df, y
 
 
-def _train_test_split(rows: List[Dict[str, object]]) -> Tuple[List[int], List[int]]:
+def _row_year(row: Dict[str, object]) -> Optional[int]:
+    filed = row.get("filed")
+    if filed is None:
+        return None
+    if isinstance(filed, (dt.datetime, dt.date)):
+        return filed.year
+    try:
+        ts = pd.to_datetime(filed)
+    except Exception:
+        return None
+    if pd.isna(ts):
+        return None
+    return int(ts.year)
+
+
+def _issuer_split_stats(
+    rows: List[Dict[str, object]], train_idx: Sequence[int], test_idx: Sequence[int]
+) -> Tuple[float, List[str], List[str], List[str]]:
+    train_tickers = {str(rows[idx].get("ticker", "")).upper() for idx in train_idx if rows[idx].get("ticker")}
+    test_tickers = {str(rows[idx].get("ticker", "")).upper() for idx in test_idx if rows[idx].get("ticker")}
+    exclusive = sorted(ticker for ticker in test_tickers if ticker not in train_tickers)
+    ratio = len(exclusive) / len(test_tickers) if test_tickers else 0.0
+    return ratio, exclusive, sorted(test_tickers), sorted(train_tickers)
+
+
+def _strict_time_split(
+    rows: List[Dict[str, object]],
+    *,
+    min_test: int = 30,
+    issuer_ratio: float = 0.2,
+) -> Tuple[List[int], List[int], Dict[str, object]]:
+    years = sorted({year for row in rows if (year := _row_year(row)) is not None})
+    if len(years) < 2:
+        raise RuntimeError("Temporal split requires filings across at least two years")
+
+    def split_for_year(cutoff_year: int) -> Tuple[List[int], List[int]]:
+        train: List[int] = []
+        test: List[int] = []
+        for idx, row in enumerate(rows):
+            year = _row_year(row)
+            if year is None:
+                train.append(idx)
+                continue
+            if year <= cutoff_year:
+                train.append(idx)
+            else:
+                test.append(idx)
+        return train, test
+
+    initial_cutoff: Optional[int] = None
+    for candidate in years[:-1]:
+        train_idx, test_idx = split_for_year(candidate)
+        if len(test_idx) >= min_test:
+            initial_cutoff = candidate
+    if initial_cutoff is None:
+        initial_cutoff = years[-2]
+    train_idx, test_idx = split_for_year(initial_cutoff)
+    if len(test_idx) < min_test:
+        raise RuntimeError("Unable to satisfy minimum test size with temporal split")
+
+    ratio, exclusive, test_issuers, train_issuers = _issuer_split_stats(rows, train_idx, test_idx)
+    cutoff_year = initial_cutoff
+    adjustments: List[Dict[str, object]] = []
+    current_index = years.index(initial_cutoff)
+    while ratio < issuer_ratio and current_index < len(years) - 1:
+        next_cutoff = years[current_index + 1]
+        candidate_train, candidate_test = split_for_year(next_cutoff)
+        if len(candidate_test) < min_test:
+            adjustments.append(
+                {
+                    "cutoff_year": next_cutoff,
+                    "action": "halt",
+                    "reason": "min_test",
+                    "test_size": len(candidate_test),
+                }
+            )
+            break
+        cutoff_year = next_cutoff
+        train_idx, test_idx = candidate_train, candidate_test
+        ratio, exclusive, test_issuers, train_issuers = _issuer_split_stats(rows, train_idx, test_idx)
+        adjustments.append(
+            {
+                "cutoff_year": cutoff_year,
+                "issuer_ratio": ratio,
+                "test_size": len(test_idx),
+            }
+        )
+        current_index += 1
+
+    print(
+        f"[split] cutoff_year={cutoff_year} test_size={len(test_idx)} issuer_ratio={ratio:.1%} exclusive_test={len(exclusive)}",
+        flush=True,
+    )
+
+    metadata = {
+        "strategy": "temporal_cutoff",
+        "initial_cutoff_year": initial_cutoff,
+        "cutoff_year": cutoff_year,
+        "min_test": min_test,
+        "issuer_ratio_target": issuer_ratio,
+        "issuer_ratio": ratio,
+        "exclusive_test_issuers": exclusive,
+        "test_issuers": test_issuers,
+        "train_issuers": train_issuers,
+        "adjustments": adjustments,
+    }
+    return sorted(set(train_idx)), sorted(set(test_idx)), metadata
+
+
+def _legacy_split(rows: List[Dict[str, object]]) -> Tuple[List[int], List[int]]:
     by_ticker: Dict[str, List[Tuple[int, pd.Timestamp]]] = defaultdict(list)
     for idx, row in enumerate(rows):
         filed = row["filed"]
@@ -374,6 +493,25 @@ def _train_test_split(rows: List[Dict[str, object]]) -> Tuple[List[int], List[in
         for idx, _ in entries[-cutoff:]:
             test_indices.append(idx)
     return sorted(set(train_indices)), sorted(set(test_indices))
+
+
+def _train_test_split(
+    rows: List[Dict[str, object]],
+    *,
+    time_split: bool,
+    min_test: int = 30,
+    issuer_ratio: float = 0.2,
+) -> Tuple[List[int], List[int], Dict[str, object]]:
+    if time_split:
+        return _strict_time_split(rows, min_test=min_test, issuer_ratio=issuer_ratio)
+    train_idx, test_idx = _legacy_split(rows)
+    metadata = {
+        "strategy": "ticker_last_third",
+        "cutoff_year": None,
+        "issuer_ratio": None,
+        "exclusive_test_issuers": [],
+    }
+    return train_idx, test_idx, metadata
 
 
 def _bootstrap_auc(y_true: np.ndarray, scores: np.ndarray, *, seed: int, n: int = 2000) -> Tuple[Tuple[float, float], int]:
@@ -441,23 +579,6 @@ def _wilson_ci(successes: int, total: int, confidence: float = 0.95) -> Tuple[fl
     return float(max(0.0, lower)), float(min(1.0, upper))
 
 
-def _tfidf_similarity(rows: List[Dict[str, object]], train_idx: Sequence[int], test_idx: Sequence[int]) -> Tuple[float, Tuple[int, int]]:
-    texts = [rows[idx]["text"] for idx in train_idx + list(test_idx)]
-    if not texts:
-        return (math.nan, (-1, -1))
-    vectorizer = TfidfVectorizer(max_features=5000, stop_words="english")
-    matrix = vectorizer.fit_transform(texts)
-    train_matrix = matrix[: len(train_idx)]
-    test_matrix = matrix[len(train_idx) :]
-    if train_matrix.shape[0] == 0 or test_matrix.shape[0] == 0:
-        return (math.nan, (-1, -1))
-    sims = cosine_similarity(test_matrix, train_matrix)
-    max_pos = np.unravel_index(np.argmax(sims), sims.shape)
-    max_val = float(sims[max_pos])
-    test_pos, train_pos = max_pos
-    return max_val, (test_idx[test_pos], train_idx[train_pos])
-
-
 def _label_shuffle_auc(X: np.ndarray, y: np.ndarray, train_idx: Sequence[int], test_idx: Sequence[int], seed: int) -> float:
     rng = np.random.default_rng(seed)
     shuffled = y.copy()
@@ -495,7 +616,14 @@ def _ablation_scores(
     return results
 
 
-def evaluate(manifest_path: Path, seed: int = 13) -> Dict[str, object]:
+def evaluate(
+    manifest_path: Path,
+    seed: int = 13,
+    *,
+    time_split: bool = False,
+    quarantine_path: Optional[Path] = None,
+    decisions_path: Optional[Path] = None,
+) -> Dict[str, object]:
     manifest = _load_manifest(manifest_path)
     rows: List[Dict[str, object]] = []
     total = len(manifest)
@@ -537,15 +665,23 @@ def evaluate(manifest_path: Path, seed: int = 13) -> Dict[str, object]:
                 "test": 0,
                 "distressed": 0,
                 "controls": 0,
+                "train_breakdown": {"total": 0, "by_role": {}, "by_issuer": {}, "by_year": {}},
+                "test_breakdown": {"total": 0, "by_role": {}, "by_issuer": {}, "by_year": {}},
             },
             "metrics": {},
             "train_indices": [],
             "test_indices": [],
-            "label_shuffle_auc": math.nan,
+            "label_shuffle": {"auc": math.nan, "seed": None},
             "welch": {"statistic": math.nan, "p_value": math.nan},
             "ig_guardrail": {"rate": math.nan, "count": 0, "total": 0, "ci": [math.nan, math.nan]},
             "ablations": {},
-            "similarity": {"max_cross_split": math.nan, "pair": (-1, -1)},
+            "similarity": {
+                "tfidf": {"max_cross_split": math.nan, "pair": (-1, -1)},
+                "minhash": {"max_cross_split": math.nan, "pair": (-1, -1)},
+            },
+            "split": {"strategy": "temporal_cutoff", "cutoff_year": None},
+            "test_filings_after_filtering": 0,
+            "dedup": {"quarantined": 0, "decisions": []},
             "rows": [],
             "features": {},
         }
@@ -553,7 +689,7 @@ def evaluate(manifest_path: Path, seed: int = 13) -> Dict[str, object]:
     records = [row["record"] for row in rows]
     features_df, y = _feature_dataframe(records)
     X = features_df.to_numpy(dtype=float)
-    train_idx, test_idx = _train_test_split(rows)
+    train_idx, test_idx, split_metadata = _train_test_split(rows, time_split=time_split)
     if not train_idx or not test_idx:
         raise RuntimeError("Train/test split insufficient; need filings across time")
 
@@ -604,7 +740,8 @@ def evaluate(manifest_path: Path, seed: int = 13) -> Dict[str, object]:
         "gradient_boosting": _metrics(gbr_scores),
     }
 
-    label_shuffle_auc = _label_shuffle_auc(X, y, train_idx, test_idx, seed=seed + 1)
+    label_shuffle_seed = seed + 1
+    label_shuffle_auc = _label_shuffle_auc(X, y, train_idx, test_idx, seed=label_shuffle_seed)
 
     distress_scores = features_df.iloc[test_idx]["CCE"].to_numpy()
     distress_labels = y[test_idx]
@@ -652,7 +789,45 @@ def evaluate(manifest_path: Path, seed: int = 13) -> Dict[str, object]:
     }
     ablations = _ablation_scores(features_df, y, train_idx, test_idx, ablation_groups, seed=seed + 2)
 
-    similarity, pair_idx = _tfidf_similarity(rows, train_idx, test_idx)
+    train_texts = [rows[idx]["text"] for idx in train_idx]
+    test_texts = [rows[idx]["text"] for idx in test_idx]
+    tfidf_similarity, tfidf_pair_local = max_cross_tfidf_similarity(train_texts, test_texts)
+    if not math.isnan(tfidf_similarity) and tfidf_pair_local != (-1, -1):
+        tfidf_pair = (train_idx[tfidf_pair_local[0]], test_idx[tfidf_pair_local[1]])
+    else:
+        tfidf_pair = (-1, -1)
+
+    minhash_similarity, minhash_pair_local = max_cross_minhash_similarity(train_texts, test_texts)
+    if not math.isnan(minhash_similarity) and minhash_pair_local != (-1, -1):
+        minhash_pair = (train_idx[minhash_pair_local[0]], test_idx[minhash_pair_local[1]])
+    else:
+        minhash_pair = (-1, -1)
+
+    def _split_counts(indices: Sequence[int]) -> Dict[str, object]:
+        subset = [rows[idx] for idx in indices]
+        frame = pd.DataFrame(
+            [
+                {
+                    "ticker": entry.get("ticker", "unknown"),
+                    "role": entry.get("role", "unknown"),
+                    "year": _row_year(entry),
+                }
+                for entry in subset
+            ]
+        )
+        if frame.empty:
+            return {
+                "total": 0,
+                "by_role": {},
+                "by_issuer": {},
+                "by_year": {},
+            }
+        return {
+            "total": int(len(indices)),
+            "by_role": {str(k): int(v) for k, v in frame["role"].value_counts().to_dict().items()},
+            "by_issuer": {str(k): int(v) for k, v in frame["ticker"].value_counts().to_dict().items()},
+            "by_year": {str(k): int(v) for k, v in frame["year"].value_counts().to_dict().items()},
+        }
 
     outputs = {
         "counts": {
@@ -661,11 +836,16 @@ def evaluate(manifest_path: Path, seed: int = 13) -> Dict[str, object]:
             "test": len(test_idx),
             "distressed": int(y.sum()),
             "controls": int(len(y) - y.sum()),
+            "train_breakdown": _split_counts(train_idx),
+            "test_breakdown": _split_counts(test_idx),
         },
         "metrics": metrics,
         "train_indices": train_idx,
         "test_indices": test_idx,
-        "label_shuffle_auc": label_shuffle_auc,
+        "label_shuffle": {
+            "auc": label_shuffle_auc,
+            "seed": label_shuffle_seed,
+        },
         "welch": {
             "statistic": float(welch.statistic),
             "p_value": float(welch.pvalue),
@@ -678,12 +858,50 @@ def evaluate(manifest_path: Path, seed: int = 13) -> Dict[str, object]:
         },
         "ablations": ablations,
         "similarity": {
-            "max_cross_split": similarity,
-            "pair": pair_idx,
+            "tfidf": {
+                "max_cross_split": tfidf_similarity,
+                "pair": tfidf_pair,
+            },
+            "minhash": {
+                "max_cross_split": minhash_similarity,
+                "pair": minhash_pair,
+            },
         },
+        "split": split_metadata,
+        "test_filings_after_filtering": len(test_idx),
         "rows": rows,
         "features": features_df.to_dict(orient="list"),
     }
+
+    dedup_info: Dict[str, object] = {"quarantined": 0, "decisions": []}
+    if decisions_path and decisions_path.exists():
+        try:
+            decisions_payload = json.loads(decisions_path.read_text(encoding="utf-8"))
+            if isinstance(decisions_payload, list):
+                dedup_info["decisions"] = decisions_payload
+        except Exception as exc:  # pragma: no cover - best effort to continue
+            print(f"[warn] failed to read dedup decisions: {exc}", file=sys.stderr)
+    if quarantine_path and quarantine_path.exists():
+        quarantine_df = pd.read_csv(quarantine_path)
+        dedup_info["quarantined"] = int(len(quarantine_df))
+        if not dedup_info["decisions"] and {
+            "duplicate_of",
+            "dedup_method",
+            "dedup_score",
+        }.issubset(set(quarantine_df.columns)):
+            dedup_info["decisions"] = [
+                {
+                    "kept_id": row.get("duplicate_of"),
+                    "removed_id": row.get("filing_id") or row.get("path"),
+                    "kept_path": row.get("duplicate_path"),
+                    "removed_path": row.get("path"),
+                    "method": row.get("dedup_method"),
+                    "score": row.get("dedup_score"),
+                    "rationale": row.get("dedup_rationale"),
+                }
+                for _, row in quarantine_df.iterrows()
+            ]
+    outputs["dedup"] = dedup_info
     return outputs
 
 
@@ -696,14 +914,53 @@ def main() -> None:
         help="Path to SEC manifest CSV",
     )
     parser.add_argument("--seed", type=int, default=13)
-    parser.add_argument("--output", type=Path, default=Path("reports/realworld/eval.json"))
+    parser.add_argument(
+        "--time-split",
+        action="store_true",
+        help="Use strict temporal cutoff when forming train/test splits",
+    )
+    parser.add_argument("--quarantine", type=Path, default=None, help="Dedup quarantine CSV")
+    parser.add_argument(
+        "--decisions-json",
+        type=Path,
+        default=None,
+        help="Dedup decisions JSON emitted by finance_dedup",
+    )
+    parser.add_argument("--report", type=Path, default=None, help="Output report JSON path")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Deprecated alias for --report",
+    )
     args = parser.parse_args()
 
-    results = evaluate(args.manifest, seed=args.seed)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    with args.output.open("w", encoding="utf-8") as handle:
+    report_path = args.report or args.output or Path("reports/realworld/phase1_report.json")
+
+    quarantine_path = args.quarantine
+    if quarantine_path is None:
+        stem = args.manifest.stem
+        suffix = args.manifest.suffix
+        if stem.endswith("_dedup"):
+            candidate = args.manifest.with_name(stem.replace("_dedup", "_quarantine") + suffix)
+            if candidate.exists():
+                quarantine_path = candidate
+
+    results = evaluate(
+        args.manifest,
+        seed=args.seed,
+        time_split=args.time_split,
+        quarantine_path=quarantine_path,
+        decisions_path=args.decisions_json,
+    )
+
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    with report_path.open("w", encoding="utf-8") as handle:
         json.dump(results, handle, indent=2, default=str)
-    print(json.dumps({k: v for k, v in results.items() if k not in {"rows", "features"}}, indent=2))
+    summary_payload = {
+        k: v for k, v in results.items() if k not in {"rows", "features"}
+    }
+    print(json.dumps(summary_payload, indent=2))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,9 @@
+path,ticker,filed,form
+tests/finance/fixtures/phase1_docs/baseline.html,AAA,2018-06-01,10-K
+tests/finance/fixtures/phase1_docs/duplicate.html,AAA,2019-06-01,10-K
+tests/finance/fixtures/phase1_docs/tfidf_variant.html,BBB,2020-05-10,10-Q
+tests/finance/fixtures/phase1_docs/minhash_a.html,BBB,2021-04-02,10-Q
+tests/finance/fixtures/phase1_docs/minhash_b.html,CCC,2022-07-15,8-K
+tests/finance/fixtures/phase1_docs/unique_future.html,DDD,2023-03-12,8-K
+tests/finance/fixtures/phase1_docs/overlap.html,EEE,2020-12-01,8-K
+tests/finance/fixtures/phase1_docs/overlap_future.html,EEE,2022-12-01,8-K
