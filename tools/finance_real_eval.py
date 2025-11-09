@@ -4,20 +4,26 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import datetime as dt
+import functools
 import hashlib
 import json
+import logging
 import math
 import random
-from collections import defaultdict
+import statistics
+import subprocess
+from collections import defaultdict, deque
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Tuple
 import sys
 
 import numpy as np
 import pandas as pd
 from scipy import stats
 from sklearn.calibration import calibration_curve
+from sklearn.isotonic import IsotonicRegression
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
@@ -28,21 +34,52 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import GradientBoostingClassifier
+try:  # pragma: no cover - optional dependency
+    import lightgbm as lgb  # type: ignore
+except Exception:  # pragma: no cover - guard for environments without lightgbm
+    lgb = None
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:  # pragma: no cover - defensive import path tweak
     sys.path.insert(0, str(ROOT))
+SRC_ROOT = ROOT / "src"
+if str(SRC_ROOT) not in sys.path:  # pragma: no cover - defensive import path tweak
+    sys.path.insert(0, str(SRC_ROOT))
 
 from tools import event_study_core as esc
 from tools import finance_extract as fx
-from tools.fetch_sec_real import CONTROL, DISTRESSED
+
+try:  # pragma: no cover - optional dependency chain
+    from tools.fetch_sec_real import CONTROL, DISTRESSED
+except Exception:  # pragma: no cover - fallback constants
+    DISTRESSED = ("CVNA", "UPST", "KSS", "CCL", "RIVN", "AA")
+    CONTROL = ("AAPL", "MSFT", "JNJ", "PG", "COST", "ADBE")
 
 DISTRESSED_SET = {ticker.upper() for ticker in DISTRESSED}
 CONTROL_SET = {ticker.upper() for ticker in CONTROL}
 CACHE_DIR = Path("reports/realworld/cache")
 MAX_HTML_CHARS = 3_500_000
+
+
+@dataclasses.dataclass
+class CalibrationDetails:
+    method: str
+    scores: List[float]
+    ece: float
+    brier: float
+    curve: List[Dict[str, float]]
+    parameters: Dict[str, float]
+
+
+@dataclasses.dataclass
+class ModelEvaluation:
+    name: str
+    raw_scores: List[float]
+    metrics: Dict[str, object]
+    calibrations: Dict[str, CalibrationDetails]
 
 
 def _load_manifest(path: Path) -> pd.DataFrame:
@@ -458,6 +495,220 @@ def _tfidf_similarity(rows: List[Dict[str, object]], train_idx: Sequence[int], t
     return max_val, (test_idx[test_pos], train_idx[train_pos])
 
 
+def _timestamp_for_row(row: Mapping[str, object]) -> pd.Timestamp:
+    filed = row.get("filed")
+    if isinstance(filed, (pd.Timestamp, dt.datetime, dt.date)):
+        return pd.Timestamp(filed)
+    return pd.Timestamp(row.get("filing_date", dt.datetime.utcnow()))
+
+
+def _sorted_indices_by_time(rows: Sequence[Mapping[str, object]]) -> List[int]:
+    return sorted(range(len(rows)), key=lambda idx: _timestamp_for_row(rows[idx]))
+
+
+def _rolling_folds(rows: Sequence[Mapping[str, object]], n_splits: int, min_train_size: int = 20) -> List[Tuple[List[int], List[int]]]:
+    ordered = _sorted_indices_by_time(rows)
+    folds: List[Tuple[List[int], List[int]]] = []
+    total = len(ordered)
+    if total < min_train_size + 1:
+        return [(ordered[:max(total - 1, 1)], ordered[max(total - 1, 1):])]
+    block = max(1, total // (n_splits + 1))
+    for split in range(1, n_splits + 1):
+        test_start = split * block
+        test_end = min(total, test_start + block)
+        train = ordered[:test_start]
+        test = ordered[test_start:test_end]
+        if len(train) < min_train_size or not test:
+            continue
+        folds.append((train, test))
+    if not folds:
+        folds.append((ordered[: total - 1], ordered[total - 1 :]))
+    return folds
+
+
+def _blocked_folds(rows: Sequence[Mapping[str, object]], n_splits: int) -> List[Tuple[List[int], List[int]]]:
+    ordered = _sorted_indices_by_time(rows)
+    total = len(ordered)
+    block = max(1, total // n_splits)
+    folds: List[Tuple[List[int], List[int]]] = []
+    for idx in range(n_splits):
+        start = idx * block
+        end = total if idx == n_splits - 1 else min(total, (idx + 1) * block)
+        test = ordered[start:end]
+        train = ordered[:start] + ordered[end:]
+        if not train or not test:
+            continue
+        folds.append((train, test))
+    if not folds:
+        mid = total // 2
+        folds.append((ordered[:mid], ordered[mid:]))
+    return folds
+
+
+def _build_time_folds(rows: Sequence[Mapping[str, object]], strategy: str, n_splits: int, min_train_size: int = 20) -> List[Tuple[List[int], List[int]]]:
+    if strategy == "rolling":
+        return _rolling_folds(rows, n_splits, min_train_size=min_train_size)
+    if strategy == "blocked":
+        return _blocked_folds(rows, n_splits)
+    raise ValueError(f"Unsupported CV strategy: {strategy}")
+
+
+def _time_train_test_split(rows: Sequence[Mapping[str, object]], holdout_fraction: float) -> Tuple[List[int], List[int]]:
+    if not 0.0 < holdout_fraction < 1.0:
+        raise ValueError("holdout_fraction must be between 0 and 1")
+    ordered = _sorted_indices_by_time(rows)
+    cutoff = max(1, int(round(len(ordered) * (1 - holdout_fraction))))
+    train = ordered[:cutoff]
+    test = ordered[cutoff:]
+    if not test:
+        test = [ordered[-1]]
+        train = ordered[:-1]
+    return train, test
+
+
+def _remap_folds(folds: Sequence[Tuple[Sequence[int], Sequence[int]]], base_indices: Sequence[int]) -> List[Tuple[List[int], List[int]]]:
+    remapped: List[Tuple[List[int], List[int]]] = []
+    for train_local, test_local in folds:
+        train = [base_indices[idx] for idx in train_local]
+        test = [base_indices[idx] for idx in test_local]
+        if train and test:
+            remapped.append((train, test))
+    return remapped
+
+
+class _PlattCalibrator:
+    def __init__(self, seed: int) -> None:
+        self._model = LogisticRegression(max_iter=1000, solver="lbfgs", random_state=seed)
+
+    def fit(self, scores: np.ndarray, y: np.ndarray) -> "_PlattCalibrator":
+        scores = scores.reshape(-1, 1)
+        self._model.fit(scores, y)
+        return self
+
+    def __call__(self, scores: np.ndarray) -> np.ndarray:
+        scores = scores.reshape(-1, 1)
+        return self._model.predict_proba(scores)[:, 1]
+
+    @property
+    def parameters(self) -> Dict[str, float]:
+        coef = float(self._model.coef_.ravel()[0])
+        intercept = float(self._model.intercept_.ravel()[0])
+        return {"coef": coef, "intercept": intercept}
+
+
+class _IsotonicCalibrator:
+    def __init__(self) -> None:
+        self._model = IsotonicRegression(out_of_bounds="clip")
+
+    def fit(self, scores: np.ndarray, y: np.ndarray) -> "_IsotonicCalibrator":
+        self._model.fit(scores, y)
+        return self
+
+    def __call__(self, scores: np.ndarray) -> np.ndarray:
+        return self._model.transform(scores)
+
+    @property
+    def parameters(self) -> Dict[str, float]:
+        return {"n_inputs": len(getattr(self._model, "X_thresholds_", []))}
+
+
+class _TemperatureCalibrator:
+    def __init__(self) -> None:
+        self._temperature = 1.0
+
+    @staticmethod
+    def _to_logit(prob: np.ndarray) -> np.ndarray:
+        eps = np.finfo(float).eps
+        prob = np.clip(prob, eps, 1 - eps)
+        return np.log(prob / (1 - prob))
+
+    def fit(self, scores: np.ndarray, y: np.ndarray) -> "_TemperatureCalibrator":
+        logits = self._to_logit(scores)
+
+        def _loss(temp: float) -> float:
+            scaled = logits / max(temp, 1e-3)
+            prob = 1 / (1 + np.exp(-scaled))
+            return -np.mean(y * np.log(prob + 1e-12) + (1 - y) * np.log(1 - prob + 1e-12))
+
+        best_temp = 1.0
+        best_loss = float("inf")
+        for temp in np.linspace(0.1, 5.0, 100):
+            loss = _loss(temp)
+            if loss < best_loss:
+                best_loss = loss
+                best_temp = temp
+        self._temperature = float(best_temp)
+        return self
+
+    def __call__(self, scores: np.ndarray) -> np.ndarray:
+        logits = self._to_logit(scores)
+        scaled = logits / max(self._temperature, 1e-3)
+        return 1 / (1 + np.exp(-scaled))
+
+    @property
+    def parameters(self) -> Dict[str, float]:
+        return {"temperature": float(self._temperature)}
+
+
+def _midrank(x: np.ndarray) -> np.ndarray:
+    sorted_idx = np.argsort(x)
+    sorted_x = x[sorted_idx]
+    n = len(x)
+    midranks = np.zeros(n, dtype=float)
+    i = 0
+    while i < n:
+        j = i
+        while j < n and sorted_x[j] == sorted_x[i]:
+            j += 1
+        mid = 0.5 * (i + j - 1) + 1
+        midranks[i:j] = mid
+        i = j
+    out = np.empty(n, dtype=float)
+    out[sorted_idx] = midranks
+    return out
+
+
+def _fast_delong(predictions_sorted_transposed: np.ndarray, label_1_count: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    m = label_1_count
+    n = predictions_sorted_transposed.shape[1] - m
+    if m == 0 or n == 0:
+        return (
+            np.full(predictions_sorted_transposed.shape[0], math.nan),
+            np.full((predictions_sorted_transposed.shape[0], predictions_sorted_transposed.shape[0]), math.nan),
+            np.full((predictions_sorted_transposed.shape[0], predictions_sorted_transposed.shape[0]), math.nan),
+        )
+    positives = predictions_sorted_transposed[:, :m]
+    negatives = predictions_sorted_transposed[:, m:]
+    tx = np.apply_along_axis(_midrank, 1, predictions_sorted_transposed)
+    ty = np.apply_along_axis(_midrank, 1, positives)
+    tz = np.apply_along_axis(_midrank, 1, negatives)
+    aucs = (tx[:, :m].sum(axis=1) - m * (m + 1) / 2) / (m * n)
+    v01 = (ty - (m + 1) / 2) / n
+    v10 = 1 - (tz - (n + 1) / 2) / m
+    sx = np.cov(v01)
+    sy = np.cov(v10)
+    return aucs, sx / m, sy / n
+
+
+def _delong_ci(y_true: np.ndarray, scores: np.ndarray, alpha: float = 0.95) -> Tuple[float, float, float]:
+    y_true = y_true.astype(int)
+    order = np.argsort(-scores)
+    y_true = y_true[order]
+    scores = scores[order]
+    label_1_count = int(y_true.sum())
+    preds = scores[np.newaxis, :]
+    aucs, v01, v10 = _fast_delong(preds, label_1_count)
+    auc = float(aucs[0])
+    var = float(v01 + v10)
+    if math.isnan(var) or var <= 0:
+        return auc, math.nan, math.nan
+    std = math.sqrt(var)
+    z = stats.norm.ppf(0.5 + alpha / 2.0)
+    lower = max(0.0, auc - z * std)
+    upper = min(1.0, auc + z * std)
+    return auc, lower, upper
+
+
 def _label_shuffle_auc(X: np.ndarray, y: np.ndarray, train_idx: Sequence[int], test_idx: Sequence[int], seed: int) -> float:
     rng = np.random.default_rng(seed)
     shuffled = y.copy()
@@ -495,7 +746,226 @@ def _ablation_scores(
     return results
 
 
-def evaluate(manifest_path: Path, seed: int = 13) -> Dict[str, object]:
+def _threshold_sweep(
+    scores: np.ndarray,
+    y_true: np.ndarray,
+    test_indices: Sequence[int],
+    rows: Sequence[Mapping[str, object]],
+    ig_universe: Sequence[str],
+) -> Dict[str, object]:
+    ig_set = {ticker.upper() for ticker in ig_universe}
+    ig_indices = []
+    for idx in range(len(test_indices)):
+        row = rows[test_indices[idx]]
+        ticker = row.get("ticker")
+        if ticker is None and "record" in row:
+            ticker = getattr(row["record"], "ticker", None)
+        if ticker and ticker.upper() in ig_set:
+            ig_indices.append(idx)
+    ig_total = sum(1 for idx in ig_indices if y_true[idx] == 0)
+    if ig_total == 0:
+        return {
+            "threshold": 0.5,
+            "ig_fp_rate": math.nan,
+            "ig_fp": 0,
+            "ig_total": 0,
+            "wilson": (math.nan, math.nan),
+        }
+    best_threshold = 0.5
+    best_recall = -1.0
+    best_auc = -1.0
+    best_payload: Dict[str, object] = {}
+    thresholds = np.linspace(0.01, 0.99, 99)
+    for threshold in thresholds:
+        preds = (scores >= threshold).astype(int)
+        ig_fp = int(
+            sum(
+                1
+                for local_idx in ig_indices
+                if y_true[local_idx] == 0 and preds[local_idx] == 1
+            )
+        )
+        rate = ig_fp / ig_total if ig_total else math.nan
+        wilson = _wilson_ci(ig_fp, ig_total)
+        if ig_total and (rate <= 0.20) and (not math.isnan(wilson[1]) and wilson[1] <= 0.10):
+            precision, recall, f1, _ = precision_recall_fscore_support(
+                y_true, preds, average=None, labels=[0, 1], zero_division=0
+            )
+            recall_pos = float(recall[1])
+            auc = roc_auc_score(y_true, scores)
+            if recall_pos > best_recall or (math.isclose(recall_pos, best_recall) and auc > best_auc):
+                best_recall = recall_pos
+                best_auc = auc
+                best_threshold = float(threshold)
+                best_payload = {
+                    "threshold": float(threshold),
+                    "ig_fp_rate": float(rate),
+                    "ig_fp": ig_fp,
+                    "ig_total": ig_total,
+                    "wilson": (float(wilson[0]), float(wilson[1])),
+                    "precision": float(precision[1]),
+                    "recall": recall_pos,
+                    "f1": float(f1[1]),
+                }
+    if not best_payload:
+        best_payload = {
+            "threshold": best_threshold,
+            "ig_fp_rate": float(0.0 if ig_total == 0 else math.nan),
+            "ig_fp": 0,
+            "ig_total": ig_total,
+            "wilson": _wilson_ci(0, ig_total),
+        }
+    return best_payload
+
+
+def _model_metrics(
+    y_true: np.ndarray,
+    scores: np.ndarray,
+    threshold: float,
+    seed: int,
+) -> Dict[str, object]:
+    roc = roc_auc_score(y_true, scores)
+    pr = average_precision_score(y_true, scores)
+    bootstrap_ci, effective = _bootstrap_auc(y_true, scores, seed=seed)
+    auc, lower, upper = _delong_ci(y_true, scores)
+    preds = (scores >= threshold).astype(int)
+    cm = confusion_matrix(y_true, preds, labels=[0, 1])
+    precision, recall, f1, support = precision_recall_fscore_support(
+        y_true, preds, labels=[0, 1], zero_division=0
+    )
+    ece = _expected_calibration_error(y_true, scores)
+    brier = brier_score_loss(y_true, scores)
+    return {
+        "roc_auc": float(roc),
+        "roc_auc_ci_bootstrap": tuple(float(x) for x in bootstrap_ci),
+        "roc_auc_ci_delong": (float(lower), float(upper)),
+        "roc_auc_delong": float(auc),
+        "pr_auc": float(pr),
+        "confusion_matrix": cm.tolist(),
+        "precision": [float(x) for x in precision],
+        "recall": [float(x) for x in recall],
+        "f1": [float(x) for x in f1],
+        "support": [int(x) for x in support],
+        "threshold": float(threshold),
+        "ece": float(ece),
+        "brier": float(brier),
+        "bootstrap_samples": int(effective),
+    }
+
+
+def _build_estimator(name: str, seed: int) -> object:
+    if name == "logistic":
+        return Pipeline(
+            steps=[
+                ("scaler", StandardScaler()),
+                (
+                    "model",
+                    LogisticRegression(
+                        max_iter=4000,
+                        class_weight="balanced",
+                        solver="lbfgs",
+                        random_state=seed,
+                    ),
+                ),
+            ]
+        )
+    if name == "gbm":
+        return GradientBoostingClassifier(random_state=seed)
+    if name == "lightgbm":
+        if lgb is None:
+            raise RuntimeError("LightGBM is not installed; install lightgbm to use this model")
+        return lgb.LGBMClassifier(
+            n_estimators=400,
+            learning_rate=0.05,
+            max_depth=-1,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            class_weight="balanced",
+            random_state=seed,
+        )
+    raise ValueError(f"Unknown model name: {name}")
+
+
+def _predict_scores_from_estimator(model: object, X: np.ndarray) -> np.ndarray:
+    if hasattr(model, "predict_proba"):
+        proba = model.predict_proba(X)
+        if proba.ndim == 2:
+            return proba[:, 1]
+        return proba
+    if hasattr(model, "decision_function"):
+        decision = model.decision_function(X)
+        if decision.ndim == 1:
+            return 1 / (1 + np.exp(-decision))
+        return 1 / (1 + np.exp(-decision[:, 1]))
+    preds = model.predict(X)
+    return preds.astype(float)
+
+
+def _cross_val_predictions(
+    model_name: str,
+    X: np.ndarray,
+    y: np.ndarray,
+    folds: Sequence[Tuple[Sequence[int], Sequence[int]]],
+    seed: int,
+) -> np.ndarray:
+    preds = np.full(len(y), np.nan, dtype=float)
+    for fold_idx, (train_idx, test_idx) in enumerate(folds, start=1):
+        estimator = _build_estimator(model_name, seed + fold_idx)
+        estimator.fit(X[train_idx], y[train_idx])
+        preds[test_idx] = _predict_scores_from_estimator(estimator, X[test_idx])
+    return preds
+
+
+def _calibration_curve_table(y_true: np.ndarray, scores: np.ndarray, bins: int = 10) -> List[Dict[str, float]]:
+    prob_true, prob_pred = calibration_curve(y_true, scores, n_bins=bins, strategy="uniform")
+    table: List[Dict[str, float]] = []
+    for idx, (truth, pred) in enumerate(zip(prob_true, prob_pred)):
+        table.append({"bin": float(idx), "prob_true": float(truth), "prob_pred": float(pred)})
+    return table
+
+
+def _apply_calibration(
+    method: str,
+    train_scores: np.ndarray,
+    train_labels: np.ndarray,
+    test_scores: np.ndarray,
+    test_labels: np.ndarray,
+    seed: int,
+) -> CalibrationDetails:
+    if method == "platt":
+        calibrator = _PlattCalibrator(seed).fit(train_scores, train_labels)
+    elif method == "isotonic":
+        calibrator = _IsotonicCalibrator().fit(train_scores, train_labels)
+    elif method == "temperature":
+        calibrator = _TemperatureCalibrator().fit(train_scores, train_labels)
+    else:
+        raise ValueError(f"Unknown calibration method: {method}")
+    calibrated_scores = calibrator(test_scores)
+    ece = _expected_calibration_error(test_labels, calibrated_scores)
+    brier = brier_score_loss(test_labels, calibrated_scores)
+    curve = _calibration_curve_table(test_labels, calibrated_scores)
+    return CalibrationDetails(
+        method=method,
+        scores=calibrated_scores.tolist(),
+        ece=float(ece),
+        brier=float(brier),
+        curve=curve,
+        parameters=getattr(calibrator, "parameters", {}),
+    )
+
+
+def evaluate(
+    manifest_path: Path,
+    *,
+    seed: int = 13,
+    holdout_fraction: float = 0.25,
+    cv_strategy: str = "rolling",
+    cv_splits: int = 5,
+    models: Optional[Sequence[str]] = None,
+    calibrations: Optional[Sequence[str]] = None,
+    time_split: bool = True,
+    export_folds: Optional[Path] = None,
+) -> Dict[str, object]:
     manifest = _load_manifest(manifest_path)
     rows: List[Dict[str, object]] = []
     total = len(manifest)
@@ -505,25 +975,25 @@ def evaluate(manifest_path: Path, seed: int = 13) -> Dict[str, object]:
         cached = _load_cached(row)
         if cached is not None:
             if cached.get("status") == "skip":
-                print(f"[warn] skipped {ticker} {filed} (cached)", file=sys.stderr)
+                logging.warning("skipped %s %s (cached)", ticker, filed)
                 continue
             cached_processed = _deserialise_processed(cached)
-            print(
-                f"[info] cached {idx}/{total} {ticker} {filed}",
-                flush=True,
-            )
+            logging.info("cached %s/%s %s %s", idx, total, ticker, filed)
             rows.append(cached_processed)
             continue
 
-        print(f"[info] extracting {idx}/{total} {ticker} {filed}", flush=True)
+        logging.info("extracting %s/%s %s %s", idx, total, ticker, filed)
         processed = _process_filing(row, seed)
         if processed is None:
-            print(f"[warn] skipped {ticker} {filed}", file=sys.stderr)
+            logging.warning("skipped %s %s", ticker, filed)
             _save_cached(row, {"status": "skip"})
             continue
-        print(
-            f"[info] processed {idx}/{total} {processed['ticker']} {processed['filed']}",
-            flush=True,
+        logging.info(
+            "processed %s/%s %s %s",
+            idx,
+            total,
+            processed["ticker"],
+            processed["filed"],
         )
         _save_cached(row, _serialise_processed(processed))
         rows.append(processed)
@@ -543,66 +1013,121 @@ def evaluate(manifest_path: Path, seed: int = 13) -> Dict[str, object]:
             "test_indices": [],
             "label_shuffle_auc": math.nan,
             "welch": {"statistic": math.nan, "p_value": math.nan},
-            "ig_guardrail": {"rate": math.nan, "count": 0, "total": 0, "ci": [math.nan, math.nan]},
             "ablations": {},
             "similarity": {"max_cross_split": math.nan, "pair": (-1, -1)},
             "rows": [],
             "features": {},
+            "fingerprint": {},
         }
 
     records = [row["record"] for row in rows]
     features_df, y = _feature_dataframe(records)
     X = features_df.to_numpy(dtype=float)
-    train_idx, test_idx = _train_test_split(rows)
+
+    if time_split:
+        train_idx, test_idx = _time_train_test_split(rows, holdout_fraction)
+    else:
+        train_idx, test_idx = _train_test_split(rows)
     if not train_idx or not test_idx:
         raise RuntimeError("Train/test split insufficient; need filings across time")
 
-    scaler = StandardScaler()
-    X_train = scaler.fit_transform(X[train_idx])
-    X_test = scaler.transform(X[test_idx])
+    X_train = X[train_idx]
+    y_train = y[train_idx]
+    X_test = X[test_idx]
+    y_test = y[test_idx]
 
-    logistic = LogisticRegression(max_iter=4000, class_weight="balanced", solver="lbfgs", random_state=seed)
-    logistic.fit(X_train, y[train_idx])
-    logistic_scores = logistic.predict_proba(X_test)[:, 1]
+    local_folds = _build_time_folds(
+        [rows[idx] for idx in train_idx],
+        cv_strategy,
+        cv_splits,
+        min_train_size=max(5, int(len(train_idx) * 0.3)),
+    )
+    global_folds = _remap_folds(local_folds, train_idx)
 
-    gbr = GradientBoostingClassifier(random_state=seed)
-    gbr.fit(X[train_idx], y[train_idx])
-    gbr_scores = gbr.predict_proba(X[test_idx])[:, 1]
-
-    baseline_scores = X[test_idx, features_df.columns.get_loc("CCE")]
-
-    def _metrics(scores: np.ndarray) -> Dict[str, object]:
-        roc = roc_auc_score(y[test_idx], scores)
-        pr = average_precision_score(y[test_idx], scores)
-        auc_ci, effective = _bootstrap_auc(y[test_idx], scores, seed=seed)
-        p_value = _auc_pvalue_vs_chance(y[test_idx], scores, seed=seed)
-        preds = (scores >= 0.5).astype(int)
-        cm = confusion_matrix(y[test_idx], preds, labels=[0, 1])
-        precision, recall, f1, support = precision_recall_fscore_support(
-            y[test_idx], preds, labels=[0, 1], zero_division=0
-        )
-        ece = _expected_calibration_error(y[test_idx], scores)
-        brier = brier_score_loss(y[test_idx], scores)
-        return {
-            "roc_auc": roc,
-            "roc_auc_ci": auc_ci,
-            "pr_auc": pr,
-            "p_value_vs_chance": p_value,
-            "bootstrap_samples": effective,
-            "confusion_matrix": cm.tolist(),
-            "precision": precision.tolist(),
-            "recall": recall.tolist(),
-            "f1": f1.tolist(),
-            "support": support.tolist(),
-            "ece": ece,
-            "brier": brier,
+    if export_folds is not None:
+        export_folds.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "train": train_idx,
+            "test": test_idx,
+            "cv": [
+                {"train": fold_train, "test": fold_test}
+                for fold_train, fold_test in global_folds
+            ],
         }
+        with export_folds.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
 
-    metrics = {
-        "baseline": _metrics(baseline_scores),
-        "logistic": _metrics(logistic_scores),
-        "gradient_boosting": _metrics(gbr_scores),
-    }
+    requested_models = list(models or ("logistic", "gbm"))
+    requested_calibrations = list(calibrations or ("platt", "isotonic", "temperature"))
+
+    baseline_scores = features_df.iloc[test_idx]["CCE"].to_numpy(dtype=float)
+    baseline_threshold = _threshold_sweep(baseline_scores, y_test, test_idx, rows, fx.INVESTMENT_GRADE)
+    baseline_metrics = _model_metrics(y_test, baseline_scores, baseline_threshold["threshold"], seed)
+    baseline_metrics["ig_guardrail"] = baseline_threshold
+
+    model_results: Dict[str, ModelEvaluation] = {}
+
+    for name in requested_models:
+        if name == "baseline":
+            model_results[name] = ModelEvaluation(
+                name=name,
+                raw_scores=baseline_scores.tolist(),
+                metrics=baseline_metrics,
+                calibrations={},
+            )
+            continue
+        if name == "stacked":
+            # Stacked ensemble will be computed after base models are available
+            continue
+        estimator = _build_estimator(name, seed)
+        estimator.fit(X_train, y_train)
+        test_scores = _predict_scores_from_estimator(estimator, X_test)
+
+        calibration_map: Dict[str, CalibrationDetails] = {}
+        if local_folds:
+            oof_scores = _cross_val_predictions(name, X_train, y_train, local_folds, seed)
+        else:
+            oof_scores = np.full(len(y_train), np.nan)
+
+        valid_mask = ~np.isnan(oof_scores)
+        if valid_mask.sum() >= 5 and len(np.unique(y_train[valid_mask])) > 1:
+            for method in requested_calibrations:
+                try:
+                    calibration_map[method] = _apply_calibration(
+                        method,
+                        oof_scores[valid_mask],
+                        y_train[valid_mask],
+                        test_scores,
+                        y_test,
+                        seed,
+                    )
+                except ValueError:
+                    continue
+
+        threshold = _threshold_sweep(test_scores, y_test, test_idx, rows, fx.INVESTMENT_GRADE)
+        metrics = _model_metrics(y_test, test_scores, threshold["threshold"], seed)
+        metrics["ig_guardrail"] = threshold
+        model_results[name] = ModelEvaluation(
+            name=name,
+            raw_scores=test_scores.tolist(),
+            metrics=metrics,
+            calibrations=calibration_map,
+        )
+
+    if "stacked" in requested_models:
+        base_candidates = [model_results.get(candidate) for candidate in ("logistic", "gbm", "lightgbm")]
+        base_candidates = [candidate for candidate in base_candidates if candidate is not None]
+        if base_candidates:
+            stacked_scores = np.mean([np.array(candidate.raw_scores) for candidate in base_candidates], axis=0)
+            threshold = _threshold_sweep(stacked_scores, y_test, test_idx, rows, fx.INVESTMENT_GRADE)
+            metrics = _model_metrics(y_test, stacked_scores, threshold["threshold"], seed)
+            metrics["ig_guardrail"] = threshold
+            model_results["stacked"] = ModelEvaluation(
+                name="stacked",
+                raw_scores=stacked_scores.tolist(),
+                metrics=metrics,
+                calibrations={},
+            )
 
     label_shuffle_auc = _label_shuffle_auc(X, y, train_idx, test_idx, seed=seed + 1)
 
@@ -611,16 +1136,6 @@ def evaluate(manifest_path: Path, seed: int = 13) -> Dict[str, object]:
     distressed = distress_scores[distress_labels == 1]
     controls = distress_scores[distress_labels == 0]
     welch = stats.ttest_ind(distressed, controls, equal_var=False)
-
-    ig_mask = [idx for idx in test_idx if rows[idx]["ticker"] in fx.INVESTMENT_GRADE]
-    ig_fp = 0
-    ig_total = 0
-    if ig_mask:
-        ig_total = sum(1 for idx in ig_mask if y[idx] == 0)
-        ig_preds = (logistic_scores[[test_idx.index(idx) for idx in ig_mask]] >= 0.5).astype(int)
-        ig_fp = int((ig_preds == 1).sum())
-    ig_rate = ig_fp / ig_total if ig_total else math.nan
-    ig_ci = _wilson_ci(ig_fp, ig_total) if ig_total else (math.nan, math.nan)
 
     ablation_groups = {
         "sectionizer": [
@@ -654,6 +1169,24 @@ def evaluate(manifest_path: Path, seed: int = 13) -> Dict[str, object]:
 
     similarity, pair_idx = _tfidf_similarity(rows, train_idx, test_idx)
 
+    try:
+        import regex as regex_mod  # type: ignore
+
+        regex_version = getattr(regex_mod, "__version__", "unknown")
+    except Exception:  # pragma: no cover - optional dependency guard
+        import re
+
+        regex_version = getattr(re, "__version__", "stdlib")
+
+    fingerprint_payload = {
+        "regex_version": regex_version,
+        "calibration_timestamp": dt.datetime.utcnow().isoformat(),
+        "models": requested_models,
+        "calibrations": requested_calibrations,
+    }
+    model_hash = hashlib.sha256(json.dumps(fingerprint_payload, sort_keys=True).encode("utf-8")).hexdigest()
+    fingerprint_payload["model_hash"] = model_hash
+
     outputs = {
         "counts": {
             "total_filings": len(rows),
@@ -662,19 +1195,25 @@ def evaluate(manifest_path: Path, seed: int = 13) -> Dict[str, object]:
             "distressed": int(y.sum()),
             "controls": int(len(y) - y.sum()),
         },
-        "metrics": metrics,
         "train_indices": train_idx,
         "test_indices": test_idx,
-        "label_shuffle_auc": label_shuffle_auc,
+        "cv_folds": global_folds,
+        "metrics": {
+            name: dataclasses.asdict(result)
+            for name, result in model_results.items()
+        },
+        "baseline": dataclasses.asdict(
+            ModelEvaluation(
+                name="baseline",
+                raw_scores=baseline_scores.tolist(),
+                metrics=baseline_metrics,
+                calibrations={},
+            )
+        ),
+        "label_shuffle_auc": float(label_shuffle_auc),
         "welch": {
             "statistic": float(welch.statistic),
             "p_value": float(welch.pvalue),
-        },
-        "ig_guardrail": {
-            "rate": ig_rate,
-            "count": ig_fp,
-            "total": ig_total,
-            "ci": ig_ci,
         },
         "ablations": ablations,
         "similarity": {
@@ -683,6 +1222,7 @@ def evaluate(manifest_path: Path, seed: int = 13) -> Dict[str, object]:
         },
         "rows": rows,
         "features": features_df.to_dict(orient="list"),
+        "fingerprint": fingerprint_payload,
     }
     return outputs
 
@@ -697,9 +1237,56 @@ def main() -> None:
     )
     parser.add_argument("--seed", type=int, default=13)
     parser.add_argument("--output", type=Path, default=Path("reports/realworld/eval.json"))
+    parser.add_argument("--holdout-fraction", type=float, default=0.25)
+    parser.add_argument(
+        "--cv-strategy",
+        type=str,
+        default="rolling",
+        choices=["rolling", "blocked"],
+        help="Cross-validation scheme for calibration",
+    )
+    parser.add_argument("--cv-splits", type=int, default=5)
+    parser.add_argument(
+        "--models",
+        type=str,
+        default="logistic,gbm",
+        help="Comma-separated list of models (logistic,gbm,lightgbm,stacked,baseline)",
+    )
+    parser.add_argument(
+        "--calibration",
+        type=str,
+        default="platt,isotonic,temperature",
+        help="Comma-separated list of calibration methods",
+    )
+    parser.add_argument(
+        "--no-time-split",
+        action="store_true",
+        help="Disable time-aware split and fallback to ticker-based split",
+    )
+    parser.add_argument(
+        "--export-folds",
+        type=Path,
+        default=None,
+        help="Optional path to export fold assignments as JSON",
+    )
     args = parser.parse_args()
 
-    results = evaluate(args.manifest, seed=args.seed)
+    model_list = [item.strip() for item in args.models.split(",") if item.strip()]
+    calibration_list = [item.strip() for item in args.calibration.split(",") if item.strip()]
+
+    logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
+
+    results = evaluate(
+        args.manifest,
+        seed=args.seed,
+        holdout_fraction=args.holdout_fraction,
+        cv_strategy=args.cv_strategy,
+        cv_splits=args.cv_splits,
+        models=model_list,
+        calibrations=calibration_list,
+        time_split=not args.no_time_split,
+        export_folds=args.export_folds,
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", encoding="utf-8") as handle:
         json.dump(results, handle, indent=2, default=str)
