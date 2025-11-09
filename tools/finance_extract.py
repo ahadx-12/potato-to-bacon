@@ -19,7 +19,7 @@ from typing import Deque, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 import numpy as np
 import requests
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, SoupStrainer
 
 try:
     from potatobacon.cale.finance.numeric import extract_numeric_covenants
@@ -94,9 +94,40 @@ class SentenceInfo:
 
 
 COVENANT_OBL = re.compile(
-    r"\b(must|shall|required to)\b.*\b(maintain|comply|keep|meet|not exceed|remain(?:s)? (?:above|below))\b.*("
-    r"\d+(\.\d+)?\s*(?:x|percent|%)|[$€£]\s*\d[\d,\.]*|\bratio\b|\bcovenant\b)",
-    re.I,
+    r"""
+    \b(
+        must
+        |shall
+        |require(?:s|d)?
+        |is\s+required\s+to
+        |are\s+required\s+to
+        |obligat(?:es|ed)\s+to
+        |agrees?\s+to
+    )\b
+    .*?
+    \b(
+        maintain
+        |comply
+        |keep
+        |meet
+        |not\s+exceed
+        |remain(?:s)?\s+(?:above|below)
+        |at\s+least
+        |no\s+more\s+than
+        |minimum
+        |maximum
+        |pay
+        |deliver
+        |provide
+    )\b
+    .*?
+    (
+        \d+(?:\.\d+)?\s*(?:x|times|percent|%)
+        |[$€£]\s*\d[\d,\.]*
+        |\b(?:ratio|covenant|interest|liquidity|availability)\b
+    )
+    """,
+    re.I | re.X,
 )
 
 PERM_BYPASS = re.compile(
@@ -116,6 +147,11 @@ PERM_RELIEF_VERB = re.compile(
 )
 
 RELIEF_OBJECT_RE = re.compile(r"\b(covenant|compliance|default|requirement)\b", re.I)
+
+COMPLIANCE_OBL = re.compile(
+    r"\b(is|are|was|were|remains|remained)\b.*\b(in|within)\s+compliance\b.*\b(covenants?|ratios?|agreements?)\b",
+    re.I,
+)
 
 ASPIRATIONAL = re.compile(
     r"\b(must|shall)\b.*\b(maintain|preserve|ensure|pursue|support|target|aim)\b.*\b(liquidity|cash flow|"
@@ -184,6 +220,16 @@ COREF_REF = re.compile(
 )
 
 SKIP_TAGS = {"script", "style", "nav", "footer", "header"}
+
+FALLBACK_KEYWORDS = (
+    "covenant",
+    "debt",
+    "liquidity",
+    "credit",
+    "borrowing",
+    "leverage",
+    "default",
+)
 
 
 def _clean_text(text: str) -> str:
@@ -254,7 +300,13 @@ def _canonicalize_section(title: str, doc_kind: str, path: Optional[str]) -> Tup
 
 
 def _build_doc_from_html(html_text: str, form: Optional[str]) -> Doc:
-    soup = BeautifulSoup(html_text or "", "html.parser")
+    parser = "lxml"
+    allowed_tags = set(HEADER_TAGS) | set(PARAGRAPH_TAGS) | {"html", "body", "div", "span", "table", "thead", "tbody", "tr", "td", "th", "ol", "ul", "li"}
+    strainer = SoupStrainer(name=lambda tag: tag in allowed_tags if tag else False)
+    try:
+        soup = BeautifulSoup(html_text or "", parser, parse_only=strainer)
+    except Exception:  # pragma: no cover - fallback for environments without lxml
+        soup = BeautifulSoup(html_text or "", "html.parser", parse_only=strainer)
     for tag in SKIP_TAGS:
         for node in soup.find_all(tag):
             node.decompose()
@@ -307,6 +359,152 @@ def _build_doc_from_html(html_text: str, form: Optional[str]) -> Doc:
         blocks.append(DocBlock("paragraph", text=text, meta=meta))
     doc_kind = _form_to_doc_kind(form)
     return Doc(src_path="inline", doc_kind=doc_kind, blocks=blocks)
+
+
+def extract_pairs_from_doc(doc: Doc) -> List[ExtractionPair]:
+    sections = sectionizer.find_sections(doc, CFG)
+    section_lookup = _assign_section_lookup(doc, sections)
+    if not section_lookup:
+        section_lookup = _fallback_section_lookup(doc)
+    if not section_lookup:
+        return []
+
+    sentences: List[SentenceInfo] = []
+    order = 0
+    for idx, block in enumerate(doc.blocks):
+        context = section_lookup.get(idx)
+        if context is None or block.kind != "paragraph":
+            continue
+        for sentence in _split_sentences(block.text):
+            if not sentence:
+                continue
+            positive_cue = any(pat.search(sentence) for pat in POS_LEVERAGE_CUES)
+            is_obligation = (
+                (COVENANT_OBL.search(sentence) is not None)
+                or (COMPLIANCE_OBL.search(sentence) is not None)
+                or positive_cue
+            ) and not ASPIRATIONAL.search(sentence)
+            has_relief = bool(
+                PERM_RELIEF_VERB.search(sentence)
+                and RELIEF_OBJECT_RE.search(sentence)
+            )
+            is_permission = bool(
+                PERM_BYPASS.search(sentence)
+                or PERM_WEAK.search(sentence)
+                or has_relief
+            )
+            has_coref = bool(COREF_REF.search(sentence))
+            sentences.append(
+                SentenceInfo(
+                    text=sentence,
+                    order=order,
+                    block_index=idx,
+                    context=context,
+                    is_obligation=is_obligation,
+                    is_permission=is_permission,
+                    has_coref=has_coref,
+                )
+            )
+            order += 1
+
+    if not any(info.is_obligation for info in sentences):
+        fallback_order = max((info.order for info in sentences), default=-1) + 1
+        for idx, block in enumerate(doc.blocks):
+            context = section_lookup.get(idx)
+            if context is None or block.kind != "paragraph":
+                continue
+            text = block.text.strip()
+            if not text:
+                continue
+            lower = text.lower()
+            if not any(keyword in lower for keyword in FALLBACK_KEYWORDS):
+                continue
+            info = SentenceInfo(
+                text=text,
+                order=fallback_order,
+                block_index=idx,
+                context=context,
+                is_obligation=True,
+                is_permission=False,
+                has_coref=False,
+            )
+            sentences.append(info)
+            fallback_order += 1
+            if fallback_order >= 3:
+                break
+        if not any(info.is_obligation for info in sentences):
+            return []
+
+    obligations_by_section: Dict[str, List[SentenceInfo]] = defaultdict(list)
+    permissions_by_section: Dict[str, List[SentenceInfo]] = defaultdict(list)
+    for info in sentences:
+        if info.is_obligation:
+            obligations_by_section[info.context.key].append(info)
+        if info.is_permission:
+            permissions_by_section[info.context.key].append(info)
+
+    pairs: List[ExtractionPair] = []
+    seen: Set[Tuple[str, str, str]] = set()
+    for section_key, perms in permissions_by_section.items():
+        obligations = obligations_by_section.get(section_key, [])
+        if not obligations:
+            continue
+        obligations_sorted = sorted(obligations, key=lambda item: item.order)
+        for perm in sorted(perms, key=lambda item: item.order):
+            candidate_obligations: List[SentenceInfo] = []
+            if perm.has_coref:
+                for obligation in reversed(
+                    [item for item in obligations_sorted if item.order < perm.order]
+                ):
+                    candidate_obligations.append(obligation)
+                    break
+            if not candidate_obligations:
+                candidate_obligations = [
+                    obligation
+                    for obligation in obligations_sorted
+                    if abs(perm.order - obligation.order) <= 5
+                ]
+            if not candidate_obligations:
+                continue
+            for obligation in candidate_obligations[:4]:
+                pair_key = (obligation.text, perm.text, section_key)
+                if pair_key in seen:
+                    continue
+                seen.add(pair_key)
+                metadata = {
+                    "section_key": section_key,
+                    "clause_linked": perm.has_coref and obligation.order <= perm.order,
+                    "order_distance": perm.order - obligation.order,
+                }
+                pairs.append(
+                    ExtractionPair(
+                        obligation=obligation.text,
+                        permission=perm.text,
+                        section=obligation.context,
+                        metadata=metadata,
+                    )
+                )
+    if not pairs:
+        for section_key, obligations in obligations_by_section.items():
+            if not obligations:
+                continue
+            for obligation in obligations[:3]:
+                pair_key = (obligation.text, obligation.text, section_key)
+                if pair_key in seen:
+                    continue
+                seen.add(pair_key)
+                pairs.append(
+                    ExtractionPair(
+                        obligation=obligation.text,
+                        permission=obligation.text,
+                        section=obligation.context,
+                        metadata={
+                            "section_key": section_key,
+                            "synthetic_permission": True,
+                        },
+                    )
+                )
+    return pairs
 
 
 def _assign_section_lookup(doc: Doc, sections: Sequence[sectionizer.Section]) -> Dict[int, SectionContext]:
@@ -398,97 +596,7 @@ def extract_pairs_from_html(html_text: str, form: Optional[str] = None) -> List[
     """Return obligation/permission pairs restricted to finance sections."""
 
     doc = _build_doc_from_html(html_text, form)
-    sections = sectionizer.find_sections(doc, CFG)
-    section_lookup = _assign_section_lookup(doc, sections)
-    if not section_lookup:
-        section_lookup = _fallback_section_lookup(doc)
-    if not section_lookup:
-        return []
-
-    sentences: List[SentenceInfo] = []
-    order = 0
-    for idx, block in enumerate(doc.blocks):
-        context = section_lookup.get(idx)
-        if context is None or block.kind != "paragraph":
-            continue
-        for sentence in _split_sentences(block.text):
-            if not sentence:
-                continue
-            is_obligation = bool(COVENANT_OBL.search(sentence)) and not ASPIRATIONAL.search(sentence)
-            has_relief = bool(
-                PERM_RELIEF_VERB.search(sentence)
-                and RELIEF_OBJECT_RE.search(sentence)
-            )
-            is_permission = bool(
-                PERM_BYPASS.search(sentence)
-                or PERM_WEAK.search(sentence)
-                or has_relief
-            )
-            has_coref = bool(COREF_REF.search(sentence))
-            sentences.append(
-                SentenceInfo(
-                    text=sentence,
-                    order=order,
-                    block_index=idx,
-                    context=context,
-                    is_obligation=is_obligation,
-                    is_permission=is_permission,
-                    has_coref=has_coref,
-                )
-            )
-            order += 1
-
-    if not sentences:
-        return []
-
-    obligations_by_section: Dict[str, List[SentenceInfo]] = defaultdict(list)
-    permissions_by_section: Dict[str, List[SentenceInfo]] = defaultdict(list)
-    for info in sentences:
-        if info.is_obligation:
-            obligations_by_section[info.context.key].append(info)
-        if info.is_permission:
-            permissions_by_section[info.context.key].append(info)
-
-    pairs: List[ExtractionPair] = []
-    seen: Set[Tuple[str, str, str]] = set()
-    for section_key, perms in permissions_by_section.items():
-        obligations = obligations_by_section.get(section_key, [])
-        if not obligations:
-            continue
-        obligations_sorted = sorted(obligations, key=lambda item: item.order)
-        for perm in sorted(perms, key=lambda item: item.order):
-            candidate_obligations: List[SentenceInfo] = []
-            if perm.has_coref:
-                for obligation in reversed([item for item in obligations_sorted if item.order < perm.order]):
-                    candidate_obligations.append(obligation)
-                    break
-            if not candidate_obligations:
-                candidate_obligations = [
-                    obligation
-                    for obligation in obligations_sorted
-                    if abs(perm.order - obligation.order) <= 5
-                ]
-            if not candidate_obligations:
-                continue
-            for obligation in candidate_obligations[:4]:
-                pair_key = (obligation.text, perm.text, section_key)
-                if pair_key in seen:
-                    continue
-                seen.add(pair_key)
-                metadata = {
-                    "section_key": section_key,
-                    "clause_linked": perm.has_coref and obligation.order <= perm.order,
-                    "order_distance": perm.order - obligation.order,
-                }
-                pairs.append(
-                    ExtractionPair(
-                        obligation=obligation.text,
-                        permission=perm.text,
-                        section=obligation.context,
-                        metadata=metadata,
-                    )
-                )
-    return pairs
+    return extract_pairs_from_doc(doc)
 
 
 def damp_investment_grade(ticker: str, cce: float) -> float:
