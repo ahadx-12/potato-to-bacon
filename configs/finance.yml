@@ -69,3 +69,55 @@ sectionizer:
       CREDIT_AGREEMENT: 0.6
       default: 0.0
   min_score: 0.9
+
+lexicon:
+  finance_terms:
+    - "covenant"
+    - "debt"
+    - "liquidity"
+    - "ratio"
+    - "credit facility"
+    - "borrowing"
+    - "revolver"
+    - "senior notes"
+    - "maturities"
+    - "ebitda add-back"
+  toc_patterns:
+    - "table of contents"
+    - "index of"
+    - "where you can find"
+    - "forward-looking statements"
+    - "item page part"
+    - "part i financial information"
+  bypass_cues:
+    - "except that"
+    - "provided, however"
+    - "notwithstanding"
+    - "basket"
+  negation_terms:
+    - "except that"
+    - "provided, however"
+    - "notwithstanding"
+    - "unless"
+    - "except to the extent"
+    - "other than"
+    - "basket"
+  section_aliases:
+    CREDIT_AGREEMENT:
+      - "Credit Agreement"
+      - "Covenants"
+      - "Revolver"
+      - "EBITDA add-backs"
+      - "EBITDA add backs"
+      - "Liquidity and Capital Resources — Borrowings"
+      - "Liquidity and Capital Resources - Borrowings"
+      - "Debt Maturities"
+      - "Credit Agreement Exhibit"
+      - "Exhibit 10"
+    INDENTURE_NOTES:
+      - "Senior Notes"
+      - "Indenture"
+    LIQUIDITY:
+      - "Liquidity and Capital Resources"
+      - "Debt Maturities"
+      - "Borrowings"
