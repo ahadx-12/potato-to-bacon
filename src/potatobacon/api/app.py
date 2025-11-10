@@ -19,6 +19,7 @@ from potatobacon.cale.engine import CALEEngine
 from potatobacon.cale.types import LegalRule
 from potatobacon.codegen.reference import generate_numpy
 from potatobacon.core.units import analyze_units_map
+from potatobacon.dashboard import register_tax_dashboard
 from potatobacon.manifest.store import ComputationManifest
 from potatobacon.parser.dsl_parser import parse_dsl
 from potatobacon.semantics.canonicalizer import canonicalize
@@ -85,6 +86,12 @@ if web_dir.exists():
         return RedirectResponse(url="/ui/")
 else:
     print(f"⚠️ Warning: UI directory not found at {web_dir}, skipping UI mount.")
+
+
+# -----------------------------------------------------------------------------
+# CALE-LAW dashboard registration
+# -----------------------------------------------------------------------------
+register_tax_dashboard(app)
 
 
 # -----------------------------------------------------------------------------

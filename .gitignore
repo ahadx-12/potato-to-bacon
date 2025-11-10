@@ -16,6 +16,15 @@ data/sec_real/
 data/cache/
 reports/realworld/
 src/potatobacon.egg-info/
+# Tax corpus artefacts
+us_tax_corpus/raw/**
+!us_tax_corpus/raw/**/.gitkeep
+us_tax_corpus/parsed/*.jsonl
+us_tax_corpus/manifests/*.csv
+us_tax_corpus/logs/**
+!us_tax_corpus/logs/**/.gitkeep
+out/*.jsonl
+out/*.json
 # Ignore trained model artifacts
 models/finance/pipeline.joblib
 models/finance/metadata.json
