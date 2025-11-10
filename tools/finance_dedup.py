@@ -7,7 +7,8 @@ import argparse
 import csv
 import json
 import re
-from collections import defaultdict
+import hashlib
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Sequence, Set, Tuple
@@ -50,6 +51,14 @@ class ManifestRow:
     @property
     def key(self) -> str:
         return self.md5 or f"{self.data.get('ticker','')}::{self.path.name}"
+
+
+@dataclass(frozen=True)
+class DedupDecision:
+    method: str
+    primary: str
+    duplicate: str
+    score: float
 
 
 class SimpleMinHashLSH:
@@ -179,6 +188,52 @@ def _jaccard(a: Sequence[int], b: Sequence[int]) -> float:
     return len(set_a & set_b) / len(set_a | set_b)
 
 
+def _cosine(counter_a: Counter[str], counter_b: Counter[str]) -> float:
+    if not counter_a or not counter_b:
+        return 0.0
+    intersection = set(counter_a) & set(counter_b)
+    dot = sum(counter_a[token] * counter_b[token] for token in intersection)
+    norm_a = sum(value * value for value in counter_a.values()) ** 0.5
+    norm_b = sum(value * value for value in counter_b.values()) ** 0.5
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def _tfidf_near_duplicates(records: Sequence[Dict[str, object]], threshold: float) -> List[Tuple[int, int, float]]:
+    matches: List[Tuple[int, int, float]] = []
+    for idx, left in enumerate(records):
+        left_counts: Counter[str] = left["counts"]  # type: ignore[assignment]
+        for jdx in range(idx + 1, len(records)):
+            right = records[jdx]
+            right_counts: Counter[str] = right["counts"]  # type: ignore[assignment]
+            score = _cosine(left_counts, right_counts)
+            if score >= threshold:
+                matches.append((idx, jdx, score))
+    return matches
+
+
+def _minhash_near_duplicates(records: Sequence[Dict[str, object]], threshold: float) -> List[Tuple[int, int, float]]:
+    matches: List[Tuple[int, int, float]] = []
+    for idx, left in enumerate(records):
+        left_shingles: Sequence[int] = left["shingles"]  # type: ignore[assignment]
+        left_tokens = set(left.get("tokens", []))
+        for jdx in range(idx + 1, len(records)):
+            right = records[jdx]
+            right_shingles: Sequence[int] = right["shingles"]  # type: ignore[index]
+            right_tokens = set(right.get("tokens", []))
+            shingle_score = _jaccard(left_shingles, right_shingles)
+            token_score = (
+                len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
+                if left_tokens and right_tokens
+                else 0.0
+            )
+            score = max(shingle_score, token_score)
+            if score >= threshold:
+                matches.append((idx, jdx, score))
+    return matches
+
+
 def _apply_quality_flag(row: Dict[str, str], reason: str) -> None:
     existing = [flag for flag in (row.get("quality_flag") or "").split(";") if flag]
     if reason not in existing:
@@ -254,6 +309,107 @@ def _assign_splits(rows: List[Dict[str, str]], min_split: int = DEFAULT_MIN_SPLI
     for row in rows:
         key = (row.get("accession", ""), row.get("md5", ""))
         row["split"] = keyed.get(key, "train")
+
+
+def _prepare_records(manifest: "pd.DataFrame") -> List[Dict[str, object]]:
+    records: List[Dict[str, object]] = []
+    for idx, row in manifest.reset_index(drop=True).iterrows():
+        path = Path(str(row.get("path", "")))
+        text = _read_text(path)
+        tokens = _tokenize(text)
+        counts = Counter(tokens)
+        shingles = _shingles(tokens)
+        md5 = hashlib.md5(text.encode("utf-8")).hexdigest() if text else ""
+        records.append(
+            {
+                "index": idx,
+                "row": {key: (str(value) if not pd.isna(value) else "") for key, value in row.items()},
+                "path": path,
+                "text": text,
+                "tokens": tokens,
+                "counts": counts,
+                "shingles": shingles,
+                "md5": md5,
+                "key": f"{row.get('ticker', '')}::{path.name}",
+            }
+        )
+    return records
+
+
+def deduplicate_manifest(
+    manifest: "pd.DataFrame",
+    threshold: float = DEFAULT_DUPLICATE_THRESHOLD,
+) -> Tuple["pd.DataFrame", "pd.DataFrame", Sequence[DedupDecision]]:
+    records = _prepare_records(manifest)
+    kept: List[Dict[str, object]] = []
+    quarantine: List[Dict[str, object]] = []
+    decisions: List[DedupDecision] = []
+    seen_md5: Dict[str, Dict[str, object]] = {}
+
+    tfidf_matches = _tfidf_near_duplicates(records, threshold)
+    minhash_matches = _minhash_near_duplicates(records, max(0.5, threshold - 0.1))
+
+    tfidf_lookup = {(i, j): score for i, j, score in tfidf_matches}
+    minhash_lookup = {(i, j): score for i, j, score in minhash_matches}
+
+    def _mark_duplicate(record: Dict[str, object], method: str, primary: Dict[str, object], score: float) -> None:
+        row = dict(record["row"])
+        row["dedup_method"] = method
+        row["duplicate_of"] = primary.get("key", "")
+        row["dedup_score"] = round(float(score), 4)
+        quarantine.append(row)
+        decisions.append(
+            DedupDecision(
+                method=method,
+                primary=str(primary.get("key", "")),
+                duplicate=str(record.get("key", "")),
+                score=float(score),
+            )
+        )
+
+    for idx, record in enumerate(records):
+        md5 = record["md5"]
+        if md5 and md5 in seen_md5:
+            _mark_duplicate(record, "md5_raw", seen_md5[md5], 1.0)
+            continue
+
+        duplicate_marked = False
+        for kept_record in kept:
+            pair = (min(idx, kept_record["index"]), max(idx, kept_record["index"]))
+            if pair in tfidf_lookup:
+                _mark_duplicate(record, "tfidf", kept_record, tfidf_lookup[pair])
+                duplicate_marked = True
+                break
+            if pair in minhash_lookup:
+                _mark_duplicate(record, "minhash", kept_record, minhash_lookup[pair])
+                duplicate_marked = True
+                break
+        if duplicate_marked:
+            continue
+
+        kept.append(record)
+        if md5:
+            seen_md5[md5] = record
+
+    base_columns = list(manifest.columns)
+    extra_columns = ["dedup_method", "duplicate_of", "dedup_score"]
+
+    kept_rows = []
+    for record in kept:
+        row = dict(record["row"])
+        for column in extra_columns:
+            row.setdefault(column, "")
+        kept_rows.append(row)
+
+    quarantine_rows = []
+    for row in quarantine:
+        for column in extra_columns:
+            row.setdefault(column, "")
+        quarantine_rows.append(row)
+
+    kept_df = pd.DataFrame(kept_rows, columns=base_columns + extra_columns)
+    quarantine_df = pd.DataFrame(quarantine_rows, columns=base_columns + extra_columns)
+    return kept_df, quarantine_df, decisions
 
 
 def _write_csv(path: Path, rows: List[Dict[str, str]], fieldnames: Sequence[str]) -> None:

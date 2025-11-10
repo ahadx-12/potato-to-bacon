@@ -725,8 +725,11 @@ def compute_metrics(records: Sequence[FilingRecord]) -> Tuple[Dict[str, object],
     if not records:
         return {}, np.zeros(0), np.zeros(0), {}
     X, y, feature_names = _feature_matrix(records)
-    baseline = X[:, 1]
+    baseline = X[:, 1].copy()
     auc_baseline = compute_auc(y, baseline)
+    if auc_baseline < 0.5:
+        baseline = 1.0 - baseline
+        auc_baseline = compute_auc(y, baseline)
     distressed = baseline[y == 1]
     controls = baseline[y == 0]
     p_value = welch_pvalue(distressed, controls)
