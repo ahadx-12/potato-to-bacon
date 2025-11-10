@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CALE-LAW Tax Dashboard</title>
+    <link rel="stylesheet" href="/static/law/tax/tax_dashboard.css" />
+  </head>
+  <body>
+    <main id="tax-dashboard">
+      <header>
+        <h1>CALE-LAW — Tax Law Coherence</h1>
+        <p id="summary-subtitle">Live metrics derived from public U.S. tax authorities.</p>
+      </header>
+      <section id="summary-panel">
+        <div class="summary-card">
+          <h2>Coverage</h2>
+          <p><span id="statute-count">0</span> sections scored</p>
+          <p><span id="pair-count">0</span> statute/reg pairs</p>
+        </div>
+        <div class="summary-card">
+          <h2>Top Sections</h2>
+          <ul id="top-sections"></ul>
+        </div>
+      </section>
+      <section id="heatmap-section">
+        <h2>Conflict Heatmap</h2>
+        <div id="heatmap" aria-live="polite">Loading…</div>
+      </section>
+      <section id="timeseries-section">
+        <h2>Temporal Signal</h2>
+        <pre id="timeseries">No time series yet.</pre>
+      </section>
+      <section id="drilldown-section">
+        <h2>Drilldown</h2>
+        <div id="drilldown"></div>
+      </section>
+    </main>
+    <script src="/static/law/tax/tax_dashboard.js" defer></script>
+  </body>
+</html>
