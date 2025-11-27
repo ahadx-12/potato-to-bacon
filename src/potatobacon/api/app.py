@@ -28,6 +28,12 @@ from potatobacon.storage import load_manifest as load_persisted_manifest
 from potatobacon.storage import save_code, save_manifest, save_schema
 from potatobacon.validation.pipeline import validate_all
 from potatobacon.units.infer import evaluate_equation_dimensions, UnitInferenceError
+from potatobacon.law.arbitrage_hunter import (
+    ArbitrageHunter,
+    ArbitrageRequest as ArbitrageRequestPayload,
+)
+from potatobacon.law.cale_metrics import batch_metrics, compute_scenario_metrics, sample_scenarios
+from potatobacon.law.solver_z3 import build_policy_atoms_from_rules
 
 # -----------------------------------------------------------------------------
 # App setup
@@ -210,6 +216,14 @@ class SuggestionResponse(BaseModel):
     candidates_considered: int
     suggestions: List[SuggestionItem]
     best: SuggestionItem
+
+
+class ArbitrageRequestModel(BaseModel):
+    jurisdictions: List[str] = Field(default_factory=list)
+    domain: str = "tax"
+    objective: str = "MAXIMIZE(net_after_tax_income)"
+    constraints: Dict[str, Any] = Field(default_factory=dict)
+    risk_tolerance: str = Field(default="medium", pattern="^(low|medium|high)$")
 
 
 def _ensure_bootstrap() -> CALEServices:
@@ -423,8 +437,18 @@ def manifest(req: ManifestReq) -> ManifestResp:
 
 @app.post("/v1/law/analyze")
 def analyze_conflict(req: ConflictRequest) -> Dict[str, Any]:
-    _cale_services()  # ensure bootstrap succeeded
+    services = _cale_services()  # ensure bootstrap succeeded
     engine = _cale_engine()
+
+    # Parse the incoming rules so we can compute scenario-aware metrics
+    rule1 = _parse_and_populate_rule(req.rule1, services)
+    rule2 = _parse_and_populate_rule(req.rule2, services)
+    atoms = build_policy_atoms_from_rules([rule1, rule2], services.mapper)
+    scenario_summary = batch_metrics(atoms, sample_size=8)
+    sampled = sample_scenarios(atoms, sample_size=3)
+    scenario_metrics = [
+        asdict(compute_scenario_metrics(scenario, atoms)) for scenario in sampled
+    ]
 
     try:
         result = engine.suggest(req.rule1.model_dump(), req.rule2.model_dump())
@@ -434,6 +458,10 @@ def analyze_conflict(req: ConflictRequest) -> Dict[str, Any]:
         logger.exception("Conflict analysis failed")
         raise HTTPException(status_code=500, detail=f"analysis failed: {exc}") from exc
 
+    result["scenario_metrics"] = {
+        "summary": scenario_summary,
+        "samples": scenario_metrics,
+    }
     return result
 
 
@@ -512,6 +540,40 @@ def train_dry_run(req: ConflictRequest) -> Dict[str, Any]:
 
     result["training"] = training_result or {"status": "skipped"}
     return result
+
+
+@app.post("/api/law/arbitrage/hunt")
+def arbitrage_hunt(req: ArbitrageRequestModel) -> Dict[str, Any]:
+    services = _cale_services()
+    atoms = build_policy_atoms_from_rules(services.corpus, services.mapper)
+    hunter = ArbitrageHunter(atoms)
+
+    dossier = hunter.hunt(
+        ArbitrageRequestPayload(
+            jurisdictions=req.jurisdictions,
+            domain=req.domain,
+            objective=req.objective,
+            constraints=req.constraints,
+            risk_tolerance=req.risk_tolerance,
+        )
+    )
+
+    response_candidates = [
+        {
+            "scenario": candidate.scenario,
+            "metrics": asdict(candidate.metrics),
+            "proof_trace": candidate.proof_trace,
+        }
+        for candidate in dossier.candidates
+    ]
+
+    return {
+        "golden_scenario": dossier.golden_scenario,
+        "metrics": dossier.metrics,
+        "proof_trace": dossier.proof_trace,
+        "risk_flags": dossier.risk_flags,
+        "candidates": response_candidates,
+    }
 
 
 @app.get("/v1/manifest/{manifest_hash}")
