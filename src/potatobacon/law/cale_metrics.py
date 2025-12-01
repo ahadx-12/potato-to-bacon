@@ -21,6 +21,8 @@ class ScenarioMetrics:
     risk: float
     score: float
     active_rules: List[str]
+    value_components: Dict[str, float]
+    risk_components: Dict[str, float]
 
 
 def _applicable_outcomes(
@@ -79,6 +81,36 @@ def compute_scenario_metrics(
     else:
         value_estimate = 0.0
 
+    # Value transparency: derive components based on active rules and entropy
+    active_jurisdictions: Dict[str, int] = {}
+    for atom in active_atoms:
+        jurisdiction = atom.outcome.get("jurisdiction", "Unknown") or "Unknown"
+        active_jurisdictions[jurisdiction] = active_jurisdictions.get(jurisdiction, 0) + 1
+
+    gross_income = float(max(len(scenario), 1) * 100000.0)
+    effective_tax_rate_base = max(0.0, min(1.0, 0.25 + (1.0 - dominant) * 0.5))
+    value_components: Dict[str, float] = {
+        "gross_income": gross_income,
+    }
+    for jurisdiction, count in active_jurisdictions.items():
+        weight = count / max(len(active_atoms), 1)
+        key = f"effective_tax_rate_{jurisdiction.lower().replace(' ', '_').replace('.', '_')}"
+        value_components[key] = max(0.0, min(1.0, effective_tax_rate_base * weight + entropy * 0.1))
+    blended_tax_rate = max(value_components.values()) if len(value_components) > 1 else effective_tax_rate_base
+    net_after_tax = gross_income * (1.0 - blended_tax_rate)
+    value_components["net_after_tax"] = net_after_tax
+
+    # Risk transparency: trace drivers behind the scalar risk
+    enforcement_risk = min(1.0, risk + (0.2 if not is_sat else 0.0))
+    ambiguity_risk = max(0.0, min(1.0, entropy))
+    treaty_mismatch_risk = min(1.0, len(active_jurisdictions) * 0.1 + (1.0 - dominant) * 0.3)
+    risk_components = {
+        "enforcement_risk": enforcement_risk,
+        "ambiguity_risk": ambiguity_risk,
+        "treaty_mismatch_risk": treaty_mismatch_risk,
+    }
+    risk = max(risk, sum(risk_components.values()) / max(len(risk_components), 1))
+
     score = (value_estimate ** alpha) * (entropy ** beta) * (1.0 - risk)
 
     # Cohen's kappa proxy: agreement vs uniform baseline
@@ -97,6 +129,8 @@ def compute_scenario_metrics(
         risk=float(risk),
         score=float(score),
         active_rules=[atom.source_id for atom in active_atoms],
+        value_components=value_components,
+        risk_components=risk_components,
     )
 
 

@@ -32,6 +32,7 @@ from potatobacon.storage import latest_manifest_hash
 from potatobacon.validation.pipeline import validate_all
 from potatobacon.units.infer import evaluate_equation_dimensions, UnitInferenceError
 from potatobacon.law.arbitrage_hunter import run_arbitrage_hunt
+from potatobacon.law.arbitrage_models import ArbitrageDossierModel
 from potatobacon.law.cale_metrics import batch_metrics, compute_scenario_metrics, sample_scenarios
 from potatobacon.law.manifest import LawSource, ingest_sources, load_latest_law_manifest
 from potatobacon.law.pdf_ingest import build_sources_from_pdf, extract_text_from_pdf
@@ -605,7 +606,7 @@ def train_dry_run(req: ConflictRequest, api_key: str = Depends(require_api_key))
     return result
 
 
-@app.post("/api/law/arbitrage/hunt")
+@app.post("/api/law/arbitrage/hunt", response_model=ArbitrageDossierModel)
 def arbitrage_hunt(req: ArbitrageRequestModel, api_key: str = Depends(require_api_key)) -> Dict[str, Any]:
     services = _cale_services()
     dossier = run_arbitrage_hunt(services, req.model_dump())
