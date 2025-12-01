@@ -7,32 +7,34 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ConfigDict
 
 from potatobacon.api.routes_units import router as units_router
+from potatobacon.api.security import ENGINE_VERSION, require_api_key
 from potatobacon.cale.bootstrap import CALEServices, build_services
 from potatobacon.cale.engine import CALEEngine
 from potatobacon.cale.types import LegalRule
 from potatobacon.codegen.reference import generate_numpy
 from potatobacon.core.units import analyze_units_map
 from potatobacon.dashboard import register_tax_dashboard
+from potatobacon.law.jobs import job_manager
 from potatobacon.manifest.store import ComputationManifest
 from potatobacon.parser.dsl_parser import parse_dsl
 from potatobacon.semantics.canonicalizer import canonicalize
 from potatobacon.semantics.schema_builder import build_theory_schema
 from potatobacon.storage import load_manifest as load_persisted_manifest
 from potatobacon.storage import save_code, save_manifest, save_schema
+from potatobacon.storage import latest_manifest_hash
 from potatobacon.validation.pipeline import validate_all
 from potatobacon.units.infer import evaluate_equation_dimensions, UnitInferenceError
-from potatobacon.law.arbitrage_hunter import (
-    ArbitrageHunter,
-    ArbitrageRequest as ArbitrageRequestPayload,
-)
+from potatobacon.law.arbitrage_hunter import run_arbitrage_hunt
 from potatobacon.law.cale_metrics import batch_metrics, compute_scenario_metrics, sample_scenarios
+from potatobacon.law.manifest import LawSource, ingest_sources, load_latest_law_manifest
+from potatobacon.law.pdf_ingest import build_sources_from_pdf, extract_text_from_pdf
 from potatobacon.law.solver_z3 import build_policy_atoms_from_rules
 
 # -----------------------------------------------------------------------------
@@ -177,6 +179,41 @@ class ManifestReq(BaseModel):
 class ManifestResp(BaseModel):
     manifest_hash: str
     code_digest: str
+    engine_version: str = ENGINE_VERSION
+
+
+class VersionResp(BaseModel):
+    engine_version: str
+    build: str | None = None
+    manifest_hash: str | None = None
+
+
+class BulkSource(BaseModel):
+    id: str
+    text: str
+    jurisdiction: str | None = None
+    statute: str | None = None
+    section: str | None = None
+    enactment_year: int | None = None
+
+
+class BulkOptions(BaseModel):
+    replace_existing: bool = False
+
+
+class BulkManifestRequest(BaseModel):
+    domain: str
+    sources: List[BulkSource]
+    options: BulkOptions = Field(default_factory=BulkOptions)
+
+
+class BulkManifestResponse(BaseModel):
+    manifest_hash: str
+    rules_count: int
+    domain: str
+    sources_ingested: List[str]
+    engine_version: str = ENGINE_VERSION
+    extracted_sections: int | None = None
 
 
 class RuleInput(BaseModel):
@@ -255,6 +292,20 @@ def _cale_engine() -> CALEEngine:
     return engine
 
 
+def _active_manifest_hash(domain: str | None = None) -> str | None:
+    manifest_map: Dict[str, str] = getattr(app.state, "active_manifest_hash", {}) or {}
+    if domain and domain in manifest_map:
+        return manifest_map[domain]
+    domain_hash = latest_manifest_hash(domain) if domain else None
+    return domain_hash or latest_manifest_hash(None)
+
+
+def _update_active_manifest(domain: str, manifest_hash: str) -> None:
+    manifest_map: Dict[str, str] = getattr(app.state, "active_manifest_hash", {}) or {}
+    manifest_map[domain] = manifest_hash
+    app.state.active_manifest_hash = manifest_map
+
+
 def _parse_and_populate_rule(inp: RuleInput, services: CALEServices) -> LegalRule:
     metadata = inp.model_dump(exclude={"text"})
     metadata.setdefault("id", None)
@@ -290,6 +341,15 @@ def info() -> Dict[str, Any]:
         ],
         "validators": ["dimensional_fast", "constraints", "relativistic", "pde_class"],
     }
+
+
+@app.get("/v1/version", response_model=VersionResp)
+def version() -> VersionResp:
+    return VersionResp(
+        engine_version=ENGINE_VERSION,
+        build=os.getenv("GIT_COMMIT"),
+        manifest_hash=_active_manifest_hash(None),
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -397,7 +457,7 @@ def codegen(req: CodegenReq) -> CodegenResp:
 
 
 @app.post("/v1/manifest", response_model=ManifestResp)
-def manifest(req: ManifestReq) -> ManifestResp:
+def manifest(req: ManifestReq, api_key: str = Depends(require_api_key)) -> ManifestResp:
     expr = parse_dsl(req.dsl)
     canon = canonicalize(expr)
     report = validate_all(
@@ -432,11 +492,12 @@ def manifest(req: ManifestReq) -> ManifestResp:
     )
 
     manifest_hash = save_manifest(asdict(manifest))
+    _update_active_manifest(req.domain, manifest_hash)
     return ManifestResp(manifest_hash=manifest_hash, code_digest=code_digest)
 
 
 @app.post("/v1/law/analyze")
-def analyze_conflict(req: ConflictRequest) -> Dict[str, Any]:
+def analyze_conflict(req: ConflictRequest, api_key: str = Depends(require_api_key)) -> Dict[str, Any]:
     services = _cale_services()  # ensure bootstrap succeeded
     engine = _cale_engine()
 
@@ -462,11 +523,13 @@ def analyze_conflict(req: ConflictRequest) -> Dict[str, Any]:
         "summary": scenario_summary,
         "samples": scenario_metrics,
     }
+    result["engine_version"] = ENGINE_VERSION
+    result["manifest_hash"] = _active_manifest_hash(None)
     return result
 
 
 @app.post("/v1/law/suggest_amendment", response_model=SuggestionResponse)
-def suggest_amendment(req: ConflictRequest) -> SuggestionResponse:
+def suggest_amendment(req: ConflictRequest, api_key: str = Depends(require_api_key)) -> SuggestionResponse:
     _cale_services()  # ensure bootstrap succeeded
     engine = _cale_engine()
 
@@ -482,7 +545,7 @@ def suggest_amendment(req: ConflictRequest) -> SuggestionResponse:
 
 
 @app.post("/v1/law/train/dry_run")
-def train_dry_run(req: ConflictRequest) -> Dict[str, Any]:
+def train_dry_run(req: ConflictRequest, api_key: str = Depends(require_api_key)) -> Dict[str, Any]:
     _cale_services()  # ensure bootstrap succeeded
     engine = _cale_engine()
 
@@ -543,36 +606,44 @@ def train_dry_run(req: ConflictRequest) -> Dict[str, Any]:
 
 
 @app.post("/api/law/arbitrage/hunt")
-def arbitrage_hunt(req: ArbitrageRequestModel) -> Dict[str, Any]:
+def arbitrage_hunt(req: ArbitrageRequestModel, api_key: str = Depends(require_api_key)) -> Dict[str, Any]:
     services = _cale_services()
-    atoms = build_policy_atoms_from_rules(services.corpus, services.mapper)
-    hunter = ArbitrageHunter(atoms)
+    dossier = run_arbitrage_hunt(services, req.model_dump())
+    dossier["engine_version"] = ENGINE_VERSION
+    dossier["manifest_hash"] = _active_manifest_hash(req.domain)
+    return dossier
 
-    dossier = hunter.hunt(
-        ArbitrageRequestPayload(
-            jurisdictions=req.jurisdictions,
-            domain=req.domain,
-            objective=req.objective,
-            constraints=req.constraints,
-            risk_tolerance=req.risk_tolerance,
-        )
-    )
 
-    response_candidates = [
-        {
-            "scenario": candidate.scenario,
-            "metrics": asdict(candidate.metrics),
-            "proof_trace": candidate.proof_trace,
-        }
-        for candidate in dossier.candidates
-    ]
+@app.post("/api/law/arbitrage/hunt/job")
+def arbitrage_hunt_job(
+    req: ArbitrageRequestModel,
+    background_tasks: BackgroundTasks,
+    api_key: str = Depends(require_api_key),
+) -> Dict[str, str]:
+    services = _cale_services()
+    job = job_manager.create_job("arbitrage_hunt")
 
+    def runner() -> Dict[str, Any]:
+        return run_arbitrage_hunt(services, req.model_dump())
+
+    background_tasks.add_task(job_manager.run_job, job, runner)
+    return {"job_id": job.id, "engine_version": ENGINE_VERSION}
+
+
+@app.get("/api/law/jobs/{job_id}")
+def get_job(job_id: str, api_key: str = Depends(require_api_key)) -> Dict[str, Any]:
+    job = job_manager.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
     return {
-        "golden_scenario": dossier.golden_scenario,
-        "metrics": dossier.metrics,
-        "proof_trace": dossier.proof_trace,
-        "risk_flags": dossier.risk_flags,
-        "candidates": response_candidates,
+        "id": job.id,
+        "type": job.type,
+        "status": job.status,
+        "result": job.result,
+        "error": job.error,
+        "created_at": job.created_at.isoformat(),
+        "updated_at": job.updated_at.isoformat(),
+        "engine_version": ENGINE_VERSION,
     }
 
 
@@ -582,4 +653,43 @@ def get_manifest(manifest_hash: str) -> Dict[str, Any]:
         return load_persisted_manifest(manifest_hash)
     except FileNotFoundError as exc:
         raise HTTPException(404, "Not found") from exc
+
+
+@app.post("/v1/manifest/bulk_ingest", response_model=BulkManifestResponse)
+def bulk_ingest_manifest(req: BulkManifestRequest, api_key: str = Depends(require_api_key)) -> BulkManifestResponse:
+    services = _cale_services()
+    sources = [
+        LawSource(
+            id=src.id,
+            text=src.text,
+            jurisdiction=src.jurisdiction or "Unknown",
+            statute=src.statute or src.id,
+            section=src.section or "",
+            enactment_year=src.enactment_year or 2000,
+        )
+        for src in req.sources
+    ]
+    result = ingest_sources(services, req.domain, sources, replace_existing=req.options.replace_existing)
+    _update_active_manifest(req.domain, result["manifest_hash"])
+    return BulkManifestResponse(engine_version=ENGINE_VERSION, **result)
+
+
+@app.post("/v1/manifest/ingest_pdf", response_model=BulkManifestResponse)
+async def ingest_pdf_manifest(
+    domain: str = Form(...),
+    base_id: str | None = Form(None),
+    file: UploadFile = File(...),
+    api_key: str = Depends(require_api_key),
+) -> BulkManifestResponse:
+    payload = await file.read()
+    text = extract_text_from_pdf(payload)
+    sources = build_sources_from_pdf(text, base_id)
+    services = _cale_services()
+    result = ingest_sources(services, domain, sources)
+    _update_active_manifest(domain, result["manifest_hash"])
+    return BulkManifestResponse(
+        engine_version=ENGINE_VERSION,
+        extracted_sections=len(sources),
+        **result,
+    )
 

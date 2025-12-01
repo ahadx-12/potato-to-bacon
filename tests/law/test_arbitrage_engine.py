@@ -1,9 +1,12 @@
+import os
+
 from fastapi.testclient import TestClient
 
 from potatobacon.api.app import app
 
 
-client = TestClient(app)
+os.environ["CALE_API_KEYS"] = "test-key"
+client = TestClient(app, headers={"X-API-Key": "test-key"})
 
 
 def _law_request_payload():

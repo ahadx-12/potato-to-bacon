@@ -7,7 +7,7 @@ import os
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Iterable, Optional
 
 BASE_PATH = Path(os.getenv("PTB_DATA_ROOT", "artifacts"))
 SCHEMA_DIR = BASE_PATH / "schemas"
@@ -99,3 +99,36 @@ def save_manifest_entry(
     manifest.setdefault("canonical", canonical)
     manifest.setdefault("domain", domain)
     return save_manifest(manifest)
+
+
+def iter_manifest_index(domain: Optional[str] = None) -> Iterable[Dict[str, Any]]:
+    """Yield entries from the manifest index, optionally filtered by domain."""
+
+    if not MANIFEST_INDEX.exists():
+        return []
+
+    with MANIFEST_INDEX.open("r", encoding="utf-8") as handle:
+        lines = handle.readlines()
+
+    entries: list[Dict[str, Any]] = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if domain is None or entry.get("domain") == domain:
+            entries.append(entry)
+    return entries
+
+
+def latest_manifest_hash(domain: Optional[str] = None) -> Optional[str]:
+    """Return the newest manifest hash for the given domain, if any."""
+
+    entries = list(iter_manifest_index(domain))
+    if not entries:
+        return None
+    entries = sorted(entries, key=lambda e: e.get("created_at", ""))
+    return entries[-1].get("sha")
