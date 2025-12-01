@@ -158,11 +158,24 @@ def test_arbitrage_sync_single_and_multi(authed_client):
         assert resp.status_code == 200, resp.text
         payload = resp.json()
         assert payload["golden_scenario"]
+        assert payload["golden_scenario"].get("jurisdictions")
+        assert isinstance(payload["golden_scenario"].get("facts"), dict)
         metrics = payload["metrics"]
         for key in ["value", "entropy", "kappa", "risk", "score"]:
             assert key in metrics
+        assert metrics.get("value_components")
+        assert metrics.get("risk_components")
         assert payload["proof_trace"]
         assert isinstance(payload.get("risk_flags", []), list)
+        assert payload.get("provenance_chain")
+        assert payload.get("dependency_graph", {}).get("nodes")
+
+    provenance_ids = {step["rule_id"] for step in payload.get("provenance_chain", [])}
+    assert provenance_ids, "Provenance should include active rules"
+    assert len(provenance_ids) >= 2
+    expected_rules = {"PIPEDA_7_3", "ANTI_TERRORISM_83_28"}
+    if expected_rules.intersection(provenance_ids):
+        assert expected_rules.issubset(provenance_ids)
 
 
 def test_arbitrage_job_flow(authed_client):
@@ -194,6 +207,10 @@ def test_arbitrage_job_flow(authed_client):
     metrics = final_state["result"]["metrics"]
     for key in ["value", "entropy", "kappa", "risk", "score"]:
         assert key in metrics
+    assert metrics.get("value_components")
+    assert metrics.get("risk_components")
+    assert final_state["result"]["provenance_chain"]
+    assert final_state["result"].get("dependency_graph", {}).get("nodes")
     assert final_state["engine_version"]
 
 

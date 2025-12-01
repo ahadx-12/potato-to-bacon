@@ -39,6 +39,13 @@ class PolicyAtom:
     guard: Sequence[str]
     outcome: Mapping[str, str]
     source_id: str
+    statute: str = ""
+    section: str = ""
+    text: str = ""
+    modality: str = ""
+    action: str = ""
+    rule_type: str = "STATUTE"
+    atom_id: str | None = None
     z3_guard: BoolRef | None = None
     z3_outcome: BoolRef | None = None
 
@@ -82,7 +89,7 @@ def build_policy_atoms_from_rules(
     """Convert ``LegalRule`` objects into :class:`PolicyAtom` instances."""
 
     atoms: List[PolicyAtom] = []
-    for rule in rules:
+    for idx, rule in enumerate(rules):
         guard = list(rule.conditions)
         atom = PolicyAtom(
             guard=guard,
@@ -93,6 +100,12 @@ def build_policy_atoms_from_rules(
                 "jurisdiction": getattr(rule, "jurisdiction", ""),
             },
             source_id=getattr(rule, "id", rule.action),
+            statute=getattr(rule, "statute", ""),
+            section=getattr(rule, "section", ""),
+            text=getattr(rule, "text", ""),
+            modality=rule.modality,
+            action=rule.action,
+            atom_id=f"{getattr(rule, 'id', rule.action)}_atom_{idx}",
         )
         atoms.append(atom)
     return atoms

@@ -3,13 +3,23 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, asdict
-from typing import Any, Dict, List, Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any, Dict, List, Mapping, Sequence, Set
 
 from z3 import BoolVal, If, Optimize, sat  # type: ignore[import-not-found]
 
 from potatobacon.cale.bootstrap import CALEServices
 from potatobacon.law.cale_metrics import ScenarioMetrics, compute_scenario_metrics, sample_scenarios
+from potatobacon.law.arbitrage_models import (
+    ArbitrageCandidateModel,
+    ArbitrageDossierModel,
+    ArbitrageMetrics,
+    ArbitrageScenario,
+    DependencyEdge,
+    DependencyGraph,
+    DependencyNode,
+    ProvenanceStep,
+)
 from potatobacon.law.solver_z3 import PolicyAtom, build_policy_atoms_from_rules, compile_atoms_to_z3
 
 
@@ -36,6 +46,8 @@ class ArbitrageDossier:
     proof_trace: List[str]
     risk_flags: List[str]
     candidates: List[ArbitrageCandidate]
+    provenance_chain: List[ProvenanceStep]
+    dependency_graph: DependencyGraph | None
 
 
 class ArbitrageHunter:
@@ -96,6 +108,62 @@ class ArbitrageHunter:
             mutated[key] = not mutated[key]
         return mutated
 
+    @staticmethod
+    def _role_from_modality(modality: str) -> str:
+        modality_upper = modality.upper()
+        if modality_upper == "OBLIGE":
+            return "obligation"
+        if modality_upper == "FORBID":
+            return "prohibition"
+        if modality_upper == "PERMIT":
+            return "permission"
+        return "classification"
+
+    def _provenance_chain(
+        self, active_ids: Set[str], request_jurisdictions: Sequence[str], atoms: Sequence[PolicyAtom]
+    ) -> List[ProvenanceStep]:
+        default_jurisdiction = request_jurisdictions[0] if request_jurisdictions else "Unknown"
+        chain: List[ProvenanceStep] = []
+        for idx, atom in enumerate([a for a in atoms if a.source_id in active_ids], start=1):
+            jurisdiction = atom.outcome.get("jurisdiction") or default_jurisdiction
+            chain.append(
+                ProvenanceStep(
+                    step=idx,
+                    jurisdiction=jurisdiction,
+                    rule_id=atom.source_id,
+                    type=atom.rule_type or "RULE",
+                    role=self._role_from_modality(atom.modality or atom.outcome.get("modality", "")),
+                    summary=atom.text or atom.action or atom.source_id,
+                    atom_id=atom.atom_id,
+                )
+            )
+        return chain
+
+    def _atom_label(self, rule_id: str, atoms: Sequence[PolicyAtom]) -> str:
+        for atom in atoms:
+            if atom.source_id == rule_id:
+                label_parts = [atom.statute or atom.source_id, atom.section]
+                return " ".join(part for part in label_parts if part).strip() or atom.source_id
+        return rule_id
+
+    def _dependency_graph(
+        self, provenance: List[ProvenanceStep], atoms: Sequence[PolicyAtom]
+    ) -> DependencyGraph | None:
+        if not provenance:
+            return None
+        nodes: Dict[str, DependencyNode] = {}
+        for step in provenance:
+            if step.rule_id not in nodes:
+                nodes[step.rule_id] = DependencyNode(
+                    id=step.rule_id,
+                    jurisdiction=step.jurisdiction,
+                    label=self._atom_label(step.rule_id, atoms),
+                )
+        edges: List[DependencyEdge] = []
+        for current, nxt in zip(provenance, provenance[1:]):
+            edges.append(DependencyEdge(from_id=current.rule_id, to_id=nxt.rule_id, relation="sequence"))
+        return DependencyGraph(nodes=list(nodes.values()), edges=edges)
+
     def hunt(self, request: ArbitrageRequest) -> ArbitrageDossier:
         atoms = self._filter_atoms(request.jurisdictions)
         if not atoms:
@@ -112,13 +180,13 @@ class ArbitrageHunter:
         candidates: List[ArbitrageCandidate] = []
         for seed in seed_candidates:
             metrics = compute_scenario_metrics(seed, atoms)
-            proof = [atom.outcome_label for atom in self._atoms if atom.source_id in metrics.active_rules]
+            proof = [atom.outcome_label for atom in atoms if atom.source_id in metrics.active_rules]
             candidates.append(ArbitrageCandidate(seed, metrics, proof))
             for _ in range(fuzz_budget):
                 mutated = self._mutate(seed)
                 metrics_mut = compute_scenario_metrics(mutated, atoms)
                 proof_mut = [
-                    atom.outcome_label for atom in self._atoms if atom.source_id in metrics_mut.active_rules
+                    atom.outcome_label for atom in atoms if atom.source_id in metrics_mut.active_rules
                 ]
                 candidates.append(ArbitrageCandidate(mutated, metrics_mut, proof_mut))
 
@@ -128,26 +196,35 @@ class ArbitrageHunter:
         else:
             golden = ArbitrageCandidate({}, compute_scenario_metrics({}, atoms), [])
 
-        dossier_metrics = {
-            "value": golden.metrics.value_estimate,
-            "entropy": golden.metrics.entropy,
-            "kappa": golden.metrics.kappa,
-            "risk": golden.metrics.risk,
-            "contradiction_probability": 1.0 if golden.metrics.contradiction else 0.0,
-            "score": golden.metrics.score,
-        }
+        dossier_metrics = ArbitrageMetrics(
+            value=golden.metrics.value_estimate,
+            entropy=golden.metrics.entropy,
+            kappa=golden.metrics.kappa,
+            risk=golden.metrics.risk,
+            contradiction_probability=1.0 if golden.metrics.contradiction else 0.0,
+            score=golden.metrics.score,
+            value_components=golden.metrics.value_components,
+            risk_components=golden.metrics.risk_components,
+        )
         risk_flags = []
         if golden.metrics.risk > 0.6:
             risk_flags.append("High ambiguity relative to dominant outcome")
         if golden.metrics.contradiction:
             risk_flags.append("Scenario leads to inconsistent obligations")
 
+        active_ids = set(golden.metrics.active_rules)
+        provenance_chain = self._provenance_chain(active_ids, request.jurisdictions, atoms)
+        dependency_graph = self._dependency_graph(provenance_chain, atoms)
+        golden_scenario = ArbitrageScenario(jurisdictions=list(request.jurisdictions), facts=golden.scenario)
+
         return ArbitrageDossier(
-            golden_scenario=golden.scenario,
-            metrics=dossier_metrics,
+            golden_scenario=golden_scenario.model_dump(),
+            metrics=dossier_metrics.model_dump(),
             proof_trace=golden.proof_trace,
             risk_flags=risk_flags,
             candidates=top_candidates,
+            provenance_chain=provenance_chain,
+            dependency_graph=dependency_graph,
         )
 
 
@@ -164,19 +241,35 @@ def run_arbitrage_hunt(services: CALEServices, req: Mapping[str, Any]) -> Dict[s
         )
     )
 
-    response_candidates = [
-        {
-            "scenario": candidate.scenario,
-            "metrics": asdict(candidate.metrics),
-            "proof_trace": candidate.proof_trace,
-        }
-        for candidate in dossier.candidates
-    ]
+    response_candidates: List[ArbitrageCandidateModel] = []
+    for candidate in dossier.candidates:
+        metrics = candidate.metrics
+        metrics_model = ArbitrageMetrics(
+            value=metrics.value_estimate,
+            entropy=metrics.entropy,
+            kappa=metrics.kappa,
+            risk=metrics.risk,
+            contradiction_probability=1.0 if metrics.contradiction else 0.0,
+            score=metrics.score,
+            value_components=metrics.value_components,
+            risk_components=metrics.risk_components,
+        )
+        response_candidates.append(
+            ArbitrageCandidateModel(
+                scenario=candidate.scenario,
+                metrics=metrics_model,
+                proof_trace=candidate.proof_trace,
+            )
+        )
 
-    return {
-        "golden_scenario": dossier.golden_scenario,
-        "metrics": dossier.metrics,
-        "proof_trace": dossier.proof_trace,
-        "risk_flags": dossier.risk_flags,
-        "candidates": response_candidates,
-    }
+    dossier_model = ArbitrageDossierModel(
+        golden_scenario=ArbitrageScenario(**dossier.golden_scenario),
+        metrics=ArbitrageMetrics(**dossier.metrics),
+        proof_trace=dossier.proof_trace,
+        risk_flags=dossier.risk_flags,
+        candidates=response_candidates,
+        provenance_chain=dossier.provenance_chain,
+        dependency_graph=dossier.dependency_graph,
+    )
+
+    return dossier_model.model_dump()

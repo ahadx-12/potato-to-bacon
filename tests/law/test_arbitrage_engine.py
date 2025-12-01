@@ -51,6 +51,20 @@ def test_arbitrage_hunt_returns_dossier():
     assert response.status_code == 200
     payload = response.json()
     assert set(payload.keys()) >= {"golden_scenario", "metrics", "proof_trace", "candidates"}
+    assert payload["golden_scenario"]["jurisdictions"] == request["jurisdictions"]
+    assert isinstance(payload["golden_scenario"].get("facts"), dict)
+
+    metrics = payload["metrics"]
+    assert "value_components" in metrics and metrics["value_components"]
+    assert "risk_components" in metrics and metrics["risk_components"]
+
+    provenance = payload.get("provenance_chain", [])
+    assert provenance and provenance[0]["jurisdiction"]
+    assert provenance[0]["rule_id"]
+
+    graph = payload.get("dependency_graph", {}) or {}
+    assert graph.get("nodes")
+
     assert isinstance(payload["candidates"], list)
     if payload["candidates"]:
         candidate = payload["candidates"][0]
