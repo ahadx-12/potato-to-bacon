@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 def test_end_to_end_flow(tmp_path, monkeypatch):
     monkeypatch.setenv("PTB_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("CALE_API_KEYS", "dev-key")
 
     import potatobacon.storage as storage_mod
     import potatobacon.manifest.store as store_mod
@@ -18,7 +19,7 @@ def test_end_to_end_flow(tmp_path, monkeypatch):
     store_mod = importlib.reload(store_mod)
     app_mod = importlib.reload(app_mod)
 
-    client = TestClient(app_mod.app)
+    client = TestClient(app_mod.app, headers={"X-API-Key": "dev-key"})
 
     dsl_text = Path("examples/01_ke.dsl").read_text()
 

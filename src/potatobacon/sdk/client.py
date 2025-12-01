@@ -42,6 +42,7 @@ class PBConfig:
     """Configuration for :class:`PBClient`."""
 
     base_url: Optional[str] = None
+    api_key: Optional[str] = None
 
     @property
     def resolved_base_url(self) -> str:
@@ -52,6 +53,15 @@ class PBConfig:
             return env_value
         return "http://localhost:8000"
 
+    @property
+    def resolved_api_key(self) -> str:
+        if self.api_key:
+            return self.api_key
+        env_value = os.getenv("PTB_API_KEY") or os.getenv("CALE_API_KEY")
+        if env_value:
+            return env_value
+        return "dev-key"
+
 
 class PBClient:
     """High-level synchronous client for the potato-to-bacon REST API."""
@@ -59,6 +69,7 @@ class PBClient:
     def __init__(self, cfg: Optional[PBConfig] = None, session: Optional[requests.Session] = None):
         self.cfg = cfg or PBConfig()
         self._session = session or requests.Session()
+        self._session.headers.setdefault("X-API-Key", self.cfg.resolved_api_key)
 
     @property
     def base_url(self) -> str:

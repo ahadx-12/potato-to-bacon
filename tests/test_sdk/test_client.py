@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 def test_sdk_client_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setenv("PTB_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("CALE_API_KEYS", "dev-key")
 
     import potatobacon.storage as storage_mod
     import potatobacon.manifest.store as store_mod
@@ -16,7 +17,10 @@ def test_sdk_client_roundtrip(tmp_path, monkeypatch):
     store_mod = importlib.reload(store_mod)
     app_mod = importlib.reload(app_mod)
 
-    client = PBClient(cfg=PBConfig(base_url="http://testserver"), session=TestClient(app_mod.app))
+    client = PBClient(
+        cfg=PBConfig(base_url="http://testserver"),
+        session=TestClient(app_mod.app),
+    )
 
     dsl_text = Path("examples/01_ke.dsl").read_text()
 
