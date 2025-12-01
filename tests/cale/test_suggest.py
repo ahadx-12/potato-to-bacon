@@ -7,6 +7,7 @@ import numpy as np
 from fastapi.testclient import TestClient
 
 os.environ["CALE_EMBED_BACKEND"] = "hash"
+os.environ["CALE_API_KEYS"] = "test-key"
 
 from potatobacon.api.app import app
 from potatobacon.cale.ccs import CCSCalculator
@@ -94,7 +95,7 @@ def test_suggestion_reduces_ccs() -> None:
         },
     }
 
-    with TestClient(app) as client:
+    with TestClient(app, headers={"X-API-Key": "test-key"}) as client:
         analyze_resp = client.post("/v1/law/analyze", json=request)
         assert analyze_resp.status_code == 200, analyze_resp.text
         current_ccs = analyze_resp.json()["conflict_scores"]["pragmatic"]

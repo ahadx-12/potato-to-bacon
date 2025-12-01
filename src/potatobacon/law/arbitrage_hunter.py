@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Mapping, Sequence
 
 from z3 import BoolVal, If, Optimize, sat  # type: ignore[import-not-found]
 
+from potatobacon.cale.bootstrap import CALEServices
 from potatobacon.law.cale_metrics import ScenarioMetrics, compute_scenario_metrics, sample_scenarios
 from potatobacon.law.solver_z3 import PolicyAtom, build_policy_atoms_from_rules, compile_atoms_to_z3
 
@@ -148,3 +149,34 @@ class ArbitrageHunter:
             risk_flags=risk_flags,
             candidates=top_candidates,
         )
+
+
+def run_arbitrage_hunt(services: CALEServices, req: Mapping[str, Any]) -> Dict[str, Any]:
+    atoms = build_policy_atoms_from_rules(services.corpus, services.mapper)
+    hunter = ArbitrageHunter(atoms)
+    dossier = hunter.hunt(
+        ArbitrageRequest(
+            jurisdictions=list(req.get("jurisdictions", [])),
+            domain=req.get("domain", "tax"),
+            objective=req.get("objective", ""),
+            constraints=req.get("constraints", {}),
+            risk_tolerance=req.get("risk_tolerance", "medium"),
+        )
+    )
+
+    response_candidates = [
+        {
+            "scenario": candidate.scenario,
+            "metrics": asdict(candidate.metrics),
+            "proof_trace": candidate.proof_trace,
+        }
+        for candidate in dossier.candidates
+    ]
+
+    return {
+        "golden_scenario": dossier.golden_scenario,
+        "metrics": dossier.metrics,
+        "proof_trace": dossier.proof_trace,
+        "risk_flags": dossier.risk_flags,
+        "candidates": response_candidates,
+    }

@@ -13,8 +13,10 @@ from potatobacon.api.app import app
 
 @pytest.fixture()
 def client(monkeypatch):
+    monkeypatch.setenv("CALE_API_KEYS", "test-key")
+    monkeypatch.setenv("CALE_RATE_LIMIT_PER_MINUTE", "100")
     monkeypatch.delenv("CALE_DISABLE_STARTUP_INIT", raising=False)
-    with TestClient(app) as test_client:
+    with TestClient(app, headers={"X-API-Key": "test-key"}) as test_client:
         yield test_client
 
 
