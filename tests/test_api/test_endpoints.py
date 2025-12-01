@@ -1,10 +1,17 @@
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from potatobacon.api.app import app
 
-client = TestClient(app)
+
+@pytest.fixture(autouse=True)
+def _configure_keys(monkeypatch):
+    monkeypatch.setenv("CALE_API_KEYS", "dev-key")
+
+
+client = TestClient(app, headers={"X-API-Key": "dev-key"})
 
 
 def test_health() -> None:
