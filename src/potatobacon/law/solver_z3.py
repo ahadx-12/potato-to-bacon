@@ -10,7 +10,7 @@ outcomes that can be composed by downstream search/metrics components.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Mapping, MutableMapping, Sequence
+from typing import Dict, Iterable, List, Mapping, MutableMapping, Sequence, Tuple
 
 from z3 import (  # type: ignore[import-not-found]
     And,
@@ -19,12 +19,15 @@ from z3 import (  # type: ignore[import-not-found]
     BoolVal,
     Implies,
     Not,
+    Optimize,
     Solver,
     sat,
 )
 
 from potatobacon.cale.parser import PredicateMapper
 from potatobacon.cale.types import LegalRule
+
+_ATOM_CACHE: Dict[Tuple[str, Tuple[str, ...]], Dict[str, object]] = {}
 
 
 @dataclass(slots=True)
@@ -83,13 +86,31 @@ def _outcome_to_z3(atom: PolicyAtom, variables: MutableMapping[str, BoolRef]) ->
     return variables[action_var]
 
 
+def _cache_key(manifest_hash: str | None, jurisdictions: Sequence[str] | None) -> Tuple[str, Tuple[str, ...]]:
+    return (manifest_hash or "default", tuple(sorted(jurisdictions)) if jurisdictions else ("*all*",))
+
+
 def build_policy_atoms_from_rules(
-    rules: Iterable[LegalRule], mapper: PredicateMapper | None = None
+    rules: Iterable[LegalRule],
+    mapper: PredicateMapper | None = None,
+    manifest_hash: str | None = None,
+    jurisdictions: Sequence[str] | None = None,
 ) -> List[PolicyAtom]:
-    """Convert ``LegalRule`` objects into :class:`PolicyAtom` instances."""
+    """Convert ``LegalRule`` objects into :class:`PolicyAtom` instances.
+
+    Results are memoized by manifest hash and jurisdiction filter to avoid
+    repetitive Z3 expression construction across hunts.
+    """
+
+    cache_key = _cache_key(manifest_hash, jurisdictions)
+    if cache_key in _ATOM_CACHE:
+        return list(_ATOM_CACHE[cache_key]["atoms"])
 
     atoms: List[PolicyAtom] = []
+    jurisdictions_lower = {j.lower() for j in jurisdictions} if jurisdictions else None
     for idx, rule in enumerate(rules):
+        if jurisdictions_lower and getattr(rule, "jurisdiction", "").lower() not in jurisdictions_lower:
+            continue
         guard = list(rule.conditions)
         atom = PolicyAtom(
             guard=guard,
@@ -108,7 +129,14 @@ def build_policy_atoms_from_rules(
             atom_id=f"{getattr(rule, 'id', rule.action)}_atom_{idx}",
         )
         atoms.append(atom)
-    return atoms
+    var_map: Dict[str, BoolRef] = {}
+    compile_atoms_to_z3(atoms, var_map)
+    base_optimize = Optimize()
+    for atom in atoms:
+        if atom.z3_guard is not None and atom.z3_outcome is not None:
+            base_optimize.add(Implies(atom.z3_guard, atom.z3_outcome))
+    _ATOM_CACHE[cache_key] = {"atoms": atoms, "var_map": var_map, "optimize": base_optimize}
+    return list(atoms)
 
 
 def compile_atoms_to_z3(
@@ -123,6 +151,26 @@ def compile_atoms_to_z3(
         atom.z3_guard = And(*z3_guard_terms) if z3_guard_terms else BoolVal(True)
         atom.z3_outcome = _outcome_to_z3(atom, variables)
     return variables
+
+
+def memoized_optimize(
+    manifest_hash: str | None,
+    jurisdictions: Sequence[str] | None,
+) -> tuple[Optimize, Dict[str, BoolRef]]:
+    """Return a reusable Optimize seeded with cached rule implications."""
+
+    cache_key = _cache_key(manifest_hash, jurisdictions)
+    if cache_key not in _ATOM_CACHE:
+        raise ValueError("Atoms must be built before requesting memoized optimize")
+    cached = _ATOM_CACHE[cache_key]
+    base_opt = cached.get("optimize")
+    var_map = cached.get("var_map")
+    if not isinstance(base_opt, Optimize) or not isinstance(var_map, dict):
+        raise ValueError("Cache incomplete for optimize")
+    clone = Optimize()
+    for assertion in base_opt.assertions():
+        clone.add(assertion)
+    return clone, var_map  # type: ignore[return-value]
 
 
 def build_z3_model_for_scenario(

@@ -20,7 +20,12 @@ from potatobacon.law.arbitrage_models import (
     DependencyNode,
     ProvenanceStep,
 )
-from potatobacon.law.solver_z3 import PolicyAtom, build_policy_atoms_from_rules, compile_atoms_to_z3
+from potatobacon.law.solver_z3 import (
+    PolicyAtom,
+    build_policy_atoms_from_rules,
+    compile_atoms_to_z3,
+    memoized_optimize,
+)
 
 
 @dataclass(slots=True)
@@ -54,9 +59,12 @@ class ArbitrageDossier:
 class ArbitrageHunter:
     """Explore the CALE rule space for high-value ambiguous scenarios."""
 
-    def __init__(self, atoms: Sequence[PolicyAtom], seed: int | None = None):
+    def __init__(
+        self, atoms: Sequence[PolicyAtom], seed: int | None = None, manifest_hash: str | None = None
+    ):
         self._atoms = list(atoms)
         self._seed = seed
+        self._manifest_hash = manifest_hash
         self._rng = random.Random(seed) if seed is not None else random.Random()
 
     @classmethod
@@ -74,9 +82,14 @@ class ArbitrageHunter:
             if atom.outcome.get("jurisdiction", "").lower() in jurisdictions_lower
         ]
 
-    def _optimise_seed(self, atoms: Sequence[PolicyAtom], constraints: Mapping[str, Any]) -> Dict[str, bool]:
-        optimizer = Optimize()
-        var_map = compile_atoms_to_z3(atoms, {})
+    def _optimise_seed(
+        self, atoms: Sequence[PolicyAtom], constraints: Mapping[str, Any], jurisdictions: Sequence[str]
+    ) -> Dict[str, bool]:
+        try:
+            optimizer, var_map = memoized_optimize(self._manifest_hash, tuple(jurisdictions))
+        except Exception:
+            optimizer = Optimize()
+            var_map = compile_atoms_to_z3(atoms, {})
 
         # Apply user constraints
         for key, value in constraints.items():
@@ -237,7 +250,7 @@ class ArbitrageHunter:
             atoms = list(self._atoms)
 
         base_constraints = request.constraints or {}
-        seed_scenario = self._optimise_seed(atoms, base_constraints)
+        seed_scenario = self._optimise_seed(atoms, base_constraints, request.jurisdictions)
         if not seed_scenario:
             seed_candidates = sample_scenarios(atoms, sample_size=5, rng=self._rng)
         else:
@@ -277,7 +290,7 @@ class ArbitrageHunter:
             entropy=golden.metrics.entropy,
             kappa=golden.metrics.kappa,
             risk=adjusted_risk,
-            contradiction_probability=1.0 if golden.metrics.contradiction else 0.0,
+            contradiction_probability=golden.metrics.contradiction_probability,
             score=golden.metrics.score * value_boost,
             value_components=golden.metrics.value_components,
             risk_components=golden.metrics.risk_components,
@@ -309,11 +322,14 @@ class ArbitrageHunter:
 
 
 def run_arbitrage_hunt(services: CALEServices, req: Mapping[str, Any]) -> Dict[str, Any]:
-    atoms = build_policy_atoms_from_rules(services.corpus, services.mapper)
-    hunter = ArbitrageHunter(atoms, seed=req.get("seed"))
+    jurisdictions = list(req.get("jurisdictions", []))
+    atoms = build_policy_atoms_from_rules(
+        services.corpus, services.mapper, manifest_hash=req.get("manifest_hash"), jurisdictions=jurisdictions
+    )
+    hunter = ArbitrageHunter(atoms, seed=req.get("seed"), manifest_hash=req.get("manifest_hash"))
     dossier = hunter.hunt(
         ArbitrageRequest(
-            jurisdictions=list(req.get("jurisdictions", [])),
+            jurisdictions=jurisdictions,
             domain=req.get("domain", "tax"),
             objective=req.get("objective", ""),
             constraints=req.get("constraints", {}),
@@ -329,7 +345,7 @@ def run_arbitrage_hunt(services: CALEServices, req: Mapping[str, Any]) -> Dict[s
             entropy=metrics.entropy,
             kappa=metrics.kappa,
             risk=metrics.risk,
-            contradiction_probability=1.0 if metrics.contradiction else 0.0,
+            contradiction_probability=metrics.contradiction_probability,
             score=metrics.score,
             value_components=metrics.value_components,
             risk_components=metrics.risk_components,
