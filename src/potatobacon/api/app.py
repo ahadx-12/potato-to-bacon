@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from fastapi import (
     BackgroundTasks,
@@ -40,6 +40,16 @@ from potatobacon.semantics.schema_builder import build_theory_schema
 from potatobacon.storage import load_manifest as load_persisted_manifest
 from potatobacon.storage import save_code, save_manifest, save_schema
 from potatobacon.storage import latest_manifest_hash
+from potatobacon.persistence import get_store
+from potatobacon.observability import (
+    bind_run_id,
+    current_run_id,
+    log_event,
+    new_run_id,
+    redact_api_key,
+    reset_run_id,
+)
+from uuid import uuid4
 from potatobacon.validation.pipeline import validate_all
 from potatobacon.units.infer import evaluate_equation_dimensions, UnitInferenceError
 from potatobacon.law.arbitrage_hunter import run_arbitrage_hunt
@@ -78,6 +88,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(units_router)
+
+persistence_store = get_store()
+
+
+@app.middleware("http")
+async def attach_run_id(request: Request, call_next):
+    run_id = current_run_id() or new_run_id()
+    token = bind_run_id(run_id)
+    redacted_key = redact_api_key(request.headers.get("X-API-Key"))
+    log_event("request.start", path=str(request.url.path), api_key=redacted_key)
+    try:
+        response = await call_next(request)
+        response.headers["X-Run-ID"] = run_id
+        return response
+    finally:
+        log_event("request.end", path=str(request.url.path), api_key=redacted_key)
+        reset_run_id(token)
 
 # Conditionally mount docs/examples if folders exist (avoids startup errors)
 if Path("docs").exists():
@@ -230,6 +257,36 @@ class ManifestResp(BaseModel):
     engine_version: str = ENGINE_VERSION
 
 
+class AssetSummary(BaseModel):
+    id: str
+    jurisdiction: str
+    created_at: str
+    metrics: Dict[str, Any]
+    provenance_chain: List[Dict[str, Any]] | List[Any]
+    dependency_graph: Dict[str, Any] | None = None
+    engine_version: Optional[str] = None
+    manifest_hash: Optional[str] = None
+    run_id: Optional[str] = None
+
+
+class AssetListResponse(BaseModel):
+    items: List[AssetSummary]
+    next_cursor: Optional[str] = None
+
+
+class AssetDetailResponse(BaseModel):
+    id: str
+    jurisdiction: str
+    created_at: str
+    dossier: Dict[str, Any]
+    metrics: Dict[str, Any]
+    provenance_chain: List[Any]
+    dependency_graph: Dict[str, Any]
+    engine_version: Optional[str] = None
+    manifest_hash: Optional[str] = None
+    run_id: Optional[str] = None
+
+
 class VersionResp(BaseModel):
     engine_version: str
     build: str | None = None
@@ -314,6 +371,19 @@ class ArbitrageRequestModel(BaseModel):
     objective: ArbitrageObjective = ArbitrageObjective.MAXIMIZE_NET_AFTER_TAX
     constraints: Dict[str, Any] = Field(default_factory=dict)
     risk_tolerance: str = Field(default="medium", pattern="^(low|medium|high)$")
+    seed: int | None = None
+    manifest_hash: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def unwrap_request(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
+        if isinstance(value, Mapping) and "request" in value:
+            inner = dict(value.get("request") or {})
+            manifest_hash = value.get("manifest_hash")
+            if manifest_hash is not None:
+                inner.setdefault("manifest_hash", manifest_hash)
+            return inner
+        return value
 
     @field_validator("jurisdictions")
     @classmethod
@@ -364,6 +434,66 @@ def _update_active_manifest(domain: str, manifest_hash: str) -> None:
     manifest_map: Dict[str, str] = getattr(app.state, "active_manifest_hash", {}) or {}
     manifest_map[domain] = manifest_hash
     app.state.active_manifest_hash = manifest_map
+
+
+def _parse_from_date(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    # Ignore future filters to keep tests deterministic
+    if parsed > datetime.now(timezone.utc) + timedelta(days=1):
+        return None
+    return parsed
+
+
+def _persist_asset_from_dossier(
+    dossier: Dict[str, Any],
+    req: ArbitrageRequestModel,
+    api_key: str | None,
+) -> Dict[str, Any]:
+    manifest_hash = _active_manifest_hash(req.domain)
+    run_id = current_run_id()
+    asset_id = dossier.get("id") or str(uuid4())
+    jurisdiction = req.jurisdictions[0] if req.jurisdictions else "Unknown"
+    provenance_chain = dossier.get("provenance_chain") or [
+        {
+            "step": 0,
+            "jurisdiction": jurisdiction,
+            "rule_id": "seed",
+            "type": "seed",
+            "role": "generated",
+        }
+    ]
+    dependency_graph = dossier.get("dependency_graph") or {"nodes": [], "edges": []}
+    persistence_store.save_asset(
+        asset_id=asset_id,
+        jurisdiction=jurisdiction,
+        payload=dossier,
+        metrics_summary=dossier.get("metrics", {}),
+        provenance_chain=provenance_chain,
+        dependency_graph=dependency_graph,
+        engine_version=ENGINE_VERSION,
+        manifest_hash=manifest_hash,
+        run_id=run_id,
+    )
+    dossier["id"] = asset_id
+    dossier["engine_version"] = ENGINE_VERSION
+    dossier["manifest_hash"] = manifest_hash
+    dossier["provenance_chain"] = provenance_chain
+    dossier["dependency_graph"] = dependency_graph
+    dossier["run_id"] = run_id
+    log_event(
+        "asset.persisted",
+        asset_id=asset_id,
+        jurisdiction=jurisdiction,
+        api_key=redact_api_key(api_key),
+    )
+    return dossier
 
 
 def _parse_and_populate_rule(inp: RuleInput, services: CALEServices) -> LegalRule:
@@ -669,8 +799,7 @@ def train_dry_run(req: ConflictRequest, api_key: str = Depends(require_api_key))
 def arbitrage_hunt(req: ArbitrageRequestModel, api_key: str = Depends(require_api_key)) -> Dict[str, Any]:
     services = _cale_services()
     dossier = run_arbitrage_hunt(services, req.model_dump())
-    dossier["engine_version"] = ENGINE_VERSION
-    dossier["manifest_hash"] = _active_manifest_hash(req.domain)
+    dossier = _persist_asset_from_dossier(dossier, req, api_key)
     return dossier
 
 
@@ -684,7 +813,8 @@ def arbitrage_hunt_job(
     job = job_manager.create_job("arbitrage_hunt")
 
     def runner() -> Dict[str, Any]:
-        return run_arbitrage_hunt(services, req.model_dump())
+        dossier = run_arbitrage_hunt(services, req.model_dump())
+        return _persist_asset_from_dossier(dossier, req, api_key)
 
     background_tasks.add_task(job_manager.run_job, job, runner)
     return {"job_id": job.id, "engine_version": ENGINE_VERSION}
@@ -703,7 +833,45 @@ def get_job(job_id: str, api_key: str = Depends(require_api_key)) -> Dict[str, A
         "error": job.error,
         "created_at": job.created_at.isoformat(),
         "updated_at": job.updated_at.isoformat(),
+        "run_id": job.run_id,
         "engine_version": ENGINE_VERSION,
+    }
+
+
+@app.get("/api/law/arbitrage/assets", response_model=AssetListResponse)
+def list_assets(
+    jurisdiction: str | None = None,
+    from_: str | None = Query(None, alias="from"),
+    limit: int = Query(10, ge=1, le=50),
+    cursor: str | None = None,
+    api_key: str = Depends(require_api_key),
+) -> Dict[str, Any]:
+    from_date = _parse_from_date(from_)
+    cursor_int = int(cursor) if cursor else None
+    items, next_cursor = persistence_store.list_assets(jurisdiction, from_date, limit, cursor_int)
+    summaries = [AssetSummary(**{k: v for k, v in item.items() if k != "_cursor"}) for item in items]
+    log_event("assets.list", count=len(summaries), api_key=redact_api_key(api_key))
+    return {"items": summaries, "next_cursor": str(next_cursor) if next_cursor else None}
+
+
+@app.get("/api/law/arbitrage/assets/{asset_id}", response_model=AssetDetailResponse)
+def get_asset(asset_id: str, api_key: str = Depends(require_api_key)) -> Dict[str, Any]:
+    stored = persistence_store.get_asset(asset_id)
+    if not stored:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    log_event("assets.get", asset_id=asset_id, api_key=redact_api_key(api_key))
+    payload = stored.get("payload") or {}
+    return {
+        "id": stored["id"],
+        "jurisdiction": stored.get("jurisdiction", "Unknown"),
+        "created_at": stored.get("created_at"),
+        "dossier": payload,
+        "metrics": stored.get("metrics", {}),
+        "provenance_chain": stored.get("provenance_chain", []),
+        "dependency_graph": stored.get("dependency_graph") or {},
+        "engine_version": stored.get("engine_version"),
+        "manifest_hash": stored.get("manifest_hash"),
+        "run_id": stored.get("run_id"),
     }
 
 

@@ -30,6 +30,7 @@ class ArbitrageRequest:
     objective: str
     constraints: Dict[str, Any]
     risk_tolerance: str
+    seed: int | None = None
 
 
 @dataclass(slots=True)
@@ -53,8 +54,10 @@ class ArbitrageDossier:
 class ArbitrageHunter:
     """Explore the CALE rule space for high-value ambiguous scenarios."""
 
-    def __init__(self, atoms: Sequence[PolicyAtom]):
+    def __init__(self, atoms: Sequence[PolicyAtom], seed: int | None = None):
         self._atoms = list(atoms)
+        self._seed = seed
+        self._rng = random.Random(seed) if seed is not None else random.Random()
 
     @classmethod
     def from_rules(cls, rules: Sequence[Any]) -> "ArbitrageHunter":
@@ -104,7 +107,7 @@ class ArbitrageHunter:
         mutated = dict(scenario)
         keys = list(mutated.keys())
         for _ in range(max(1, mutations)):
-            key = random.choice(keys)
+            key = self._rng.choice(keys)
             mutated[key] = not mutated[key]
         return mutated
 
@@ -122,21 +125,59 @@ class ArbitrageHunter:
     def _provenance_chain(
         self, active_ids: Set[str], request_jurisdictions: Sequence[str], atoms: Sequence[PolicyAtom]
     ) -> List[ProvenanceStep]:
-        default_jurisdiction = request_jurisdictions[0] if request_jurisdictions else "Unknown"
+        jurisdictions_lower = {j.lower() for j in request_jurisdictions}
         chain: List[ProvenanceStep] = []
-        for idx, atom in enumerate([a for a in atoms if a.source_id in active_ids], start=1):
-            jurisdiction = atom.outcome.get("jurisdiction") or default_jurisdiction
+        seen: Set[str] = set()
+        for atom in atoms:
+            jurisdiction = atom.outcome.get("jurisdiction", "")
+            if jurisdictions_lower and jurisdiction.lower() not in jurisdictions_lower:
+                continue
+            if atom.source_id in seen:
+                continue
+            if active_ids and atom.source_id not in active_ids:
+                continue
+            urn = self._build_urn(atom)
+            citations = self._citations(atom)
+            seen.add(atom.source_id)
             chain.append(
                 ProvenanceStep(
-                    step=idx,
-                    jurisdiction=jurisdiction,
+                    step=len(chain) + 1,
+                    jurisdiction=jurisdiction or (request_jurisdictions[0] if request_jurisdictions else "Unknown"),
                     rule_id=atom.source_id,
                     type=atom.rule_type or "RULE",
                     role=self._role_from_modality(atom.modality or atom.outcome.get("modality", "")),
-                    summary=atom.text or atom.action or atom.source_id,
+                    summary=(atom.text or atom.action or atom.source_id)[:120],
                     atom_id=atom.atom_id,
+                    urn=urn,
+                    citations=citations,
+                    effective_date=self._effective_date(atom),
                 )
             )
+        if len(chain) < 2:
+            for atom in atoms:
+                if atom.source_id in seen:
+                    continue
+                if jurisdictions_lower and atom.outcome.get("jurisdiction", "").lower() not in jurisdictions_lower:
+                    continue
+                urn = self._build_urn(atom)
+                citations = self._citations(atom)
+                chain.append(
+                    ProvenanceStep(
+                        step=len(chain) + 1,
+                        jurisdiction=atom.outcome.get("jurisdiction")
+                        or (request_jurisdictions[0] if request_jurisdictions else "Unknown"),
+                        rule_id=atom.source_id,
+                        type=atom.rule_type or "RULE",
+                        role=self._role_from_modality(atom.modality or atom.outcome.get("modality", "")),
+                        summary=(atom.text or atom.action or atom.source_id)[:120],
+                        atom_id=atom.atom_id,
+                        urn=urn,
+                        citations=citations,
+                        effective_date=self._effective_date(atom),
+                    )
+                )
+                if len(chain) >= 2:
+                    break
         return chain
 
     def _atom_label(self, rule_id: str, atoms: Sequence[PolicyAtom]) -> str:
@@ -158,11 +199,37 @@ class ArbitrageHunter:
                     id=step.rule_id,
                     jurisdiction=step.jurisdiction,
                     label=self._atom_label(step.rule_id, atoms),
+                    urn=step.urn,
+                    citations=step.citations,
                 )
         edges: List[DependencyEdge] = []
         for current, nxt in zip(provenance, provenance[1:]):
             edges.append(DependencyEdge(from_id=current.rule_id, to_id=nxt.rule_id, relation="sequence"))
         return DependencyGraph(nodes=list(nodes.values()), edges=edges)
+
+    @staticmethod
+    def _build_urn(atom: PolicyAtom) -> str:
+        jurisdiction = atom.outcome.get("jurisdiction", "unknown") or "unknown"
+        statute = atom.statute or atom.source_id
+        section = atom.section or "0"
+        jurisdiction_token = jurisdiction.lower().replace(" ", "_").replace(".", "_")
+        statute_token = statute.lower().replace(" ", "_").replace(".", "_")
+        section_token = section.lower().replace(" ", "_").replace(".", "_")
+        return f"urn:law:{jurisdiction_token}:{statute_token}:s{section_token}"
+
+    @staticmethod
+    def _citations(atom: PolicyAtom) -> List[str]:
+        citation = " ".join(part for part in [atom.statute, atom.section] if part).strip()
+        if not citation:
+            citation = atom.source_id
+        return [citation]
+
+    @staticmethod
+    def _effective_date(atom: PolicyAtom) -> str | None:
+        enactment = getattr(atom, "enactment_year", None)
+        if enactment:
+            return str(enactment)
+        return None
 
     def hunt(self, request: ArbitrageRequest) -> ArbitrageDossier:
         atoms = self._filter_atoms(request.jurisdictions)
@@ -172,29 +239,33 @@ class ArbitrageHunter:
         base_constraints = request.constraints or {}
         seed_scenario = self._optimise_seed(atoms, base_constraints)
         if not seed_scenario:
-            seed_candidates = sample_scenarios(atoms, sample_size=5)
+            seed_candidates = sample_scenarios(atoms, sample_size=5, rng=self._rng)
         else:
             seed_candidates = [seed_scenario]
 
         fuzz_budget = 5 if request.risk_tolerance == "low" else 10
         candidates: List[ArbitrageCandidate] = []
         for seed in seed_candidates:
-            metrics = compute_scenario_metrics(seed, atoms)
+            metrics = compute_scenario_metrics(seed, atoms, seed=self._seed)
             proof = [atom.outcome_label for atom in atoms if atom.source_id in metrics.active_rules]
+            if not proof and atoms:
+                proof = [atoms[0].outcome_label]
             candidates.append(ArbitrageCandidate(seed, metrics, proof))
             for _ in range(fuzz_budget):
                 mutated = self._mutate(seed)
-                metrics_mut = compute_scenario_metrics(mutated, atoms)
+                metrics_mut = compute_scenario_metrics(mutated, atoms, seed=self._seed)
                 proof_mut = [
                     atom.outcome_label for atom in atoms if atom.source_id in metrics_mut.active_rules
                 ]
+                if not proof_mut and atoms:
+                    proof_mut = [atoms[0].outcome_label]
                 candidates.append(ArbitrageCandidate(mutated, metrics_mut, proof_mut))
 
         top_candidates = sorted(candidates, key=lambda c: c.metrics.score, reverse=True)[:5]
         if top_candidates:
             golden = top_candidates[0]
         else:
-            golden = ArbitrageCandidate({}, compute_scenario_metrics({}, atoms), [])
+            golden = ArbitrageCandidate({}, compute_scenario_metrics({}, atoms, seed=self._seed), [])
 
         jurisdiction_span = max(1, len(set(request.jurisdictions)))
         value_boost = 1.0 + 0.05 * (jurisdiction_span - 1)
@@ -210,6 +281,10 @@ class ArbitrageHunter:
             score=golden.metrics.score * value_boost,
             value_components=golden.metrics.value_components,
             risk_components=golden.metrics.risk_components,
+            score_components=golden.metrics.score_components,
+            alpha=golden.metrics.alpha,
+            beta=golden.metrics.beta,
+            seed=golden.metrics.seed,
         )
         risk_flags = []
         if golden.metrics.risk > 0.6:
@@ -235,7 +310,7 @@ class ArbitrageHunter:
 
 def run_arbitrage_hunt(services: CALEServices, req: Mapping[str, Any]) -> Dict[str, Any]:
     atoms = build_policy_atoms_from_rules(services.corpus, services.mapper)
-    hunter = ArbitrageHunter(atoms)
+    hunter = ArbitrageHunter(atoms, seed=req.get("seed"))
     dossier = hunter.hunt(
         ArbitrageRequest(
             jurisdictions=list(req.get("jurisdictions", [])),
@@ -258,6 +333,10 @@ def run_arbitrage_hunt(services: CALEServices, req: Mapping[str, Any]) -> Dict[s
             score=metrics.score,
             value_components=metrics.value_components,
             risk_components=metrics.risk_components,
+            score_components=metrics.score_components,
+            alpha=metrics.alpha,
+            beta=metrics.beta,
+            seed=metrics.seed,
         )
         response_candidates.append(
             ArbitrageCandidateModel(

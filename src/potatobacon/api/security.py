@@ -29,13 +29,20 @@ def allowed_api_keys() -> set[str]:
 class RateLimiter:
     """Lightweight in-process rate limiter keyed by (api_key, route)."""
 
-    def __init__(self, rate_per_minute: int = 60) -> None:
+    def __init__(self, rate_per_minute: int = 60, window_seconds: int | None = None) -> None:
         self.rate_per_minute = max(1, rate_per_minute)
+        self.window_seconds = max(1, window_seconds or int(os.getenv("CALE_RATE_WINDOW_SEC", "60")))
         self._lock = threading.Lock()
         self._counters: Dict[Tuple[str, str], Tuple[int, int]] = {}
 
     def _current_window(self) -> int:
-        return int(time.time() // 60)
+        env_window = os.getenv("CALE_RATE_WINDOW_SEC")
+        if env_window:
+            try:
+                self.window_seconds = max(1, int(env_window))
+            except ValueError:
+                self.window_seconds = max(1, self.window_seconds)
+        return int(time.time() // self.window_seconds)
 
     def reset(self) -> None:
         with self._lock:
