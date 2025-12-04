@@ -1,47 +1,69 @@
-import contextlib
 import importlib
-import shutil
-from pathlib import Path
-from typing import Callable, ContextManager, Dict, Iterator, Tuple
-from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 
+from potatobacon.api.security import set_rate_limit
 
-@pytest.fixture
-def make_client(monkeypatch) -> Callable[[Dict[str, str] | None, Dict[str, str] | None], ContextManager[Tuple[TestClient, Path]]]:
-    """Factory for building isolated TestClient instances with fresh state."""
 
-    @contextlib.contextmanager
-    def _factory(
-        extra_env: Dict[str, str] | None = None, headers: Dict[str, str] | None = None
-    ) -> Iterator[Tuple[TestClient, Path]]:
-        overrides = extra_env or {}
-        data_root = Path("out/system-tests") / uuid4().hex
-        if data_root.exists():
-            shutil.rmtree(data_root)
-        data_root.mkdir(parents=True, exist_ok=True)
+@pytest.fixture()
+def app_with_auth(monkeypatch, tmp_path):
+    monkeypatch.setenv("PTB_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("CALE_API_KEYS", "system-key")
+    monkeypatch.setenv("CALE_RATE_LIMIT_PER_MINUTE", "30")
+    set_rate_limit(30)
 
-        base_env = {
-            "CALE_API_KEYS": "dev-key,alt-key",
-            "PTB_DATA_ROOT": str(data_root),
-            "CALE_RATE_LIMIT_PER_MINUTE": overrides.get("CALE_RATE_LIMIT_PER_MINUTE", "5"),
-        }
-        for key, value in base_env.items():
-            monkeypatch.setenv(key, value)
-        for key, value in overrides.items():
-            monkeypatch.setenv(key, str(value))
+    import potatobacon.storage as storage_mod
+    import potatobacon.manifest.store as store_mod
+    import potatobacon.api.app as app_mod
 
-        import potatobacon.storage as storage
-        import potatobacon.api.security as security
-        import potatobacon.api.app as app_module
+    storage_mod = importlib.reload(storage_mod)
+    store_mod = importlib.reload(store_mod)
+    app_mod = importlib.reload(app_mod)
 
-        importlib.reload(storage)
-        importlib.reload(security)
-        importlib.reload(app_module)
+    return app_mod.app
 
-        with TestClient(app_module.app, headers=headers) as client:
-            yield client, data_root
 
-    return _factory
+@pytest.fixture()
+def authed_client(app_with_auth):
+    with TestClient(app_with_auth, headers={"X-API-Key": "system-key"}) as client:
+        yield client
+
+
+@pytest.fixture()
+def bulk_manifest(authed_client):
+    payload = {
+        "domain": "tax",
+        "sources": [
+            {
+                "id": "US_TAX",
+                "text": "US corporations must pay corporate income tax on domestic profits.",
+                "jurisdiction": "US",
+                "statute": "IRC",
+                "section": "11",
+                "enactment_year": 2017,
+            },
+            {
+                "id": "IE_TAX",
+                "text": "Irish entities may claim R&D credits reducing effective tax.",
+                "jurisdiction": "IE",
+                "statute": "TCA",
+                "section": "766",
+                "enactment_year": 2020,
+            },
+            {
+                "id": "KY_TAX",
+                "text": "Kentucky allows deductions for manufacturing investments.",
+                "jurisdiction": "KY",
+                "statute": "KYREV",
+                "section": "141",
+                "enactment_year": 2018,
+            },
+        ],
+        "options": {"replace_existing": True},
+    }
+    response = authed_client.post("/v1/manifest/bulk_ingest", json=payload)
+    assert response.status_code == 200, response.text
+    manifest_hash = response.json()["manifest_hash"]
+    assert manifest_hash
+    return manifest_hash
