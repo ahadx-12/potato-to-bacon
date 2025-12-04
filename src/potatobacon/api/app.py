@@ -4,15 +4,25 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from dataclasses import asdict
-from datetime import datetime, timedelta, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
 
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, UploadFile, Request, Query
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+)
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from potatobacon.api.routes_units import router as units_router
 from potatobacon.api.security import ENGINE_VERSION, require_api_key
@@ -129,6 +139,42 @@ else:
 # CALE-LAW dashboard registration
 # -----------------------------------------------------------------------------
 register_tax_dashboard(app)
+
+
+def _redact_message(msg: str) -> str:
+    if msg.lower().startswith("value error, "):
+        msg = msg.split(", ", 1)[1]
+    lowered = msg.lower()
+    if "key" in lowered or "token" in lowered or "secret" in lowered:
+        return "Invalid request payload"
+    return msg
+
+
+def _normalize_validation_errors(raw_errors: List[Dict[str, Any]]) -> Dict[str, Any]:
+    fields: List[Dict[str, str]] = []
+    for err in raw_errors:
+        loc = err.get("loc", [])
+        loc_parts = [str(part) for part in loc if part != "body"]
+        path = ".".join(["request", *loc_parts]) if loc_parts else "request"
+        message = _redact_message(err.get("msg", "Invalid request"))
+        fields.append({"path": path, "message": message})
+    return {"error": "VALIDATION_ERROR", "fields": fields}
+
+
+@app.exception_handler(RequestValidationError)
+async def handle_request_validation_error(
+    request: Request, exc: RequestValidationError
+):  # pragma: no cover - exercised via system tests
+    content = _normalize_validation_errors(exc.errors())
+    return JSONResponse(status_code=422, content=content)
+
+
+@app.exception_handler(ValidationError)
+async def handle_pydantic_validation_error(
+    request: Request, exc: ValidationError
+):  # pragma: no cover - defensive normalization
+    content = _normalize_validation_errors(exc.errors())
+    return JSONResponse(status_code=422, content=content)
 
 
 # -----------------------------------------------------------------------------
@@ -314,10 +360,15 @@ class SuggestionResponse(BaseModel):
     best: SuggestionItem
 
 
+class ArbitrageObjective(str, Enum):
+    MAXIMIZE_NET_AFTER_TAX = "MAXIMIZE(net_after_tax_income)"
+    MINIMIZE_RISK = "MINIMIZE(risk)"
+
+
 class ArbitrageRequestModel(BaseModel):
     jurisdictions: List[str] = Field(default_factory=list)
     domain: str = "tax"
-    objective: str = "MAXIMIZE(net_after_tax_income)"
+    objective: ArbitrageObjective = ArbitrageObjective.MAXIMIZE_NET_AFTER_TAX
     constraints: Dict[str, Any] = Field(default_factory=dict)
     risk_tolerance: str = Field(default="medium", pattern="^(low|medium|high)$")
     seed: int | None = None
@@ -332,6 +383,13 @@ class ArbitrageRequestModel(BaseModel):
             if manifest_hash is not None:
                 inner.setdefault("manifest_hash", manifest_hash)
             return inner
+        return value
+
+    @field_validator("jurisdictions")
+    @classmethod
+    def _validate_jurisdictions(cls, value: List[str]) -> List[str]:
+        if not value:
+            raise ValueError("At least one jurisdiction is required")
         return value
 
 

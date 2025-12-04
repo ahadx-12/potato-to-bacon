@@ -1,0 +1,120 @@
+{
+  "runs": [
+    {
+      "jurisdictions": [
+        "US"
+      ],
+      "metrics": {
+        "value": 0.09917355371900832,
+        "entropy": 0.9845921297788124,
+        "kappa": 0.11157024793388433,
+        "risk": 0.8695196906425243,
+        "contradiction_probability": 1.0,
+        "score": 0.012740815109204167,
+        "value_components": {
+          "gross_income": 900000.0,
+          "effective_tax_rate_ca_federal": 0.27142261321400873,
+          "effective_tax_rate_ca_bc": 0.18494091309594496,
+          "effective_tax_rate_us_federal": 0.18494091309594496,
+          "effective_tax_rate_eu": 0.27142261321400873,
+          "effective_tax_rate_ca_on": 0.18494091309594496,
+          "net_after_tax": -809999100000.0
+        },
+        "risk_components": {
+          "enforcement_risk": 0.9107438016528926,
+          "ambiguity_risk": 0.9845921297788124,
+          "treaty_mismatch_risk": 0.7132231404958678
+        }
+      },
+      "r_alpha": 0.11584041228121655
+    },
+    {
+      "jurisdictions": [
+        "IE"
+      ],
+      "metrics": {
+        "value": 0.09917355371900832,
+        "entropy": 0.9845921297788124,
+        "kappa": 0.11157024793388433,
+        "risk": 0.8695196906425243,
+        "contradiction_probability": 1.0,
+        "score": 0.012740815109204167,
+        "value_components": {
+          "gross_income": 900000.0,
+          "effective_tax_rate_ca_federal": 0.27142261321400873,
+          "effective_tax_rate_ca_bc": 0.18494091309594496,
+          "effective_tax_rate_us_federal": 0.18494091309594496,
+          "effective_tax_rate_eu": 0.27142261321400873,
+          "effective_tax_rate_ca_on": 0.18494091309594496,
+          "net_after_tax": -809999100000.0
+        },
+        "risk_components": {
+          "enforcement_risk": 0.9107438016528926,
+          "ambiguity_risk": 0.9845921297788124,
+          "treaty_mismatch_risk": 0.7132231404958678
+        }
+      },
+      "r_alpha": 0.11584041228121655
+    },
+    {
+      "jurisdictions": [
+        "KY"
+      ],
+      "metrics": {
+        "value": 0.09917355371900832,
+        "entropy": 0.9845921297788124,
+        "kappa": 0.11157024793388433,
+        "risk": 0.8695196906425243,
+        "contradiction_probability": 1.0,
+        "score": 0.012740815109204167,
+        "value_components": {
+          "gross_income": 900000.0,
+          "effective_tax_rate_ca_federal": 0.27142261321400873,
+          "effective_tax_rate_ca_bc": 0.18494091309594496,
+          "effective_tax_rate_us_federal": 0.18494091309594496,
+          "effective_tax_rate_eu": 0.27142261321400873,
+          "effective_tax_rate_ca_on": 0.18494091309594496,
+          "net_after_tax": -809999100000.0
+        },
+        "risk_components": {
+          "enforcement_risk": 0.9107438016528926,
+          "ambiguity_risk": 0.9845921297788124,
+          "treaty_mismatch_risk": 0.7132231404958678
+        }
+      },
+      "r_alpha": 0.11584041228121655
+    },
+    {
+      "jurisdictions": [
+        "US",
+        "IE",
+        "KY"
+      ],
+      "metrics": {
+        "value": 0.10909090909090917,
+        "entropy": 0.9845921297788124,
+        "kappa": 0.11157024793388433,
+        "risk": 0.8295196906425243,
+        "contradiction_probability": 1.0,
+        "score": 0.014014896620124586,
+        "value_components": {
+          "gross_income": 900000.0,
+          "effective_tax_rate_ca_federal": 0.27142261321400873,
+          "effective_tax_rate_ca_bc": 0.18494091309594496,
+          "effective_tax_rate_us_federal": 0.18494091309594496,
+          "effective_tax_rate_eu": 0.27142261321400873,
+          "effective_tax_rate_ca_on": 0.18494091309594496,
+          "net_after_tax": -809999100000.0
+        },
+        "risk_components": {
+          "enforcement_risk": 0.9107438016528926,
+          "ambiguity_risk": 0.9845921297788124,
+          "treaty_mismatch_risk": 0.7132231404958678
+        }
+      },
+      "r_alpha": 0.133568946759915
+    }
+  ],
+  "best_single_r_alpha": 0.11584041228121655,
+  "best_multi_r_alpha": 0.133568946759915
+}
