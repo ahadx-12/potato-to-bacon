@@ -1,0 +1,1 @@
+OBLIGE: obtain_consent_before_collecting_personal_data. PERMIT: collect_personal_data_without_consent_cases_national_security per anti-terrorism exceptions.
