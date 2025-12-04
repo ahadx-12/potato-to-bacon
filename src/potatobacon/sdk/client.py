@@ -30,6 +30,37 @@ class ManifestResp(BaseModel):
     code_digest: str
 
 
+class VersionInfo(BaseModel):
+    engine_version: str
+    build: Optional[str] = None
+    manifest_hash: Optional[str] = None
+
+
+class AssetSummary(BaseModel):
+    id: str
+    jurisdiction: str
+    created_at: str
+    metrics: Dict[str, Any]
+    provenance_chain: List[Dict[str, Any]] | List[Any]
+    dependency_graph: Dict[str, Any] | None = None
+    engine_version: Optional[str] = None
+    manifest_hash: Optional[str] = None
+    run_id: Optional[str] = None
+
+
+class AssetDetail(BaseModel):
+    id: str
+    jurisdiction: str
+    created_at: str
+    dossier: Dict[str, Any]
+    metrics: Dict[str, Any]
+    provenance_chain: List[Any]
+    dependency_graph: Dict[str, Any]
+    engine_version: Optional[str] = None
+    manifest_hash: Optional[str] = None
+    run_id: Optional[str] = None
+
+
 class InfoResp(BaseModel):
     version: str
     git_sha: Optional[str]
@@ -70,6 +101,7 @@ class PBClient:
         self.cfg = cfg or PBConfig()
         self._session = session or requests.Session()
         self._session.headers.setdefault("X-API-Key", self.cfg.resolved_api_key)
+        self.assets = AssetsClient(self)
 
     @property
     def base_url(self) -> str:
@@ -177,9 +209,74 @@ class PBClient:
         response.raise_for_status()
         return response.json()
 
+    def bulk_ingest(self, domain: str, sources: List[Dict[str, Any]], replace_existing: bool = False) -> Dict[str, Any]:
+        """Ingest multiple law sources via the bulk manifest API."""
+
+        payload = {"domain": domain, "sources": sources, "options": {"replace_existing": replace_existing}}
+        response = self._session.post(f"{self.base_url}/v1/manifest/bulk_ingest", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    def analyze(self, rule1: Dict[str, Any], rule2: Dict[str, Any]) -> Dict[str, Any]:
+        """Run conflict analysis between two rules."""
+
+        payload = {"rule1": rule1, "rule2": rule2}
+        response = self._session.post(f"{self.base_url}/v1/law/analyze", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    def hunt(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a synchronous arbitrage hunt."""
+
+        response = self._session.post(f"{self.base_url}/api/law/arbitrage/hunt", json=request)
+        response.raise_for_status()
+        return response.json()
+
+    def version(self) -> VersionInfo:
+        """Fetch the API version metadata."""
+
+        response = self._session.get(f"{self.base_url}/v1/version")
+        response.raise_for_status()
+        return VersionInfo.model_validate(response.json())
+
     def info(self) -> InfoResp:
         """Return API metadata including available validators and DSL features."""
 
         response = self._session.get(f"{self.base_url}/v1/info")
         response.raise_for_status()
         return InfoResp.model_validate(response.json())
+
+
+class AssetsClient:
+    """Namespace for asset-related API helpers."""
+
+    def __init__(self, client: PBClient):
+        self._client = client
+
+    def list(
+        self,
+        jurisdiction: Optional[str] = None,
+        from_date: Optional[str] = None,
+        limit: int = 10,
+        cursor: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        params = {
+            "jurisdiction": jurisdiction,
+            "from": from_date,
+            "limit": limit,
+            "cursor": cursor,
+        }
+        response = self._client._session.get(
+            f"{self._client.base_url}/api/law/arbitrage/assets", params=params
+        )
+        response.raise_for_status()
+        data = response.json()
+        data["items"] = [AssetSummary.model_validate(item) for item in data.get("items", [])]
+        return data
+
+    def get(self, asset_id: str) -> AssetDetail:
+        response = self._client._session.get(
+            f"{self._client.base_url}/api/law/arbitrage/assets/{asset_id}"
+        )
+        response.raise_for_status()
+        return AssetDetail.model_validate(response.json())
