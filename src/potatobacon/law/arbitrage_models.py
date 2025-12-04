@@ -21,6 +21,10 @@ class ArbitrageMetrics(BaseModel):
     score: float
     value_components: Optional[Dict[str, float]] = None
     risk_components: Optional[Dict[str, float]] = None
+    score_components: Optional[Dict[str, float]] = None
+    alpha: Optional[float] = None
+    beta: Optional[float] = None
+    seed: Optional[int] = None
 
 
 class ProvenanceStep(BaseModel):
@@ -31,12 +35,17 @@ class ProvenanceStep(BaseModel):
     role: str
     summary: Optional[str] = None
     atom_id: Optional[str] = None
+    urn: Optional[str] = None
+    citations: Optional[List[str]] = None
+    effective_date: Optional[str] = None
 
 
 class DependencyNode(BaseModel):
     id: str
     jurisdiction: str
     label: str
+    urn: Optional[str] = None
+    citations: Optional[List[str]] = None
 
 
 class DependencyEdge(BaseModel):

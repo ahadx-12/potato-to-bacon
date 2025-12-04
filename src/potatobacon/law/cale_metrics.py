@@ -23,6 +23,10 @@ class ScenarioMetrics:
     active_rules: List[str]
     value_components: Dict[str, float]
     risk_components: Dict[str, float]
+    score_components: Dict[str, float]
+    alpha: float
+    beta: float
+    seed: int | None
 
 
 def _applicable_outcomes(
@@ -62,7 +66,11 @@ def _outcome_probabilities(active_atoms: Sequence[PolicyAtom]) -> Dict[str, floa
 
 
 def compute_scenario_metrics(
-    scenario: Mapping[str, bool], atoms: Sequence[PolicyAtom], alpha: float = 1.0, beta: float = 1.0
+    scenario: Mapping[str, bool],
+    atoms: Sequence[PolicyAtom],
+    alpha: float = 1.0,
+    beta: float = 1.0,
+    seed: int | None = None,
 ) -> ScenarioMetrics:
     """Compute entropy, contradiction, and arbitrage heuristics for a scenario."""
 
@@ -111,7 +119,18 @@ def compute_scenario_metrics(
     }
     risk = max(risk, sum(risk_components.values()) / max(len(risk_components), 1))
 
-    score = (value_estimate ** alpha) * (entropy ** beta) * (1.0 - risk)
+    value_term = value_estimate**alpha
+    entropy_term = entropy**beta
+    risk_term = 1.0 - risk
+    score = value_term * entropy_term * risk_term
+    score_components = {
+        "value_term": value_term,
+        "entropy_term": entropy_term,
+        "risk_term": risk_term,
+        "alpha": alpha,
+        "beta": beta,
+        "seed": int(seed) if seed is not None else -1,
+    }
 
     # Cohen's kappa proxy: agreement vs uniform baseline
     expected = 1.0 / max(len(probabilities), 1) if probabilities else 0.0
@@ -131,14 +150,21 @@ def compute_scenario_metrics(
         active_rules=[atom.source_id for atom in active_atoms],
         value_components=value_components,
         risk_components=risk_components,
+        score_components=score_components,
+        alpha=float(alpha),
+        beta=float(beta),
+        seed=seed,
     )
 
 
-def _random_scenario(predicates: Sequence[str]) -> Dict[str, bool]:
-    return {pred: bool(random.getrandbits(1)) for pred in predicates}
+def _random_scenario(predicates: Sequence[str], rng: random.Random | None = None) -> Dict[str, bool]:
+    rng = rng or random
+    return {pred: bool(rng.getrandbits(1)) for pred in predicates}
 
 
-def sample_scenarios(atoms: Sequence[PolicyAtom], sample_size: int = 20) -> List[Dict[str, bool]]:
+def sample_scenarios(
+    atoms: Sequence[PolicyAtom], sample_size: int = 20, rng: random.Random | None = None
+) -> List[Dict[str, bool]]:
     """Sample fact assignments implied by the manifest atoms."""
 
     seen_predicates: MutableMapping[str, None] = {}
@@ -147,7 +173,7 @@ def sample_scenarios(atoms: Sequence[PolicyAtom], sample_size: int = 20) -> List
             name = literal[1:] if literal.startswith("¬") else literal
             seen_predicates.setdefault(name, None)
     predicates = list(seen_predicates.keys()) or ["default_fact"]
-    return [_random_scenario(predicates) for _ in range(sample_size)]
+    return [_random_scenario(predicates, rng=rng) for _ in range(sample_size)]
 
 
 def batch_metrics(atoms: Sequence[PolicyAtom], sample_size: int = 20) -> Dict[str, float]:
