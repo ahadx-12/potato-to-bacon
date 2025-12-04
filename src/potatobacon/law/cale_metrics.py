@@ -1,4 +1,16 @@
-"""Scenario-level metrics for CALE-LAW using Z3 semantics."""
+"""Scenario-level metrics for CALE-LAW using Z3 semantics.
+
+Each metric is designed to be empirically inspectable:
+- ``probabilities`` and ``entropy`` follow a Dirichlet-smoothed distribution of
+  active rule outcomes.
+- ``contradiction`` and ``contradiction_probability`` are derived directly from
+  Z3 SAT/UNSAT checks across nearby scenarios instead of static heuristics.
+- ``value_components`` model pre-/post-tax cash flows with explicit loss
+  handling and transparent tax-rate blending.
+- ``risk_components`` clamp constituent risks to [0, 1] for calibration
+  stability and align the aggregate ``risk`` term with observed entropy and
+  enforcement tension.
+"""
 
 from __future__ import annotations
 
@@ -13,9 +25,26 @@ from potatobacon.law.solver_z3 import PolicyAtom, check_scenario
 
 @dataclass(slots=True)
 class ScenarioMetrics:
+    """Computed metrics for a single scenario.
+
+    - ``probabilities``: Dirichlet-smoothed probability mass over active outcomes.
+    - ``entropy``: Normalized entropy of the outcome distribution.
+    - ``contradiction``/``contradiction_probability``: Boolean SAT flag and
+      empirical ratio of UNSAT checks across local perturbations.
+    - ``kappa``: Agreement vs uniform expectation for the dominant outcome.
+    - ``value_estimate``: Spread between dominant and runner-up outcome weights.
+    - ``risk``/``risk_components``: Clamped constituent risks (enforcement,
+      ambiguity, treaty mismatch) and their aggregate.
+    - ``score``/``score_components``: Composite value × entropy × (1 - risk)
+      with tunable ``alpha``/``beta`` and seed traceability.
+    - ``value_components``: Gross income, derived tax rates, tax liability, and
+      net-after-tax (non-negative unless explicit loss facts are present).
+    """
+
     probabilities: Dict[str, float]
     entropy: float
     contradiction: bool
+    contradiction_probability: float
     kappa: float
     value_estimate: float
     risk: float
@@ -65,6 +94,31 @@ def _outcome_probabilities(active_atoms: Sequence[PolicyAtom]) -> Dict[str, floa
     return {label: value / total for label, value in counts.items()}
 
 
+def _local_contradiction_probability(
+    scenario: Mapping[str, bool], atoms: Sequence[PolicyAtom], base_sat: bool
+) -> float:
+    """Estimate contradiction likelihood by probing nearby scenarios.
+
+    The estimator compares the SAT/UNSAT ratio for the provided ``scenario`` and
+    a handful of single-bit flips. This anchors the probability to concrete Z3
+    outcomes rather than a static heuristic.
+    """
+
+    if not atoms:
+        return 0.0
+
+    trials = 1
+    contradiction_count = 0 if base_sat else 1
+    for key, value in list(scenario.items())[:5]:
+        mutated = dict(scenario)
+        mutated[key] = not value
+        is_sat, _ = check_scenario(mutated, atoms)
+        if not is_sat:
+            contradiction_count += 1
+        trials += 1
+    return max(0.0, min(1.0, contradiction_count / max(trials, 1)))
+
+
 def compute_scenario_metrics(
     scenario: Mapping[str, bool],
     atoms: Sequence[PolicyAtom],
@@ -105,19 +159,23 @@ def compute_scenario_metrics(
         key = f"effective_tax_rate_{jurisdiction.lower().replace(' ', '_').replace('.', '_')}"
         value_components[key] = max(0.0, min(1.0, effective_tax_rate_base * weight + entropy * 0.1))
     blended_tax_rate = max(value_components.values()) if len(value_components) > 1 else effective_tax_rate_base
-    net_after_tax = gross_income * (1.0 - blended_tax_rate)
+    tax_liability = gross_income * blended_tax_rate
+    net_after_tax = gross_income - tax_liability
+    if net_after_tax < 0 and not scenario.get("loss", False) and not scenario.get("net_loss", False):
+        net_after_tax = 0.0
+    value_components["tax_liability"] = tax_liability
     value_components["net_after_tax"] = net_after_tax
 
     # Risk transparency: trace drivers behind the scalar risk
-    enforcement_risk = min(1.0, risk + (0.2 if not is_sat else 0.0))
+    enforcement_risk = max(0.0, min(1.0, risk + (0.2 if not is_sat else 0.0)))
     ambiguity_risk = max(0.0, min(1.0, entropy))
-    treaty_mismatch_risk = min(1.0, len(active_jurisdictions) * 0.1 + (1.0 - dominant) * 0.3)
+    treaty_mismatch_risk = max(0.0, min(1.0, len(active_jurisdictions) * 0.1 + (1.0 - dominant) * 0.3))
     risk_components = {
         "enforcement_risk": enforcement_risk,
         "ambiguity_risk": ambiguity_risk,
         "treaty_mismatch_risk": treaty_mismatch_risk,
     }
-    risk = max(risk, sum(risk_components.values()) / max(len(risk_components), 1))
+    risk = max(0.0, min(1.0, max(risk, sum(risk_components.values()) / max(len(risk_components), 1))))
 
     value_term = value_estimate**alpha
     entropy_term = entropy**beta
@@ -139,10 +197,13 @@ def compute_scenario_metrics(
         kappa = (dominant - expected) / (1.0 - expected) if expected < 1.0 else 0.0
         kappa = max(0.0, min(1.0, kappa))
 
+    contradiction_probability = _local_contradiction_probability(scenario, atoms, base_sat=is_sat)
+
     return ScenarioMetrics(
         probabilities=probabilities,
         entropy=float(entropy),
         contradiction=not is_sat,
+        contradiction_probability=float(contradiction_probability),
         kappa=float(kappa),
         value_estimate=float(value_estimate),
         risk=float(risk),
