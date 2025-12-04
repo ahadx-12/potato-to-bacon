@@ -5,13 +5,13 @@ import os
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 
 from potatobacon.api.routes_units import router as units_router
 from potatobacon.api.security import ENGINE_VERSION, require_api_key
@@ -262,6 +262,19 @@ class ArbitrageRequestModel(BaseModel):
     objective: str = "MAXIMIZE(net_after_tax_income)"
     constraints: Dict[str, Any] = Field(default_factory=dict)
     risk_tolerance: str = Field(default="medium", pattern="^(low|medium|high)$")
+    seed: int | None = None
+    manifest_hash: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def unwrap_request(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
+        if isinstance(value, Mapping) and "request" in value:
+            inner = dict(value.get("request") or {})
+            manifest_hash = value.get("manifest_hash")
+            if manifest_hash is not None:
+                inner.setdefault("manifest_hash", manifest_hash)
+            return inner
+        return value
 
 
 def _ensure_bootstrap() -> CALEServices:
@@ -611,7 +624,7 @@ def arbitrage_hunt(req: ArbitrageRequestModel, api_key: str = Depends(require_ap
     services = _cale_services()
     dossier = run_arbitrage_hunt(services, req.model_dump())
     dossier["engine_version"] = ENGINE_VERSION
-    dossier["manifest_hash"] = _active_manifest_hash(req.domain)
+    dossier["manifest_hash"] = req.manifest_hash if req.manifest_hash not in (None, "latest") else _active_manifest_hash(req.domain)
     return dossier
 
 
@@ -625,7 +638,10 @@ def arbitrage_hunt_job(
     job = job_manager.create_job("arbitrage_hunt")
 
     def runner() -> Dict[str, Any]:
-        return run_arbitrage_hunt(services, req.model_dump())
+        dossier = run_arbitrage_hunt(services, req.model_dump())
+        dossier["engine_version"] = ENGINE_VERSION
+        dossier["manifest_hash"] = req.manifest_hash if req.manifest_hash not in (None, "latest") else _active_manifest_hash(req.domain)
+        return dossier
 
     background_tasks.add_task(job_manager.run_job, job, runner)
     return {"job_id": job.id, "engine_version": ENGINE_VERSION}
