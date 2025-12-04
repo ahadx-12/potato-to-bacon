@@ -196,13 +196,18 @@ class ArbitrageHunter:
         else:
             golden = ArbitrageCandidate({}, compute_scenario_metrics({}, atoms), [])
 
+        jurisdiction_span = max(1, len(set(request.jurisdictions)))
+        value_boost = 1.0 + 0.05 * (jurisdiction_span - 1)
+        adjusted_value = golden.metrics.value_estimate * value_boost
+        adjusted_risk = max(0.0, golden.metrics.risk - 0.02 * (jurisdiction_span - 1))
+
         dossier_metrics = ArbitrageMetrics(
-            value=golden.metrics.value_estimate,
+            value=adjusted_value,
             entropy=golden.metrics.entropy,
             kappa=golden.metrics.kappa,
-            risk=golden.metrics.risk,
+            risk=adjusted_risk,
             contradiction_probability=1.0 if golden.metrics.contradiction else 0.0,
-            score=golden.metrics.score,
+            score=golden.metrics.score * value_boost,
             value_components=golden.metrics.value_components,
             risk_components=golden.metrics.risk_components,
         )

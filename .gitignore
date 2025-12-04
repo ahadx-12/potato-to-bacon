@@ -25,6 +25,7 @@ us_tax_corpus/logs/**
 !us_tax_corpus/logs/**/.gitkeep
 out/*.jsonl
 out/*.json
+sandbox/
 # Ignore trained model artifacts
 models/finance/pipeline.joblib
 models/finance/metadata.json
