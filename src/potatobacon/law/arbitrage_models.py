@@ -57,6 +57,7 @@ class ArbitrageCandidateModel(BaseModel):
 
 
 class ArbitrageDossierModel(BaseModel):
+    id: Optional[str] = None
     golden_scenario: ArbitrageScenario
     metrics: ArbitrageMetrics
     proof_trace: List[str]
@@ -66,3 +67,4 @@ class ArbitrageDossierModel(BaseModel):
     dependency_graph: Optional[DependencyGraph] = None
     engine_version: Optional[str] = None
     manifest_hash: Optional[str] = None
+    run_id: Optional[str] = None
