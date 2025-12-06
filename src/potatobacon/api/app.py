@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from enum import Enum
@@ -16,13 +17,21 @@ from fastapi import (
     Form,
     HTTPException,
     Request,
+    Query,
     UploadFile,
 )
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from potatobacon.api.routes_units import router as units_router
 from potatobacon.api.security import ENGINE_VERSION, require_api_key
@@ -382,7 +391,19 @@ class ArbitrageRequestModel(BaseModel):
             manifest_hash = value.get("manifest_hash")
             if manifest_hash is not None:
                 inner.setdefault("manifest_hash", manifest_hash)
-            return inner
+            value = inner
+
+        if isinstance(value, Mapping):
+            normalized = dict(value)
+            objective = normalized.get("objective")
+            alias_map = {
+                "MAXIMIZE_NET_AFTER_TAX": ArbitrageObjective.MAXIMIZE_NET_AFTER_TAX,
+                "MINIMIZE_RISK": ArbitrageObjective.MINIMIZE_RISK,
+            }
+            if isinstance(objective, str) and objective in alias_map:
+                normalized["objective"] = alias_map[objective]
+            return normalized
+
         return value
 
     @field_validator("jurisdictions")
