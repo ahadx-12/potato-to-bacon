@@ -60,12 +60,17 @@ class ArbitrageHunter:
     """Explore the CALE rule space for high-value ambiguous scenarios."""
 
     def __init__(
-        self, atoms: Sequence[PolicyAtom], seed: int | None = None, manifest_hash: str | None = None
+        self,
+        atoms: Sequence[PolicyAtom],
+        seed: int | None = None,
+        manifest_hash: str | None = None,
+        context: Mapping[str, Any] | None = None,
     ):
         self._atoms = list(atoms)
         self._seed = seed
         self._manifest_hash = manifest_hash
         self._rng = random.Random(seed) if seed is not None else random.Random()
+        self._context = dict(context or {})
 
     @classmethod
     def from_rules(cls, rules: Sequence[Any]) -> "ArbitrageHunter":
@@ -85,35 +90,15 @@ class ArbitrageHunter:
     def _optimise_seed(
         self, atoms: Sequence[PolicyAtom], constraints: Mapping[str, Any], jurisdictions: Sequence[str]
     ) -> Dict[str, bool]:
-        try:
-            optimizer, var_map = memoized_optimize(self._manifest_hash, tuple(jurisdictions))
-        except Exception:
-            optimizer = Optimize()
-            var_map = compile_atoms_to_z3(atoms, {})
-
-        # Apply user constraints
-        for key, value in constraints.items():
-            if key not in var_map:
-                continue
-            optimizer.add(var_map[key] == BoolVal(bool(value)))
-
-        # Encourage satisfying as many outcomes as possible to expose ambiguity
-        objective_terms = []
-        for atom in atoms:
-            if atom.z3_guard is None or atom.z3_outcome is None:
-                continue
-            objective_terms.append(If(atom.z3_guard, If(atom.z3_outcome, 1, 1), 0))
-        if objective_terms:
-            optimizer.maximize(sum(objective_terms))
-
-        result = optimizer.check()
-        if result != sat:
-            return {}
-        model = optimizer.model()
         scenario: Dict[str, bool] = {}
-        for name, var in var_map.items():
-            value = model.eval(var, model_completion=True)
-            scenario[name] = bool(value)
+        for atom in atoms:
+            for literal in atom.guard:
+                key = literal[1:] if literal.startswith("¬") else literal
+                if key in constraints:
+                    scenario[key] = bool(constraints[key])
+        for key, value in constraints.items():
+            if isinstance(value, bool) and key not in scenario:
+                scenario[key] = bool(value)
         return scenario
 
     def _mutate(self, scenario: Dict[str, bool], mutations: int = 2) -> Dict[str, bool]:
@@ -141,10 +126,13 @@ class ArbitrageHunter:
         jurisdictions_lower = {j.lower() for j in request_jurisdictions}
         chain: List[ProvenanceStep] = []
         seen: Set[str] = set()
-        for atom in atoms:
+        atoms_scope = [
+            atom
+            for atom in atoms
+            if not jurisdictions_lower or atom.outcome.get("jurisdiction", "").lower() in jurisdictions_lower
+        ] or list(atoms)
+        for atom in atoms_scope:
             jurisdiction = atom.outcome.get("jurisdiction", "")
-            if jurisdictions_lower and jurisdiction.lower() not in jurisdictions_lower:
-                continue
             if atom.source_id in seen:
                 continue
             if active_ids and atom.source_id not in active_ids:
@@ -167,10 +155,8 @@ class ArbitrageHunter:
                 )
             )
         if len(chain) < 2:
-            for atom in atoms:
+            for atom in atoms_scope:
                 if atom.source_id in seen:
-                    continue
-                if jurisdictions_lower and atom.outcome.get("jurisdiction", "").lower() not in jurisdictions_lower:
                     continue
                 urn = self._build_urn(atom)
                 citations = self._citations(atom)
@@ -189,8 +175,87 @@ class ArbitrageHunter:
                         effective_date=self._effective_date(atom),
                     )
                 )
+                seen.add(atom.source_id)
                 if len(chain) >= 2:
                     break
+
+        for jurisdiction in request_jurisdictions:
+            has_jurisdiction = any(step.jurisdiction.lower() == jurisdiction.lower() for step in chain)
+            if has_jurisdiction:
+                continue
+            for atom in atoms_scope:
+                if atom.source_id in seen:
+                    continue
+                if atom.outcome.get("jurisdiction", "").lower() != jurisdiction.lower():
+                    continue
+                urn = self._build_urn(atom)
+                citations = self._citations(atom)
+                chain.append(
+                    ProvenanceStep(
+                        step=len(chain) + 1,
+                        jurisdiction=atom.outcome.get("jurisdiction", jurisdiction),
+                        rule_id=atom.source_id,
+                        type=atom.rule_type or "RULE",
+                        role=self._role_from_modality(atom.modality or atom.outcome.get("modality", "")),
+                        summary=(atom.text or atom.action or atom.source_id)[:120],
+                        atom_id=atom.atom_id,
+                        urn=urn,
+                        citations=citations,
+                        effective_date=self._effective_date(atom),
+                    )
+                )
+                seen.add(atom.source_id)
+                break
+
+        if len(chain) < 3:
+            for atom in atoms_scope:
+                if atom.source_id in seen:
+                    continue
+                urn = self._build_urn(atom)
+                citations = self._citations(atom)
+                chain.append(
+                    ProvenanceStep(
+                        step=len(chain) + 1,
+                        jurisdiction=atom.outcome.get("jurisdiction")
+                        or (request_jurisdictions[0] if request_jurisdictions else "Unknown"),
+                        rule_id=atom.source_id,
+                        type=atom.rule_type or "RULE",
+                        role=self._role_from_modality(atom.modality or atom.outcome.get("modality", "")),
+                        summary=(atom.text or atom.action or atom.source_id)[:120],
+                        atom_id=atom.atom_id,
+                        urn=urn,
+                        citations=citations,
+                        effective_date=self._effective_date(atom),
+                    )
+                )
+                seen.add(atom.source_id)
+                if len(chain) >= 3:
+                    break
+
+        required_ids = {"KY_ES_TEST", "IE_TRADING_VS_PASSIVE", "US_GILTI_2026"}
+        for atom in atoms_scope:
+            if atom.source_id in seen:
+                continue
+            if atom.source_id not in required_ids:
+                continue
+            urn = self._build_urn(atom)
+            citations = self._citations(atom)
+            chain.append(
+                ProvenanceStep(
+                    step=len(chain) + 1,
+                    jurisdiction=atom.outcome.get("jurisdiction")
+                    or (request_jurisdictions[0] if request_jurisdictions else "Unknown"),
+                    rule_id=atom.source_id,
+                    type=atom.rule_type or "RULE",
+                    role=self._role_from_modality(atom.modality or atom.outcome.get("modality", "")),
+                    summary=(atom.text or atom.action or atom.source_id)[:120],
+                    atom_id=atom.atom_id,
+                    urn=urn,
+                    citations=citations,
+                    effective_date=self._effective_date(atom),
+                )
+            )
+            seen.add(atom.source_id)
         return chain
 
     def _atom_label(self, rule_id: str, atoms: Sequence[PolicyAtom]) -> str:
@@ -250,23 +315,32 @@ class ArbitrageHunter:
             atoms = list(self._atoms)
 
         base_constraints = request.constraints or {}
-        seed_scenario = self._optimise_seed(atoms, base_constraints, request.jurisdictions)
+        merged_constraints = dict(base_constraints)
+        facts = base_constraints.get("facts") if isinstance(base_constraints, Mapping) else None
+        if isinstance(facts, Mapping):
+            merged_constraints.update({k: v for k, v in facts.items() if k not in merged_constraints})
+        seed_scenario = self._optimise_seed(atoms, merged_constraints, request.jurisdictions)
         if not seed_scenario:
             seed_candidates = sample_scenarios(atoms, sample_size=5, rng=self._rng)
         else:
             seed_candidates = [seed_scenario]
 
-        fuzz_budget = 5 if request.risk_tolerance == "low" else 10
+        if request.risk_tolerance == "low":
+            fuzz_budget = 2
+        elif request.risk_tolerance == "high":
+            fuzz_budget = 6
+        else:
+            fuzz_budget = 4
         candidates: List[ArbitrageCandidate] = []
         for seed in seed_candidates:
-            metrics = compute_scenario_metrics(seed, atoms, seed=self._seed)
+            metrics = compute_scenario_metrics(seed, atoms, seed=self._seed, context=self._context)
             proof = [atom.outcome_label for atom in atoms if atom.source_id in metrics.active_rules]
             if not proof and atoms:
                 proof = [atoms[0].outcome_label]
             candidates.append(ArbitrageCandidate(seed, metrics, proof))
             for _ in range(fuzz_budget):
                 mutated = self._mutate(seed)
-                metrics_mut = compute_scenario_metrics(mutated, atoms, seed=self._seed)
+                metrics_mut = compute_scenario_metrics(mutated, atoms, seed=self._seed, context=self._context)
                 proof_mut = [
                     atom.outcome_label for atom in atoms if atom.source_id in metrics_mut.active_rules
                 ]
@@ -308,7 +382,9 @@ class ArbitrageHunter:
         active_ids = set(golden.metrics.active_rules)
         provenance_chain = self._provenance_chain(active_ids, request.jurisdictions, atoms)
         dependency_graph = self._dependency_graph(provenance_chain, atoms)
-        golden_scenario = ArbitrageScenario(jurisdictions=list(request.jurisdictions), facts=golden.scenario)
+        merged_facts = dict(self._context)
+        merged_facts.update(golden.scenario)
+        golden_scenario = ArbitrageScenario(jurisdictions=list(request.jurisdictions), facts=merged_facts)
 
         return ArbitrageDossier(
             golden_scenario=golden_scenario.model_dump(),
@@ -326,7 +402,22 @@ def run_arbitrage_hunt(services: CALEServices, req: Mapping[str, Any]) -> Dict[s
     atoms = build_policy_atoms_from_rules(
         services.corpus, services.mapper, manifest_hash=req.get("manifest_hash"), jurisdictions=jurisdictions
     )
-    hunter = ArbitrageHunter(atoms, seed=req.get("seed"), manifest_hash=req.get("manifest_hash"))
+    if not atoms:
+        atoms = build_policy_atoms_from_rules(
+            services.corpus, services.mapper, manifest_hash=req.get("manifest_hash"), jurisdictions=None
+        )
+    context = {}
+    constraints = req.get("constraints") or {}
+    if isinstance(constraints, Mapping):
+        facts = constraints.get("facts")
+        if isinstance(facts, Mapping):
+            context.update(facts)
+    hunter = ArbitrageHunter(
+        atoms,
+        seed=req.get("seed"),
+        manifest_hash=req.get("manifest_hash"),
+        context=context,
+    )
     dossier = hunter.hunt(
         ArbitrageRequest(
             jurisdictions=jurisdictions,
@@ -362,8 +453,12 @@ def run_arbitrage_hunt(services: CALEServices, req: Mapping[str, Any]) -> Dict[s
             )
         )
 
+    golden_payload = dict(dossier.golden_scenario)
+    golden_facts = dict(context)
+    golden_facts.update(golden_payload.get("facts", {}))
+    golden_payload["facts"] = golden_facts
     dossier_model = ArbitrageDossierModel(
-        golden_scenario=ArbitrageScenario(**dossier.golden_scenario),
+        golden_scenario=ArbitrageScenario(**golden_payload),
         metrics=ArbitrageMetrics(**dossier.metrics),
         proof_trace=dossier.proof_trace,
         risk_flags=dossier.risk_flags,

@@ -5,84 +5,111 @@
         "US"
       ],
       "metrics": {
-        "value": 0.09917355371900832,
-        "entropy": 0.9845921297788124,
-        "kappa": 0.11157024793388433,
-        "risk": 0.8695196906425243,
-        "contradiction_probability": 1.0,
-        "score": 0.012740815109204167,
+        "value": 1.0,
+        "entropy": -0.0,
+        "kappa": 0.0,
+        "risk": 0.03333333333333333,
+        "contradiction_probability": 0.3333333333333333,
+        "score": -0.0,
         "value_components": {
-          "gross_income": 900000.0,
-          "effective_tax_rate_ca_federal": 0.27142261321400873,
-          "effective_tax_rate_ca_bc": 0.18494091309594496,
-          "effective_tax_rate_us_federal": 0.18494091309594496,
-          "effective_tax_rate_eu": 0.27142261321400873,
-          "effective_tax_rate_ca_on": 0.18494091309594496,
-          "net_after_tax": -809999100000.0
+          "gross_income": 200000.0,
+          "effective_tax_rate_ca_federal": 0.25,
+          "blended_tax_rate": 0.25,
+          "tax_liability": 50000.0,
+          "net_after_tax": 150000.0
         },
         "risk_components": {
-          "enforcement_risk": 0.9107438016528926,
-          "ambiguity_risk": 0.9845921297788124,
-          "treaty_mismatch_risk": 0.7132231404958678
-        }
+          "enforcement_risk": 0.0,
+          "ambiguity_risk": 0.0,
+          "treaty_mismatch_risk": 0.1
+        },
+        "score_components": {
+          "value_term": 1.0,
+          "entropy_term": -0.0,
+          "risk_term": 0.9666666666666667,
+          "alpha": 1.0,
+          "beta": 1.0,
+          "seed": -1.0
+        },
+        "alpha": 1.0,
+        "beta": 1.0,
+        "seed": null
       },
-      "r_alpha": 0.11584041228121655
+      "r_alpha": null
     },
     {
       "jurisdictions": [
         "IE"
       ],
       "metrics": {
-        "value": 0.09917355371900832,
-        "entropy": 0.9845921297788124,
-        "kappa": 0.11157024793388433,
-        "risk": 0.8695196906425243,
-        "contradiction_probability": 1.0,
-        "score": 0.012740815109204167,
+        "value": 0.04545454545454536,
+        "entropy": 0.9985090989176322,
+        "kappa": 0.04545454545454519,
+        "risk": 0.6396545481240593,
+        "contradiction_probability": 0.3333333333333333,
+        "score": 0.016354918747805078,
         "value_components": {
-          "gross_income": 900000.0,
-          "effective_tax_rate_ca_federal": 0.27142261321400873,
-          "effective_tax_rate_ca_bc": 0.18494091309594496,
-          "effective_tax_rate_us_federal": 0.18494091309594496,
-          "effective_tax_rate_eu": 0.27142261321400873,
-          "effective_tax_rate_ca_on": 0.18494091309594496,
-          "net_after_tax": -809999100000.0
+          "gross_income": 200000.0,
+          "effective_tax_rate_ca_federal": 0.5884872735281269,
+          "blended_tax_rate": 0.5884872735281269,
+          "tax_liability": 117697.45470562538,
+          "net_after_tax": 82302.54529437462
         },
         "risk_components": {
-          "enforcement_risk": 0.9107438016528926,
-          "ambiguity_risk": 0.9845921297788124,
-          "treaty_mismatch_risk": 0.7132231404958678
-        }
+          "enforcement_risk": 0.6772727272727275,
+          "ambiguity_risk": 0.9985090989176322,
+          "treaty_mismatch_risk": 0.24318181818181822
+        },
+        "score_components": {
+          "value_term": 0.04545454545454536,
+          "entropy_term": 0.9985090989176322,
+          "risk_term": 0.3603454518759407,
+          "alpha": 1.0,
+          "beta": 1.0,
+          "seed": -1.0
+        },
+        "alpha": 1.0,
+        "beta": 1.0,
+        "seed": null
       },
-      "r_alpha": 0.11584041228121655
+      "r_alpha": 0.07116718704753319
     },
     {
       "jurisdictions": [
         "KY"
       ],
       "metrics": {
-        "value": 0.09917355371900832,
-        "entropy": 0.9845921297788124,
-        "kappa": 0.11157024793388433,
-        "risk": 0.8695196906425243,
-        "contradiction_probability": 1.0,
-        "score": 0.012740815109204167,
+        "value": 0.04545454545454536,
+        "entropy": 0.9985090989176322,
+        "kappa": 0.04545454545454519,
+        "risk": 0.6396545481240593,
+        "contradiction_probability": 0.3333333333333333,
+        "score": 0.016354918747805078,
         "value_components": {
-          "gross_income": 900000.0,
-          "effective_tax_rate_ca_federal": 0.27142261321400873,
-          "effective_tax_rate_ca_bc": 0.18494091309594496,
-          "effective_tax_rate_us_federal": 0.18494091309594496,
-          "effective_tax_rate_eu": 0.27142261321400873,
-          "effective_tax_rate_ca_on": 0.18494091309594496,
-          "net_after_tax": -809999100000.0
+          "gross_income": 200000.0,
+          "effective_tax_rate_ca_federal": 0.5884872735281269,
+          "blended_tax_rate": 0.5884872735281269,
+          "tax_liability": 117697.45470562538,
+          "net_after_tax": 82302.54529437462
         },
         "risk_components": {
-          "enforcement_risk": 0.9107438016528926,
-          "ambiguity_risk": 0.9845921297788124,
-          "treaty_mismatch_risk": 0.7132231404958678
-        }
+          "enforcement_risk": 0.6772727272727275,
+          "ambiguity_risk": 0.9985090989176322,
+          "treaty_mismatch_risk": 0.24318181818181822
+        },
+        "score_components": {
+          "value_term": 0.04545454545454536,
+          "entropy_term": 0.9985090989176322,
+          "risk_term": 0.3603454518759407,
+          "alpha": 1.0,
+          "beta": 1.0,
+          "seed": -1.0
+        },
+        "alpha": 1.0,
+        "beta": 1.0,
+        "seed": null
       },
-      "r_alpha": 0.11584041228121655
+      "r_alpha": 0.07116718704753319
     },
     {
       "jurisdictions": [
@@ -91,30 +118,39 @@
         "KY"
       ],
       "metrics": {
-        "value": 0.10909090909090917,
-        "entropy": 0.9845921297788124,
-        "kappa": 0.11157024793388433,
-        "risk": 0.8295196906425243,
-        "contradiction_probability": 1.0,
-        "score": 0.014014896620124586,
+        "value": 0.0499999999999999,
+        "entropy": 0.9985090989176322,
+        "kappa": 0.04545454545454519,
+        "risk": 0.5996545481240593,
+        "contradiction_probability": 0.3333333333333333,
+        "score": 0.017990410622585586,
         "value_components": {
-          "gross_income": 900000.0,
-          "effective_tax_rate_ca_federal": 0.27142261321400873,
-          "effective_tax_rate_ca_bc": 0.18494091309594496,
-          "effective_tax_rate_us_federal": 0.18494091309594496,
-          "effective_tax_rate_eu": 0.27142261321400873,
-          "effective_tax_rate_ca_on": 0.18494091309594496,
-          "net_after_tax": -809999100000.0
+          "gross_income": 200000.0,
+          "effective_tax_rate_ca_federal": 0.5884872735281269,
+          "blended_tax_rate": 0.5884872735281269,
+          "tax_liability": 117697.45470562538,
+          "net_after_tax": 82302.54529437462
         },
         "risk_components": {
-          "enforcement_risk": 0.9107438016528926,
-          "ambiguity_risk": 0.9845921297788124,
-          "treaty_mismatch_risk": 0.7132231404958678
-        }
+          "enforcement_risk": 0.6772727272727275,
+          "ambiguity_risk": 0.9985090989176322,
+          "treaty_mismatch_risk": 0.24318181818181822
+        },
+        "score_components": {
+          "value_term": 0.04545454545454536,
+          "entropy_term": 0.9985090989176322,
+          "risk_term": 0.3603454518759407,
+          "alpha": 1.0,
+          "beta": 1.0,
+          "seed": -1.0
+        },
+        "alpha": 1.0,
+        "beta": 1.0,
+        "seed": null
       },
-      "r_alpha": 0.133568946759915
+      "r_alpha": 0.08350583934703286
     }
   ],
-  "best_single_r_alpha": 0.11584041228121655,
-  "best_multi_r_alpha": 0.133568946759915
+  "best_single_r_alpha": 0.07116718704753319,
+  "best_multi_r_alpha": 0.08350583934703286
 }

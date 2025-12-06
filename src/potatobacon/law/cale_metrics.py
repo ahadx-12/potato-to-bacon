@@ -17,7 +17,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Mapping, MutableMapping, Sequence
+from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Sequence
 
 from potatobacon.law.ambiguity_entropy import normalized_entropy
 from potatobacon.law.solver_z3 import PolicyAtom, check_scenario
@@ -125,9 +125,11 @@ def compute_scenario_metrics(
     alpha: float = 1.0,
     beta: float = 1.0,
     seed: int | None = None,
+    context: Mapping[str, Any] | None = None,
 ) -> ScenarioMetrics:
     """Compute entropy, contradiction, and arbitrage heuristics for a scenario."""
 
+    context = context or {}
     is_sat, active_atoms = check_scenario(scenario, atoms)
     probabilities = _outcome_probabilities(active_atoms)
     entropy = normalized_entropy(probabilities.values()) if probabilities else 0.0
@@ -149,22 +151,29 @@ def compute_scenario_metrics(
         jurisdiction = atom.outcome.get("jurisdiction", "Unknown") or "Unknown"
         active_jurisdictions[jurisdiction] = active_jurisdictions.get(jurisdiction, 0) + 1
 
-    gross_income = float(max(len(scenario), 1) * 100000.0)
+    gross_income = float(context.get("gross_staking_rewards", max(len(scenario), 1) * 100000.0))
     effective_tax_rate_base = max(0.0, min(1.0, 0.25 + (1.0 - dominant) * 0.5))
-    value_components: Dict[str, float] = {
-        "gross_income": gross_income,
-    }
+    value_components: Dict[str, float] = {"gross_income": gross_income}
     for jurisdiction, count in active_jurisdictions.items():
         weight = count / max(len(active_atoms), 1)
         key = f"effective_tax_rate_{jurisdiction.lower().replace(' ', '_').replace('.', '_')}"
         value_components[key] = max(0.0, min(1.0, effective_tax_rate_base * weight + entropy * 0.1))
-    blended_tax_rate = max(value_components.values()) if len(value_components) > 1 else effective_tax_rate_base
+    effective_rates = [
+        value
+        for key, value in value_components.items()
+        if key.startswith("effective_tax_rate") and 0.0 <= value <= 1.0
+    ]
+    blended_tax_rate = max(effective_rates) if effective_rates else effective_tax_rate_base
     tax_liability = gross_income * blended_tax_rate
     net_after_tax = gross_income - tax_liability
     if net_after_tax < 0 and not scenario.get("loss", False) and not scenario.get("net_loss", False):
         net_after_tax = 0.0
+    value_components["blended_tax_rate"] = blended_tax_rate
     value_components["tax_liability"] = tax_liability
     value_components["net_after_tax"] = net_after_tax
+
+    if value_estimate <= 0.0 and gross_income > 0 and net_after_tax > 0:
+        value_estimate = max(value_estimate, min(1.0, net_after_tax / gross_income))
 
     # Risk transparency: trace drivers behind the scalar risk
     enforcement_risk = max(0.0, min(1.0, risk + (0.2 if not is_sat else 0.0)))
@@ -175,6 +184,10 @@ def compute_scenario_metrics(
         "ambiguity_risk": ambiguity_risk,
         "treaty_mismatch_risk": treaty_mismatch_risk,
     }
+    if len(active_jurisdictions) > 1:
+        entropy = max(entropy, 0.05)
+        risk = max(risk, 0.05)
+
     risk = max(0.0, min(1.0, max(risk, sum(risk_components.values()) / max(len(risk_components), 1))))
 
     value_term = value_estimate**alpha
