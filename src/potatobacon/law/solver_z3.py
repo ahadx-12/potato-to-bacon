@@ -22,6 +22,7 @@ from z3 import (  # type: ignore[import-not-found]
     Optimize,
     Solver,
     sat,
+    unsat,
 )
 
 from potatobacon.cale.parser import PredicateMapper
@@ -223,3 +224,36 @@ def check_scenario(
 
     is_sat = solver.check() == sat
     return is_sat, active_atoms
+
+
+def analyze_scenario(
+    scenario: Mapping[str, bool], atoms: Sequence[PolicyAtom]
+) -> tuple[bool, List[PolicyAtom], List[PolicyAtom]]:
+    """Return satisfiability, active atoms, and the UNSAT core if any."""
+
+    var_map: Dict[str, BoolRef] = {}
+    compile_atoms_to_z3(atoms, var_map)
+    solver = Solver()
+    solver.set(unsat_core=True)
+
+    for name, value in scenario.items():
+        if name not in var_map:
+            var_map[name] = Bool(name)
+        solver.add(var_map[name] == BoolVal(bool(value)))
+
+    tracked_atoms: list[tuple[BoolRef, PolicyAtom]] = []
+    for idx, atom in enumerate(atoms):
+        if atom.z3_guard is None or atom.z3_outcome is None:
+            continue
+        tracker = Bool(f"atom_{idx}")
+        solver.assert_and_track(Implies(atom.z3_guard, atom.z3_outcome), tracker)
+        tracked_atoms.append((tracker, atom))
+
+    sat_result = solver.check()
+    unsat_atoms: list[PolicyAtom] = []
+    if sat_result == unsat:
+        core = set(solver.unsat_core())
+        unsat_atoms = [atom for tracker, atom in tracked_atoms if tracker in core]
+
+    is_sat, active_atoms = check_scenario(scenario, atoms)
+    return is_sat, active_atoms, unsat_atoms

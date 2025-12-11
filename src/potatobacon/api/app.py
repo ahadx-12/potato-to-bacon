@@ -34,6 +34,9 @@ from pydantic import (
 )
 
 from potatobacon.api.routes_units import router as units_router
+from potatobacon.api.routes_tariff import router as tariff_router
+from potatobacon.api.routes_tariff_explain import router as tariff_explain_router
+from potatobacon.api.routes_proofs import router as proofs_router
 from potatobacon.api.security import ENGINE_VERSION, require_api_key
 from potatobacon.cale.bootstrap import CALEServices, build_services
 from potatobacon.cale.engine import CALEEngine
@@ -97,6 +100,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(units_router)
+app.include_router(tariff_router)
+app.include_router(tariff_explain_router)
+app.include_router(proofs_router)
 
 persistence_store = get_store()
 
