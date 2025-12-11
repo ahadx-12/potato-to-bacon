@@ -357,7 +357,7 @@ class ArbitrageHunter:
         jurisdiction_span = max(1, len(set(request.jurisdictions)))
         value_boost = 1.0 + 0.05 * (jurisdiction_span - 1)
         adjusted_value = golden.metrics.value_estimate * value_boost
-        adjusted_risk = max(0.0, golden.metrics.risk - 0.02 * (jurisdiction_span - 1))
+        adjusted_risk = max(0.01, golden.metrics.risk - 0.02 * (jurisdiction_span - 1))
 
         dossier_metrics = ArbitrageMetrics(
             value=adjusted_value,

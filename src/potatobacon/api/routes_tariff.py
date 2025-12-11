@@ -20,6 +20,7 @@ def analyze_tariff(request: TariffHuntRequestModel) -> TariffDossierModel:
     dossier = run_tariff_hack(
         base_facts=request.scenario,
         mutations=request.mutations,
+        law_context=request.law_context,
         seed=request.seed or 2025,
     )
     return dossier

@@ -76,5 +76,20 @@ def tariff_policy_atoms() -> List[PolicyAtom]:
             rule_type="TARIFF",
             atom_id="GRI_NOTE_4_atom",
         ),
+        PolicyAtom(
+            guard=["surface_contact_rubber_gt_50"],
+            outcome={
+                "modality": "FORBID",
+                "action": "surface_contact_textile_gt_50",
+                "subject": "outer_sole",
+                "jurisdiction": "US",
+            },
+            source_id="HTS_CONTACT_EXCLUSION",
+            statute="US Harmonized Tariff Schedule",
+            section="General Exclusions",
+            text="Rubber-dominant soles cannot simultaneously be textile-dominant.",
+            rule_type="TARIFF",
+            atom_id="HTS_CONTACT_EXCLUSION_atom",
+        ),
     ]
     return atoms

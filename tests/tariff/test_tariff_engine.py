@@ -20,10 +20,13 @@ def test_run_tariff_hack_returns_expected_dossier():
     dossier = run_tariff_hack(
         base_facts=request.scenario,
         mutations=request.mutations,
+        law_context=request.law_context,
         seed=request.seed or 2025,
     )
 
     assert dossier.status == "OPTIMIZED"
+    assert dossier.proof_id
+    assert dossier.law_context
     assert dossier.baseline_duty_rate == 37.5
     assert dossier.optimized_duty_rate == 3.0
     assert dossier.savings_per_unit == 34.5

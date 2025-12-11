@@ -4,10 +4,15 @@ from copy import deepcopy
 from typing import Any, Dict, Iterable, List, Tuple
 
 from potatobacon.law.arbitrage_hunter import ArbitrageHunter
-from potatobacon.law.solver_z3 import PolicyAtom, check_scenario
+from potatobacon.law.solver_z3 import PolicyAtom, analyze_scenario, check_scenario
+from potatobacon.proofs.engine import record_tariff_proof
+from potatobacon.tariff.context_loader import (
+    get_default_tariff_context,
+    get_tariff_atoms_for_context,
+)
 
-from .atoms_hts import DUTY_RATES, tariff_policy_atoms
-from .models import TariffDossierModel, TariffScenario
+from .atoms_hts import DUTY_RATES
+from .models import TariffDossierModel, TariffExplainResponseModel, TariffScenario
 
 
 def _active_duty_atoms(atoms: Iterable[PolicyAtom], scenario: TariffScenario) -> Tuple[bool, List[PolicyAtom]]:
@@ -61,11 +66,13 @@ def _build_provenance(duty_atoms: Iterable[PolicyAtom], scenario_label: str) -> 
 def run_tariff_hack(
     base_facts: Dict[str, Any],
     mutations: Dict[str, Any] | None = None,
+    law_context: str | None = None,
     seed: int = 2025,
 ) -> TariffDossierModel:
     """Compute baseline vs optimized tariff outcomes for a given scenario."""
 
-    atoms = tariff_policy_atoms()
+    context = law_context or get_default_tariff_context()
+    atoms = get_tariff_atoms_for_context(context)
     ArbitrageHunter(atoms, seed=seed)  # placeholder wiring for future GA usage
 
     baseline = TariffScenario(name="baseline", facts=deepcopy(base_facts))
@@ -80,8 +87,14 @@ def run_tariff_hack(
     status = "OPTIMIZED" if optimized_rate < baseline_rate else "BASELINE"
     savings = baseline_rate - optimized_rate
 
-    sat_baseline, duty_atoms_baseline = _active_duty_atoms(atoms, baseline)
-    sat_optimized, duty_atoms_optimized = _active_duty_atoms(atoms, optimized)
+    sat_baseline, active_atoms_baseline, unsat_core_baseline = analyze_scenario(
+        baseline.facts, atoms
+    )
+    sat_optimized, active_atoms_optimized, unsat_core_optimized = analyze_scenario(
+        optimized.facts, atoms
+    )
+    duty_atoms_baseline = [atom for atom in active_atoms_baseline if atom.source_id in DUTY_RATES]
+    duty_atoms_optimized = [atom for atom in active_atoms_optimized if atom.source_id in DUTY_RATES]
 
     provenance_chain: list[Dict[str, Any]] = []
     provenance_chain.extend(_build_provenance(duty_atoms_baseline, "baseline"))
@@ -92,9 +105,24 @@ def run_tariff_hack(
         "seed": seed,
         "sat_baseline": sat_baseline,
         "sat_optimized": sat_optimized,
+        "law_context": context,
     }
 
+    proof_id = record_tariff_proof(
+        law_context=context,
+        base_facts=baseline.facts,
+        mutations=mutations,
+        baseline_active=active_atoms_baseline,
+        optimized_active=active_atoms_optimized,
+        baseline_sat=sat_baseline,
+        optimized_sat=sat_optimized,
+        baseline_unsat_core=unsat_core_baseline,
+        optimized_unsat_core=unsat_core_optimized,
+    )
+
     dossier = TariffDossierModel(
+        proof_id=proof_id,
+        law_context=context,
         status=status,
         baseline_duty_rate=baseline_rate,
         optimized_duty_rate=optimized_rate,
@@ -107,3 +135,60 @@ def run_tariff_hack(
         metrics=metrics,
     )
     return dossier
+
+
+def explain_tariff_scenario(
+    base_facts: Dict[str, Any],
+    mutations: Dict[str, Any] | None = None,
+    law_context: str | None = None,
+) -> TariffExplainResponseModel:
+    """Return SAT/UNSAT explanation for a tariff scenario."""
+
+    context = law_context or get_default_tariff_context()
+    atoms = get_tariff_atoms_for_context(context)
+
+    scenario = TariffScenario(name="baseline", facts=deepcopy(base_facts))
+    if mutations:
+        scenario = apply_mutations(scenario, mutations)
+
+    is_sat, active_atoms, unsat_core = analyze_scenario(scenario.facts, atoms)
+
+    if is_sat:
+        explanation = "Scenario is logically consistent with tariff rules."
+    else:
+        parts = [
+            "Conflict detected between tariff conditions:"
+        ]
+        for atom in unsat_core:
+            parts.append(
+                f"- {atom.source_id} ({getattr(atom, 'section', '')}) {getattr(atom, 'text', '').strip()}"
+            )
+        explanation = "\n".join(parts)
+
+    proof_id = record_tariff_proof(
+        law_context=context,
+        base_facts=scenario.facts,
+        mutations=mutations,
+        baseline_active=active_atoms,
+        optimized_active=active_atoms,
+        baseline_sat=is_sat,
+        optimized_sat=is_sat,
+        baseline_unsat_core=unsat_core,
+        optimized_unsat_core=unsat_core,
+    )
+
+    return TariffExplainResponseModel(
+        status="SAT" if is_sat else "UNSAT",
+        explanation=explanation,
+        proof_id=proof_id,
+        law_context=context,
+        unsat_core=[
+            {
+                "source_id": atom.source_id,
+                "statute": getattr(atom, "statute", ""),
+                "section": getattr(atom, "section", ""),
+                "text": getattr(atom, "text", ""),
+            }
+            for atom in unsat_core
+        ],
+    )

@@ -25,6 +25,8 @@ def test_tariff_api_analyze_endpoint(system_client):
 
     payload = response.json()
     assert payload["status"] == "OPTIMIZED"
+    assert payload["proof_id"]
+    assert payload.get("law_context")
     assert payload["baseline_duty_rate"] == 37.5
     assert payload["optimized_duty_rate"] == 3.0
     assert payload["savings_per_unit"] == 34.5
