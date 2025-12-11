@@ -57,3 +57,33 @@ class TariffExplainResponseModel(BaseModel):
     unsat_core: List[Dict[str, Any]] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")
+
+
+class TariffOptimizationRequestModel(BaseModel):
+    """Request payload for the tariff optimizer."""
+
+    scenario: Dict[str, Any]
+    candidate_mutations: Dict[str, List[Any]]
+    law_context: Optional[str] = None
+    seed: Optional[int] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TariffOptimizationResponseModel(BaseModel):
+    """Optimizer response highlighting tariff savings."""
+
+    status: Literal["OPTIMIZED", "BASELINE", "INFEASIBLE"]
+    baseline_duty_rate: float
+    optimized_duty_rate: float
+    savings_per_unit: float
+    best_mutation: Optional[Dict[str, Any]]
+    baseline_scenario: Dict[str, Any]
+    optimized_scenario: Dict[str, Any]
+    active_codes_baseline: List[str]
+    active_codes_optimized: List[str]
+    law_context: Optional[str]
+    proof_id: str
+    provenance_chain: List[Dict[str, Any]]
+
+    model_config = ConfigDict(extra="forbid")

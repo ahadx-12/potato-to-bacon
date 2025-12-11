@@ -1,0 +1,149 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+
+from potatobacon.law.solver_z3 import PolicyAtom, analyze_scenario
+from potatobacon.proofs.engine import record_tariff_proof
+from potatobacon.tariff.context_loader import (
+    get_default_tariff_context,
+    get_tariff_atoms_for_context,
+)
+
+from .atoms_hts import DUTY_RATES
+from .engine import apply_mutations
+from .models import TariffScenario
+
+
+@dataclass
+class OptimizationResult:
+    baseline_rate: float
+    optimized_rate: float
+    best_mutation: Optional[Dict[str, Any]]
+    baseline_scenario: TariffScenario
+    optimized_scenario: TariffScenario
+    active_codes_baseline: List[str]
+    active_codes_optimized: List[str]
+    law_context: str
+    proof_id: str
+    provenance_chain: List[Dict[str, Any]]
+    status: str
+
+
+@dataclass
+class _ScenarioEvaluation:
+    scenario: TariffScenario
+    is_sat: bool
+    duty_rate: Optional[float]
+    duty_atoms: List[PolicyAtom]
+    active_atoms: List[PolicyAtom]
+    unsat_core: List[PolicyAtom]
+    provenance: List[Dict[str, Any]]
+
+
+def _build_provenance(duty_atoms: List[PolicyAtom], scenario_label: str) -> List[Dict[str, Any]]:
+    provenance: list[Dict[str, Any]] = []
+    for atom in duty_atoms:
+        provenance.append(
+            {
+                "scenario": scenario_label,
+                "source_id": atom.source_id,
+                "statute": getattr(atom, "statute", ""),
+                "section": getattr(atom, "section", ""),
+                "text": getattr(atom, "text", ""),
+                "jurisdiction": atom.outcome.get("jurisdiction", ""),
+            }
+        )
+    return provenance
+
+
+def _evaluate_scenario(
+    atoms: List[PolicyAtom], scenario: TariffScenario, scenario_label: str
+) -> _ScenarioEvaluation:
+    is_sat, active_atoms, unsat_core = analyze_scenario(scenario.facts, atoms)
+    duty_atoms = [atom for atom in active_atoms if atom.source_id in DUTY_RATES]
+    duty_rate: Optional[float] = None
+    if is_sat and duty_atoms:
+        duty_rate = float(DUTY_RATES[duty_atoms[-1].source_id])
+    provenance = _build_provenance(duty_atoms, scenario_label)
+    return _ScenarioEvaluation(
+        scenario=scenario,
+        is_sat=is_sat,
+        duty_rate=duty_rate,
+        duty_atoms=duty_atoms,
+        active_atoms=active_atoms,
+        unsat_core=unsat_core,
+        provenance=provenance,
+    )
+
+
+def optimize_tariff(
+    base_facts: Dict[str, Any],
+    candidate_mutations: Dict[str, List[Any]],
+    law_context: Optional[str] = None,
+    seed: int = 2025,
+) -> OptimizationResult:
+    context = law_context or get_default_tariff_context()
+    atoms = get_tariff_atoms_for_context(context)
+
+    baseline_scenario = TariffScenario(name="baseline", facts=dict(base_facts))
+    baseline_eval = _evaluate_scenario(atoms, baseline_scenario, "baseline")
+
+    best_rate = baseline_eval.duty_rate
+    best_mutation: Optional[Dict[str, Any]] = None
+    best_eval = baseline_eval
+
+    for key, values in candidate_mutations.items():
+        for value in values:
+            mutated_scenario = apply_mutations(baseline_scenario, {key: value})
+            evaluation = _evaluate_scenario(atoms, mutated_scenario, "optimized")
+            if evaluation.duty_rate is None:
+                continue
+            if best_rate is None or evaluation.duty_rate < best_rate:
+                best_rate = evaluation.duty_rate
+                best_mutation = {key: value}
+                best_eval = evaluation
+
+    status: str
+    optimized_rate: float
+    baseline_rate: float
+
+    if best_rate is None:
+        status = "INFEASIBLE"
+        optimized_rate = 0.0
+        baseline_rate = 0.0 if baseline_eval.duty_rate is None else baseline_eval.duty_rate
+    else:
+        optimized_rate = best_rate
+        baseline_rate = baseline_eval.duty_rate if baseline_eval.duty_rate is not None else optimized_rate
+        status = "OPTIMIZED" if best_mutation else "BASELINE"
+
+    provenance_chain: List[Dict[str, Any]] = []
+    provenance_chain.extend(baseline_eval.provenance)
+    if best_eval is not baseline_eval:
+        provenance_chain.extend(best_eval.provenance)
+
+    proof_id = record_tariff_proof(
+        law_context=context,
+        base_facts=base_facts,
+        mutations={"candidates": candidate_mutations, "applied": best_mutation or {}},
+        baseline_active=baseline_eval.active_atoms,
+        optimized_active=best_eval.active_atoms,
+        baseline_sat=baseline_eval.is_sat,
+        optimized_sat=best_eval.is_sat,
+        baseline_unsat_core=baseline_eval.unsat_core,
+        optimized_unsat_core=best_eval.unsat_core,
+    )
+
+    return OptimizationResult(
+        baseline_rate=baseline_rate,
+        optimized_rate=optimized_rate,
+        best_mutation=best_mutation,
+        baseline_scenario=baseline_scenario,
+        optimized_scenario=best_eval.scenario,
+        active_codes_baseline=[atom.source_id for atom in baseline_eval.duty_atoms],
+        active_codes_optimized=[atom.source_id for atom in best_eval.duty_atoms],
+        law_context=context,
+        proof_id=proof_id,
+        provenance_chain=provenance_chain,
+        status=status,
+    )
