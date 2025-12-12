@@ -66,6 +66,8 @@ class TariffOptimizationRequestModel(BaseModel):
     candidate_mutations: Dict[str, List[Any]]
     law_context: Optional[str] = None
     seed: Optional[int] = None
+    declared_value_per_unit: Optional[float] = 100.0
+    annual_volume: Optional[int] = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -77,6 +79,50 @@ class TariffOptimizationResponseModel(BaseModel):
     baseline_duty_rate: float
     optimized_duty_rate: float
     savings_per_unit: float
+    best_mutation: Optional[Dict[str, Any]]
+    baseline_scenario: Dict[str, Any]
+    optimized_scenario: Dict[str, Any]
+    active_codes_baseline: List[str]
+    active_codes_optimized: List[str]
+    law_context: Optional[str]
+    proof_id: str
+    provenance_chain: List[Dict[str, Any]]
+
+    declared_value_per_unit: Optional[float] = None
+    savings_per_unit_rate: Optional[float] = None
+    savings_per_unit_value: Optional[float] = None
+    annual_volume: Optional[int] = None
+    annual_savings_value: Optional[float] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TariffSkuOptimizationRequestModel(BaseModel):
+    """SKU-level request payload for the tariff optimizer."""
+
+    sku_id: str
+    description: str
+    scenario: Dict[str, Any]
+    candidate_mutations: Dict[str, List[Any]]
+    declared_value_per_unit: float
+    annual_volume: int
+    law_context: Optional[str] = None
+    seed: Optional[int] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TariffSkuOptimizationResponseModel(BaseModel):
+    """SKU-level optimizer response with monetary savings."""
+
+    sku_id: str
+    description: str
+    status: Literal["OPTIMIZED", "BASELINE", "INFEASIBLE"]
+    baseline_duty_rate: float
+    optimized_duty_rate: float
+    savings_per_unit_rate: float
+    savings_per_unit_value: float
+    annual_savings_value: float
     best_mutation: Optional[Dict[str, Any]]
     baseline_scenario: Dict[str, Any]
     optimized_scenario: Dict[str, Any]

@@ -7,6 +7,8 @@ from potatobacon.law.solver_z3 import PolicyAtom
 DUTY_RATES = {
     "HTS_6404_11_90": 37.5,
     "HTS_6404_19_35": 3.0,
+    "HTS_STEEL_BOLT": 6.5,
+    "HTS_ALUMINUM_PART": 2.5,
 }
 
 
@@ -90,6 +92,36 @@ def tariff_policy_atoms() -> List[PolicyAtom]:
             text="Rubber-dominant soles cannot simultaneously be textile-dominant.",
             rule_type="TARIFF",
             atom_id="HTS_CONTACT_EXCLUSION_atom",
+        ),
+        PolicyAtom(
+            guard=["product_type_chassis_bolt", "material_steel"],
+            outcome={
+                "modality": "OBLIGE",
+                "action": "duty_rate_6_5",
+                "subject": "import_duty",
+                "jurisdiction": "US",
+            },
+            source_id="HTS_STEEL_BOLT",
+            statute="HTS",
+            section="STEEL_BOLT",
+            text="Chassis bolt made of steel ⇒ 6.5% duty",
+            rule_type="TARIFF",
+            atom_id="HTS_STEEL_BOLT_atom",
+        ),
+        PolicyAtom(
+            guard=["product_type_chassis_bolt", "material_aluminum"],
+            outcome={
+                "modality": "OBLIGE",
+                "action": "duty_rate_2_5",
+                "subject": "import_duty",
+                "jurisdiction": "US",
+            },
+            source_id="HTS_ALUMINUM_PART",
+            statute="HTS",
+            section="ALUMINUM_PART",
+            text="Chassis bolt made of aluminum ⇒ 2.5% duty",
+            rule_type="TARIFF",
+            atom_id="HTS_ALUMINUM_PART_atom",
         ),
     ]
     return atoms

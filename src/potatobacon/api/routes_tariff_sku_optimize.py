@@ -4,11 +4,10 @@ from fastapi import APIRouter, Depends
 
 from potatobacon.api.security import require_api_key
 from potatobacon.tariff.models import (
-    TariffOptimizationRequestModel,
-    TariffOptimizationResponseModel,
+    TariffSkuOptimizationRequestModel,
+    TariffSkuOptimizationResponseModel,
 )
 from potatobacon.tariff.optimizer import optimize_tariff
-
 
 router = APIRouter(
     prefix="/api/tariff",
@@ -17,10 +16,10 @@ router = APIRouter(
 )
 
 
-@router.post("/optimize", response_model=TariffOptimizationResponseModel)
-def optimize_tariff_endpoint(
-    request: TariffOptimizationRequestModel,
-) -> TariffOptimizationResponseModel:
+@router.post("/sku-optimize", response_model=TariffSkuOptimizationResponseModel)
+def sku_optimize(
+    request: TariffSkuOptimizationRequestModel,
+) -> TariffSkuOptimizationResponseModel:
     result = optimize_tariff(
         base_facts=request.scenario,
         candidate_mutations=request.candidate_mutations,
@@ -29,18 +28,18 @@ def optimize_tariff_endpoint(
     )
 
     rate_delta = result.baseline_rate - result.optimized_rate
-    declared_value = request.declared_value_per_unit or 100.0
-    savings_per_unit_value = rate_delta / 100.0 * declared_value
+    savings_per_unit_value = rate_delta / 100.0 * request.declared_value_per_unit
+    annual_savings_value = savings_per_unit_value * request.annual_volume
 
-    annual_savings_value = None
-    if request.annual_volume is not None:
-        annual_savings_value = savings_per_unit_value * request.annual_volume
-
-    return TariffOptimizationResponseModel(
+    return TariffSkuOptimizationResponseModel(
+        sku_id=request.sku_id,
+        description=request.description,
         status=result.status,
         baseline_duty_rate=result.baseline_rate,
         optimized_duty_rate=result.optimized_rate,
-        savings_per_unit=rate_delta,
+        savings_per_unit_rate=rate_delta,
+        savings_per_unit_value=savings_per_unit_value,
+        annual_savings_value=annual_savings_value,
         best_mutation=result.best_mutation,
         baseline_scenario=result.baseline_scenario.facts,
         optimized_scenario=result.optimized_scenario.facts,
@@ -49,9 +48,4 @@ def optimize_tariff_endpoint(
         law_context=result.law_context,
         proof_id=result.proof_id,
         provenance_chain=result.provenance_chain,
-        declared_value_per_unit=declared_value,
-        savings_per_unit_rate=rate_delta,
-        savings_per_unit_value=savings_per_unit_value,
-        annual_volume=request.annual_volume,
-        annual_savings_value=annual_savings_value,
     )
