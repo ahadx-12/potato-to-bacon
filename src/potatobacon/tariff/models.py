@@ -133,3 +133,52 @@ class TariffSkuOptimizationResponseModel(BaseModel):
     provenance_chain: List[Dict[str, Any]]
 
     model_config = ConfigDict(extra="forbid")
+
+
+class TariffSuggestRequestModel(BaseModel):
+    """Request payload for generating tariff suggestions from free text."""
+
+    sku_id: Optional[str] = None
+    description: str
+    bom_text: Optional[str] = None
+    declared_value_per_unit: Optional[float] = 100.0
+    annual_volume: Optional[int] = None
+    law_context: Optional[str] = None
+    top_k: Optional[int] = 5
+    seed: Optional[int] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TariffSuggestionItemModel(BaseModel):
+    """Single suggestion with optimized tariff projection and provenance."""
+
+    human_summary: str
+    baseline_duty_rate: float
+    optimized_duty_rate: float
+    savings_per_unit_rate: float
+    savings_per_unit_value: float
+    annual_savings_value: Optional[float]
+    best_mutation: Dict[str, Any]
+    active_codes_baseline: List[str]
+    active_codes_optimized: List[str]
+    provenance_chain: List[Dict[str, Any]]
+    law_context: Optional[str]
+    proof_id: str
+    risk_score: Optional[int] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TariffSuggestResponseModel(BaseModel):
+    """Response payload for top-k tariff suggestions."""
+
+    status: Literal["OK", "NO_CANDIDATES"]
+    sku_id: Optional[str]
+    description: str
+    law_context: Optional[str]
+    baseline_scenario: Dict[str, Any]
+    generated_candidates_count: int
+    suggestions: List[TariffSuggestionItemModel]
+
+    model_config = ConfigDict(extra="forbid")
