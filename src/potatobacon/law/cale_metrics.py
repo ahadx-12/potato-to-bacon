@@ -247,7 +247,16 @@ def sample_scenarios(
             name = literal[1:] if literal.startswith("¬") else literal
             seen_predicates.setdefault(name, None)
     predicates = list(seen_predicates.keys()) or ["default_fact"]
-    return [_random_scenario(predicates, rng=rng) for _ in range(sample_size)]
+
+    rng = rng or random
+    if sample_size <= 0:
+        return []
+
+    baseline = {pred: True for pred in predicates}
+    scenarios: List[Dict[str, bool]] = [baseline]
+    for _ in range(max(sample_size - 1, 0)):
+        scenarios.append(_random_scenario(predicates, rng=rng))
+    return scenarios
 
 
 def batch_metrics(atoms: Sequence[PolicyAtom], sample_size: int = 20) -> Dict[str, float]:

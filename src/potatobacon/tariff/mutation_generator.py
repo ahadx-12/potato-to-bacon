@@ -1,9 +1,9 @@
-"""Generate structured mutation candidates from a product spec."""
+"""Generate structured mutation candidates from a product spec or free text."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from .product_schema import ProductCategory, ProductSpecModel
 
@@ -150,3 +150,95 @@ def generate_mutation_candidates(product: ProductSpecModel) -> List[MutationCand
     """Generate deterministic mutation candidates based on product category."""
 
     return _select_category_templates(product)
+
+
+# -----------------------------------------------------------------------------
+# Free-text profile inference + deterministic mutation generation
+# -----------------------------------------------------------------------------
+
+
+_FOOTWEAR_KEYWORDS = ["shoe", "sneaker", "footwear"]
+_FASTENER_KEYWORDS = ["bolt", "fastener", "screw"]
+
+
+def _detect_keywords(text: str, keyword_list: List[str]) -> List[str]:
+    return [kw for kw in keyword_list if kw in text]
+
+
+def infer_product_profile(description: str, bom_text: str | None) -> Dict[str, Any]:
+    """Infer a lightweight product profile from free-text description and BOM."""
+
+    combined = " ".join(filter(None, [description, bom_text or ""])).lower()
+    footwear_hits = _detect_keywords(combined, _FOOTWEAR_KEYWORDS)
+    fastener_hits = _detect_keywords(combined, _FASTENER_KEYWORDS)
+
+    category = "unknown"
+    if footwear_hits:
+        category = "footwear"
+    elif fastener_hits:
+        category = "fastener"
+
+    keywords = sorted(set(footwear_hits + fastener_hits))
+    notes: List[str] = []
+    if not keywords:
+        notes.append("No category keywords detected")
+
+    return {"category": category, "keywords": keywords, "notes": notes}
+
+
+def baseline_facts_from_profile(profile: Dict[str, Any]) -> Dict[str, Any]:
+    """Return baseline tariff facts for a derived profile."""
+
+    category = profile.get("category") if isinstance(profile, dict) else None
+    if category == "footwear":
+        return {
+            "upper_material_textile": True,
+            "outer_sole_material_rubber_or_plastics": True,
+            "surface_contact_rubber_gt_50": True,
+            "surface_contact_textile_gt_50": False,
+            "felt_covering_gt_50": False,
+        }
+    if category == "fastener":
+        return {
+            "product_type_chassis_bolt": True,
+            "material_steel": True,
+            "material_aluminum": False,
+        }
+    return {}
+
+
+def generate_candidate_mutations(profile: Any) -> List[Any]:
+    """Generate deterministic mutations from a free-text profile or product spec."""
+
+    if isinstance(profile, ProductSpecModel):
+        return _select_category_templates(profile)
+
+    category = profile.get("category") if isinstance(profile, dict) else None
+    if category == "footwear":
+        return [
+            {"felt_covering_gt_50": True},
+            {
+                "surface_contact_textile_gt_50": True,
+                "surface_contact_rubber_gt_50": False,
+            },
+        ]
+    if category == "fastener":
+        return [
+            {"material_steel": False, "material_aluminum": True},
+            {"material_aluminum": True},
+        ]
+    return []
+
+
+def human_summary_for_mutation(profile: Dict[str, Any], mutation: Dict[str, Any]) -> str:
+    """Return a human-readable description for a proposed mutation."""
+
+    category = profile.get("category") if isinstance(profile, dict) else None
+    if category == "footwear":
+        if mutation.get("felt_covering_gt_50"):
+            return "Add >50% felt/textile overlay on outsole to make textile dominant ground contact"
+        return "Increase textile dominance on outsole contact surface"
+    if category == "fastener":
+        if mutation.get("material_aluminum"):
+            return "Switch material from steel to aluminum to qualify for lower-duty classification"
+    return "Apply alternate construction to explore lower-duty classification"
