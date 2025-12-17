@@ -67,3 +67,19 @@ def test_unknown_suggest(system_client):
     data = response.json()
     assert data["status"] == "NO_CANDIDATES"
     assert data["suggestions"] == []
+
+
+@pytest.mark.usefixtures("system_client")
+def test_suggest_includes_fact_evidence(system_client):
+    payload = {
+        "description": "Canvas sneaker with rubber sole",
+        "include_fact_evidence": True,
+    }
+
+    response = system_client.post("/api/tariff/suggest", json=payload)
+    assert response.status_code == 200, response.text
+
+    data = response.json()
+    assert data["fact_evidence"]
+    assert data["product_spec"]
+    assert any(ev.get("evidence") for ev in data["fact_evidence"])

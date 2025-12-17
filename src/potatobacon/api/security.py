@@ -94,9 +94,12 @@ def require_api_key(
 def set_rate_limit(limit: int) -> None:
     """Utility hook for tests to reconfigure the limiter."""
 
-    global rate_limiter
-    rate_limiter = RateLimiter(
-        rate_per_minute=max(1, int(limit)),
-        window_seconds=int(os.getenv("CALE_RATE_WINDOW_SEC", "60")),
-    )
+    window_env = os.getenv("CALE_RATE_WINDOW_SEC")
+    if window_env:
+        try:
+            rate_limiter.window_seconds = max(1, int(window_env))
+        except ValueError:
+            pass
+    rate_limiter.rate_per_minute = max(1, int(limit))
+    rate_limiter.reset()
 
