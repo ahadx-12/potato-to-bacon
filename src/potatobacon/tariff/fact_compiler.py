@@ -72,7 +72,15 @@ def _add_evidence(
     )
 
 
-def compile_facts(product: ProductSpecModel) -> Tuple[Dict[str, Any], List[DerivedFactEvidence]]:
+def _origin_fact_key(country: str | None) -> str | None:
+    if not country:
+        return None
+    return f"origin_country_{country.upper()}"
+
+
+def compile_facts(
+    product: ProductSpecModel, bom_signals: Dict[str, Any] | None = None
+) -> Tuple[Dict[str, Any], List[DerivedFactEvidence]]:
     """
     Compile a :class:`ProductSpecModel` into solver-friendly facts and evidence.
 
@@ -131,6 +139,14 @@ def compile_facts(product: ProductSpecModel) -> Tuple[Dict[str, Any], List[Deriv
             derived_from_fields=["product_category"],
             calculation="category fastener implies fastener role",
         )
+        facts["product_type_chassis_bolt"] = True
+        _add_evidence(
+            evidence,
+            fact_key="product_type_chassis_bolt",
+            value=True,
+            derived_from_fields=["product_category"],
+            calculation="fastener default to chassis bolt",
+        )
 
     if product.use_function:
         facts[f"use_function_{product.use_function.lower()}"] = True
@@ -171,5 +187,179 @@ def compile_facts(product: ProductSpecModel) -> Tuple[Dict[str, Any], List[Deriv
             derived_from_fields=["annual_volume"],
             calculation="direct mapping",
         )
+
+    if product.product_category == ProductCategory.ELECTRONICS:
+        facts["product_type_electronics"] = True
+        _add_evidence(
+            evidence,
+            fact_key="product_type_electronics",
+            value=True,
+            derived_from_fields=["product_category"],
+            calculation="electronics category",
+        )
+    if product.product_category == ProductCategory.APPAREL_TEXTILE:
+        facts["product_type_apparel_textile"] = True
+        _add_evidence(
+            evidence,
+            fact_key="product_type_apparel_textile",
+            value=True,
+            derived_from_fields=["product_category"],
+            calculation="apparel/textile category",
+        )
+
+    electronics_mapping = {
+        "contains_pcb": product.has_pcb,
+        "electronics_cable_or_connector": product.is_cable_or_connector,
+        "electronics_enclosure": product.is_enclosure_or_housing,
+        "contains_battery": product.contains_battery,
+    }
+    for fact_key, flag_value in electronics_mapping.items():
+        facts[fact_key] = bool(flag_value)
+        _add_evidence(
+            evidence,
+            fact_key=fact_key,
+            value=bool(flag_value),
+            derived_from_fields=[fact_key.replace("electronics_", "").replace("contains_", "has_")],
+            calculation="boolean mapping",
+        )
+
+    apparel_mapping = {
+        "textile_knit": product.is_knit,
+        "textile_woven": product.is_woven,
+        "has_coating_or_lamination": product.has_coating_or_lamination,
+    }
+    for fact_key, flag_value in apparel_mapping.items():
+        facts[fact_key] = bool(flag_value)
+        _add_evidence(
+            evidence,
+            fact_key=fact_key,
+            value=bool(flag_value),
+            derived_from_fields=[fact_key.replace("textile_", "is_")],
+            calculation="boolean mapping",
+        )
+
+    if product.fiber_cotton_pct is not None:
+        cotton_dominant = product.fiber_cotton_pct >= 50
+        facts["fiber_cotton_dominant"] = cotton_dominant
+        _add_evidence(
+            evidence,
+            fact_key="fiber_cotton_dominant",
+            value=cotton_dominant,
+            derived_from_fields=["fiber_cotton_pct"],
+            calculation=f"cotton_pct={product.fiber_cotton_pct}",
+        )
+    else:
+        facts["fiber_cotton_dominant"] = False
+    if product.fiber_polyester_pct is not None:
+        polyester_dominant = product.fiber_polyester_pct >= 50
+        facts["fiber_polyester_dominant"] = polyester_dominant
+        _add_evidence(
+            evidence,
+            fact_key="fiber_polyester_dominant",
+            value=polyester_dominant,
+            derived_from_fields=["fiber_polyester_pct"],
+            calculation=f"polyester_pct={product.fiber_polyester_pct}",
+        )
+    else:
+        facts["fiber_polyester_dominant"] = False
+
+    if product.fiber_nylon_pct is not None:
+        facts["fiber_nylon_present"] = product.fiber_nylon_pct > 0
+        _add_evidence(
+            evidence,
+            fact_key="fiber_nylon_present",
+            value=product.fiber_nylon_pct > 0,
+            derived_from_fields=["fiber_nylon_pct"],
+            calculation=f"nylon_pct={product.fiber_nylon_pct}",
+        )
+
+    if bom_signals:
+        dominant_material = bom_signals.get("dominant_material")
+        if dominant_material:
+            fact_key = MATERIAL_FACTS.get(dominant_material.lower())
+            if fact_key:
+                facts[fact_key] = True
+                _add_evidence(
+                    evidence,
+                    fact_key=fact_key,
+                    value=True,
+                    derived_from_fields=["bom"],
+                    calculation=f"bom dominant material: {dominant_material}",
+                )
+        primary_origin = bom_signals.get("primary_origin")
+        if primary_origin:
+            origin_key = _origin_fact_key(primary_origin)
+            if origin_key:
+                facts[origin_key] = True
+                _add_evidence(
+                    evidence,
+                    fact_key=origin_key,
+                    value=True,
+                    derived_from_fields=["bom"],
+                    calculation="bom primary origin",
+                )
+
+    origin_key = _origin_fact_key(product.origin_country)
+    if origin_key:
+        facts[origin_key] = True
+        _add_evidence(
+            evidence,
+            fact_key=origin_key,
+            value=True,
+            derived_from_fields=["origin_country"],
+            calculation="direct mapping",
+        )
+    facts["origin_country_raw"] = product.origin_country
+    facts["export_country"] = product.export_country
+    facts["import_country"] = product.import_country
+
+    if origin_key is None:
+        facts["requires_origin_data"] = True
+        _add_evidence(
+            evidence,
+            fact_key="requires_origin_data",
+            value=True,
+            derived_from_fields=["origin_country"],
+            calculation="origin missing",
+        )
+    else:
+        facts["requires_origin_data"] = False
+
+    if product.import_country and product.origin_country:
+        if product.import_country.upper() == "US" and product.origin_country.upper() in {"CA", "MX"}:
+            facts["fta_usmca_eligible"] = True
+            _add_evidence(
+                evidence,
+                fact_key="fta_usmca_eligible",
+                value=True,
+                derived_from_fields=["origin_country", "import_country"],
+                calculation="US import from USMCA partner",
+            )
+            facts["duty_reduction_possible"] = True
+            _add_evidence(
+                evidence,
+                fact_key="duty_reduction_possible",
+                value=True,
+                derived_from_fields=["fta_usmca_eligible"],
+                calculation="FTA eligibility indicator",
+            )
+
+    if product.product_category == ProductCategory.FASTENER and product.origin_country:
+        if product.origin_country.upper() == "CN":
+            facts["ad_cvd_possible"] = True
+            _add_evidence(
+                evidence,
+                fact_key="ad_cvd_possible",
+                value=True,
+                derived_from_fields=["origin_country", "product_category"],
+                calculation="CN origin fastener triggers AD/CVD review",
+            )
+    else:
+        facts.setdefault("ad_cvd_possible", False)
+
+    if facts.get("material_steel") or facts.get("material_aluminum"):
+        facts.setdefault("material_metal", True)
+    else:
+        facts.setdefault("material_metal", False)
 
     return facts, evidence

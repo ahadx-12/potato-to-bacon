@@ -99,6 +99,10 @@ def assess_tariff_risk(
         score += 10
         reasons.append("Material duty reduction should be documented for audit defense.")
 
+    if baseline_facts.get("ad_cvd_possible") or optimized_facts.get("ad_cvd_possible"):
+        score += 10
+        reasons.append("Potential AD/CVD exposure; requires specialist review.")
+
     score = max(0, min(100, score))
     grade = _compute_defensibility_grade(score)
 

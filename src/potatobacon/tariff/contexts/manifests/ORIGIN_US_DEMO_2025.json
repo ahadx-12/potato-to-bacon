@@ -1,0 +1,13 @@
+{
+  "context_id": "ORIGIN_US_DEMO_2025",
+  "domain": "tariff",
+  "jurisdiction": "US",
+  "effective_from": "2025-01-01",
+  "effective_to": null,
+  "description": "Starter origin and FTA eligibility scaffolding for US imports",
+  "loader": {
+    "type": "json_rules",
+    "rules_file": "rules/ORIGIN_US_DEMO_2025_rules.json"
+  },
+  "sources": ["origin/demo"]
+}

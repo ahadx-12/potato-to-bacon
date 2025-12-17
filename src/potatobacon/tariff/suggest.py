@@ -17,6 +17,7 @@ from potatobacon.tariff.models import (
     TariffSuggestionItemModel,
 )
 from potatobacon.tariff.parser import compile_facts_with_evidence, extract_product_spec
+from potatobacon.tariff.bom_ingest import bom_to_text, parse_bom_csv
 from potatobacon.tariff.risk import assess_tariff_risk
 from potatobacon.law.solver_z3 import analyze_scenario
 
@@ -46,10 +47,29 @@ def suggest_tariff_optimizations(
 ) -> TariffSuggestResponseModel:
     """Generate, evaluate, and rank tariff optimization suggestions."""
 
-    profile = infer_product_profile(request.description, request.bom_text)
-    spec, extraction_evidence = extract_product_spec(request.description, request.bom_text)
+    bom_structured = request.bom_json
+    if bom_structured is None and request.bom_csv:
+        bom_structured = parse_bom_csv(request.bom_csv)
+
+    normalized_bom_text = request.bom_text
+    if bom_structured is not None:
+        normalized_bom_text = bom_to_text(bom_structured)
+
+    profile = infer_product_profile(request.description, normalized_bom_text)
+    spec, extraction_evidence = extract_product_spec(
+        request.description,
+        normalized_bom_text,
+        bom_structured=bom_structured,
+        origin_country=request.origin_country,
+        export_country=request.export_country,
+        import_country=request.import_country,
+    )
     compiled_facts, fact_evidence = compile_facts_with_evidence(
-        spec, request.description, request.bom_text
+        spec,
+        request.description,
+        normalized_bom_text,
+        bom_structured=bom_structured,
+        include_fact_evidence=request.include_fact_evidence,
     )
     if fact_evidence:
         fact_evidence = sorted(
