@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 class TextEvidenceModel(BaseModel):
     """Span-level evidence extracted from product text inputs."""
 
-    source: Literal["description", "bom_text"]
+    source: Literal["description", "bom_text", "bom_json", "payload"]
     snippet: str
     start: int | None = None
     end: int | None = None
@@ -29,6 +29,29 @@ class FactEvidenceModel(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     evidence: List[TextEvidenceModel] = Field(default_factory=list)
     derived_from: List[str] = Field(default_factory=list)
+    risk_reason: Optional[str] = Field(default=None)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class BOMLineItemModel(BaseModel):
+    """Structured Bill of Materials line item."""
+
+    part_id: Optional[str] = None
+    description: str
+    material: Optional[str] = None
+    quantity: Optional[float] = None
+    unit_cost: Optional[float] = None
+    country_of_origin: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class StructuredBOMModel(BaseModel):
+    """Normalized BOM payload for deterministic ingestion."""
+
+    items: List[BOMLineItemModel]
+    currency: Optional[str] = Field(default="USD")
 
     model_config = ConfigDict(extra="forbid")
 
@@ -50,6 +73,9 @@ class TariffHuntRequestModel(BaseModel):
     scenario: Dict[str, Any]
     mutations: Optional[Dict[str, Any]] = None
     seed: Optional[int] = Field(default=None, description="Random seed for reproducibility")
+    origin_country: Optional[str] = None
+    export_country: Optional[str] = None
+    import_country: Optional[str] = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -84,6 +110,8 @@ class TariffExplainResponseModel(BaseModel):
     proof_payload_hash: str
     law_context: Optional[str] = None
     unsat_core: List[Dict[str, Any]] = Field(default_factory=list)
+    compliance_flags: Dict[str, bool] = Field(default_factory=dict)
+    recommended_next_inputs: List[str] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -97,6 +125,9 @@ class TariffOptimizationRequestModel(BaseModel):
     seed: Optional[int] = None
     declared_value_per_unit: Optional[float] = 100.0
     annual_volume: Optional[int] = None
+    origin_country: Optional[str] = None
+    export_country: Optional[str] = None
+    import_country: Optional[str] = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -174,12 +205,17 @@ class TariffSuggestRequestModel(BaseModel):
     sku_id: Optional[str] = None
     description: str
     bom_text: Optional[str] = None
+    bom_json: Optional[StructuredBOMModel] = None
+    bom_csv: Optional[str] = None
     declared_value_per_unit: Optional[float] = 100.0
     annual_volume: Optional[int] = None
     law_context: Optional[str] = None
     top_k: Optional[int] = 5
     seed: Optional[int] = None
     include_fact_evidence: bool = False
+    origin_country: Optional[str] = None
+    export_country: Optional[str] = None
+    import_country: Optional[str] = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -231,6 +267,11 @@ class TariffParseRequestModel(BaseModel):
     sku_id: Optional[str] = None
     description: str
     bom_text: Optional[str] = None
+    bom_json: Optional[StructuredBOMModel] = None
+    bom_csv: Optional[str] = None
+    origin_country: Optional[str] = None
+    export_country: Optional[str] = None
+    import_country: Optional[str] = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -257,9 +298,14 @@ class TariffBatchSkuModel(BaseModel):
     sku_id: str
     description: str
     bom_text: Optional[str] = None
+    bom_json: Optional[StructuredBOMModel] = None
+    bom_csv: Optional[str] = None
     declared_value_per_unit: Optional[float] = 100.0
     annual_volume: Optional[int] = None
     law_context: Optional[str] = None
+    origin_country: Optional[str] = None
+    export_country: Optional[str] = None
+    import_country: Optional[str] = None
 
     model_config = ConfigDict(extra="forbid")
 

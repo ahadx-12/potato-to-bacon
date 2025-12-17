@@ -206,6 +206,19 @@ def explain_tariff_scenario(
         tariff_manifest_hash=context_meta["manifest_hash"],
     )
 
+    compliance_flags = {
+        "requires_origin_data": bool(scenario.facts.get("requires_origin_data")),
+        "ad_cvd_possible": bool(scenario.facts.get("ad_cvd_possible")),
+        "requires_ruling_review": bool(unsat_core),
+    }
+    recommended_next_inputs: list[str] = []
+    if compliance_flags["requires_origin_data"]:
+        recommended_next_inputs.append("Provide country of origin by component")
+    if not scenario.facts.get("fiber_cotton_dominant") and not scenario.facts.get(
+        "fiber_polyester_dominant"
+    ):
+        recommended_next_inputs.append("Provide fiber percentages")
+
     return TariffExplainResponseModel(
         status="SAT" if is_sat else "UNSAT",
         explanation=explanation,
@@ -221,4 +234,6 @@ def explain_tariff_scenario(
             }
             for atom in unsat_core
         ],
+        compliance_flags=compliance_flags,
+        recommended_next_inputs=sorted(set(recommended_next_inputs)),
     )

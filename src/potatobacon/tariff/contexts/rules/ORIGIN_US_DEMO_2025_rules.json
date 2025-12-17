@@ -1,0 +1,30 @@
+[
+  {
+    "guard": ["origin_country_CA", "import_country_US", "fta_usmca_eligible"],
+    "outcome": {
+      "modality": "PERMIT",
+      "action": "duty_reduction_possible",
+      "subject": "fta",
+      "jurisdiction": "US"
+    },
+    "source_id": "FTA_USMCA_DEMO",
+    "statute": "USMCA",
+    "section": "Eligibility",
+    "text": "Canadian origin goods imported to US with USMCA eligibility may access duty reduction.",
+    "rule_type": "NON_TARIFF"
+  },
+  {
+    "guard": ["requires_origin_data"],
+    "outcome": {
+      "modality": "PERMIT",
+      "action": "requires_origin_data",
+      "subject": "origin",
+      "jurisdiction": "US"
+    },
+    "source_id": "ORIGIN_DATA_GAP",
+    "statute": "Origin Demo",
+    "section": "Data",
+    "text": "Origin missing; additional information required.",
+    "rule_type": "NON_TARIFF"
+  }
+]
