@@ -119,6 +119,7 @@ def run_tariff_hack(
         baseline_unsat_core=unsat_core_baseline,
         optimized_unsat_core=unsat_core_optimized,
         evidence_pack=evidence_pack,
+        tariff_manifest_hash=context_meta["manifest_hash"],
     )
 
     dossier = TariffDossierModel(
@@ -178,6 +179,7 @@ def explain_tariff_scenario(
         optimized_sat=is_sat,
         baseline_unsat_core=unsat_core,
         optimized_unsat_core=unsat_core,
+        tariff_manifest_hash=context_meta["manifest_hash"],
     )
 
     return TariffExplainResponseModel(
