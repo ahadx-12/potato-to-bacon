@@ -6,10 +6,7 @@ from typing import Any, Dict, Iterable, List, Tuple
 from potatobacon.law.arbitrage_hunter import ArbitrageHunter
 from potatobacon.law.solver_z3 import PolicyAtom, analyze_scenario, check_scenario
 from potatobacon.proofs.engine import record_tariff_proof
-from potatobacon.tariff.context_loader import (
-    get_default_tariff_context,
-    get_tariff_atoms_for_context,
-)
+from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_for_context
 
 from .atoms_hts import DUTY_RATES
 from .models import TariffDossierModel, TariffExplainResponseModel, TariffScenario
@@ -71,8 +68,9 @@ def run_tariff_hack(
 ) -> TariffDossierModel:
     """Compute baseline vs optimized tariff outcomes for a given scenario."""
 
-    context = law_context or get_default_tariff_context()
-    atoms = get_tariff_atoms_for_context(context)
+    resolved_context = law_context or DEFAULT_CONTEXT_ID
+    atoms, context_meta = load_atoms_for_context(resolved_context)
+    context = context_meta["context_id"]
     ArbitrageHunter(atoms, seed=seed)  # placeholder wiring for future GA usage
 
     baseline = TariffScenario(name="baseline", facts=deepcopy(base_facts))
@@ -106,6 +104,7 @@ def run_tariff_hack(
         "sat_baseline": sat_baseline,
         "sat_optimized": sat_optimized,
         "law_context": context,
+        "tariff_manifest_hash": context_meta["manifest_hash"],
     }
 
     proof_id = record_tariff_proof(
@@ -132,6 +131,7 @@ def run_tariff_hack(
         active_codes_baseline=[atom.source_id for atom in duty_atoms_baseline],
         active_codes_optimized=[atom.source_id for atom in duty_atoms_optimized],
         provenance_chain=provenance_chain,
+        tariff_manifest_hash=context_meta["manifest_hash"],
         metrics=metrics,
     )
     return dossier
@@ -144,8 +144,9 @@ def explain_tariff_scenario(
 ) -> TariffExplainResponseModel:
     """Return SAT/UNSAT explanation for a tariff scenario."""
 
-    context = law_context or get_default_tariff_context()
-    atoms = get_tariff_atoms_for_context(context)
+    resolved_context = law_context or DEFAULT_CONTEXT_ID
+    atoms, context_meta = load_atoms_for_context(resolved_context)
+    context = context_meta["context_id"]
 
     scenario = TariffScenario(name="baseline", facts=deepcopy(base_facts))
     if mutations:

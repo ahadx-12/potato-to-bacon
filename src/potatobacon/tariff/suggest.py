@@ -3,10 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from potatobacon.tariff.engine import run_tariff_hack
-from potatobacon.tariff.context_loader import (
-    get_default_tariff_context,
-    get_tariff_atoms_for_context,
-)
+from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_for_context
 from potatobacon.tariff.mutation_generator import (
     baseline_facts_from_profile,
     generate_candidate_mutations,
@@ -51,21 +48,24 @@ def suggest_tariff_optimizations(
     baseline_facts = baseline_facts_from_profile(profile)
     candidates = generate_candidate_mutations(profile)
 
+    resolved_context = request.law_context or DEFAULT_CONTEXT_ID
+    atoms, context_meta = load_atoms_for_context(resolved_context)
+    law_context = context_meta["context_id"]
+
     if not baseline_facts or not candidates:
         return TariffSuggestResponseModel(
             status="NO_CANDIDATES",
             sku_id=request.sku_id,
             description=request.description,
-            law_context=request.law_context,
+            law_context=law_context,
             baseline_scenario=baseline_facts,
             generated_candidates_count=len(candidates),
             suggestions=[],
+            tariff_manifest_hash=context_meta["manifest_hash"],
         )
 
     declared_value = request.declared_value_per_unit or 100.0
     seed = request.seed or 2025
-    law_context = request.law_context or get_default_tariff_context()
-    atoms = get_tariff_atoms_for_context(law_context)
 
     suggestion_items: List[TariffSuggestionItemModel] = []
 
@@ -113,6 +113,7 @@ def suggest_tariff_optimizations(
                 risk_score=risk.risk_score,
                 defensibility_grade=risk.defensibility_grade,
                 risk_reasons=risk.risk_reasons,
+                tariff_manifest_hash=dossier.tariff_manifest_hash,
             )
         )
 
@@ -122,7 +123,7 @@ def suggest_tariff_optimizations(
     top_k = request.top_k or 5
     ordered_suggestions = [item for _, item in indexed_items[:top_k]]
 
-    response_law_context = request.law_context
+    response_law_context = law_context
     if ordered_suggestions and ordered_suggestions[0].law_context:
         response_law_context = ordered_suggestions[0].law_context
 
@@ -136,4 +137,5 @@ def suggest_tariff_optimizations(
         baseline_scenario=baseline_facts,
         generated_candidates_count=len(candidates),
         suggestions=ordered_suggestions,
+        tariff_manifest_hash=context_meta["manifest_hash"],
     )

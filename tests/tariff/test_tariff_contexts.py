@@ -15,5 +15,5 @@ def test_default_tariff_context_loads_atoms():
 
 
 def test_unknown_context_raises_error():
-    with pytest.raises(ValueError):
+    with pytest.raises(KeyError):
         get_tariff_atoms_for_context("UNKNOWN_CONTEXT")

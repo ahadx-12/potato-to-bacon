@@ -5,10 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from potatobacon.law.solver_z3 import PolicyAtom, analyze_scenario
 from potatobacon.proofs.engine import record_tariff_proof
-from potatobacon.tariff.context_loader import (
-    get_default_tariff_context,
-    get_tariff_atoms_for_context,
-)
+from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_for_context
 
 from .atoms_hts import DUTY_RATES
 from .engine import apply_mutations
@@ -25,6 +22,7 @@ class OptimizationResult:
     active_codes_baseline: List[str]
     active_codes_optimized: List[str]
     law_context: str
+    tariff_manifest_hash: str
     proof_id: str
     provenance_chain: List[Dict[str, Any]]
     status: str
@@ -83,8 +81,9 @@ def optimize_tariff(
     law_context: Optional[str] = None,
     seed: int = 2025,
 ) -> OptimizationResult:
-    context = law_context or get_default_tariff_context()
-    atoms = get_tariff_atoms_for_context(context)
+    resolved_context = law_context or DEFAULT_CONTEXT_ID
+    atoms, context_meta = load_atoms_for_context(resolved_context)
+    context = context_meta["context_id"]
 
     baseline_scenario = TariffScenario(name="baseline", facts=dict(base_facts))
     baseline_eval = _evaluate_scenario(atoms, baseline_scenario, "baseline")
@@ -143,6 +142,7 @@ def optimize_tariff(
         active_codes_baseline=[atom.source_id for atom in baseline_eval.duty_atoms],
         active_codes_optimized=[atom.source_id for atom in best_eval.duty_atoms],
         law_context=context,
+        tariff_manifest_hash=context_meta["manifest_hash"],
         proof_id=proof_id,
         provenance_chain=provenance_chain,
         status=status,

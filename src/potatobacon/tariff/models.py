@@ -18,7 +18,7 @@ class TariffHuntRequestModel(BaseModel):
     """Request payload for tariff arbitrage analysis."""
 
     law_context: Optional[str] = Field(
-        default=None, description="Versioned tariff context identifier (e.g. HTS_US_2025_Q1)",
+        default=None, description="Versioned tariff context identifier (e.g. HTS_US_DEMO_2025)",
     )
     scenario: Dict[str, Any]
     mutations: Optional[Dict[str, Any]] = None
@@ -85,6 +85,7 @@ class TariffOptimizationResponseModel(BaseModel):
     active_codes_baseline: List[str]
     active_codes_optimized: List[str]
     law_context: Optional[str]
+    tariff_manifest_hash: Optional[str] = None
     proof_id: str
     provenance_chain: List[Dict[str, Any]]
 
@@ -129,6 +130,7 @@ class TariffSkuOptimizationResponseModel(BaseModel):
     active_codes_baseline: List[str]
     active_codes_optimized: List[str]
     law_context: Optional[str]
+    tariff_manifest_hash: Optional[str] = None
     proof_id: str
     provenance_chain: List[Dict[str, Any]]
 
@@ -168,6 +170,7 @@ class TariffSuggestionItemModel(BaseModel):
     risk_score: Optional[int] = None
     defensibility_grade: Optional[str] = None
     risk_reasons: Optional[List[str]] = None
+    tariff_manifest_hash: Optional[str] = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -182,6 +185,7 @@ class TariffSuggestResponseModel(BaseModel):
     baseline_scenario: Dict[str, Any]
     generated_candidates_count: int
     suggestions: List[TariffSuggestionItemModel]
+    tariff_manifest_hash: Optional[str] = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -226,6 +230,7 @@ class TariffBatchSkuResultModel(BaseModel):
     description: str
     status: Literal["OK", "NO_CANDIDATES", "ERROR"]
     law_context: Optional[str]
+    tariff_manifest_hash: Optional[str] = None
     baseline_scenario: Dict[str, Any]
     best: Optional[TariffSuggestionItemModel] = None
     suggestions: Optional[List[TariffSuggestionItemModel]] = None
@@ -245,5 +250,6 @@ class TariffBatchScanResponseModel(BaseModel):
     skipped: List[TariffBatchSkuResultModel]
     generated_at: Optional[str] = None
     law_context: Optional[str] = None
+    tariff_manifest_hash: Optional[str] = None
 
     model_config = ConfigDict(extra="forbid")
