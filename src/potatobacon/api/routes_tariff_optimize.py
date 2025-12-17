@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
+from potatobacon.api.context_helpers import unknown_law_context_error
 from potatobacon.api.security import require_api_key
 from potatobacon.tariff.models import (
     TariffOptimizationRequestModel,
@@ -21,12 +22,16 @@ router = APIRouter(
 def optimize_tariff_endpoint(
     request: TariffOptimizationRequestModel,
 ) -> TariffOptimizationResponseModel:
-    result = optimize_tariff(
-        base_facts=request.scenario,
-        candidate_mutations=request.candidate_mutations,
-        law_context=request.law_context,
-        seed=request.seed or 2025,
-    )
+    try:
+        result = optimize_tariff(
+            base_facts=request.scenario,
+            candidate_mutations=request.candidate_mutations,
+            law_context=request.law_context,
+            seed=request.seed or 2025,
+        )
+    except KeyError as exc:
+        attempted = exc.args[0] if exc.args else request.law_context
+        raise unknown_law_context_error(attempted) from exc
 
     rate_delta = result.baseline_rate - result.optimized_rate
     declared_value = request.declared_value_per_unit or 100.0
@@ -47,6 +52,7 @@ def optimize_tariff_endpoint(
         active_codes_baseline=result.active_codes_baseline,
         active_codes_optimized=result.active_codes_optimized,
         law_context=result.law_context,
+        tariff_manifest_hash=result.tariff_manifest_hash,
         proof_id=result.proof_id,
         provenance_chain=result.provenance_chain,
         declared_value_per_unit=declared_value,

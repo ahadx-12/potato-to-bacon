@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
+from potatobacon.api.context_helpers import unknown_law_context_error
 from potatobacon.api.security import require_api_key
 from potatobacon.tariff.models import (
     TariffSuggestRequestModel,
@@ -20,4 +21,8 @@ router = APIRouter(
 def suggest_tariff_endpoint(
     request: TariffSuggestRequestModel,
 ) -> TariffSuggestResponseModel:
-    return suggest_tariff_optimizations(request)
+    try:
+        return suggest_tariff_optimizations(request)
+    except KeyError as exc:
+        attempted = exc.args[0] if exc.args else request.law_context
+        raise unknown_law_context_error(attempted) from exc

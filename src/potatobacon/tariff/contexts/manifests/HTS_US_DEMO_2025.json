@@ -1,0 +1,13 @@
+{
+  "context_id": "HTS_US_DEMO_2025",
+  "domain": "tariff",
+  "jurisdiction": "US",
+  "effective_from": "2025-01-01",
+  "effective_to": null,
+  "description": "Demo HTS tariff rules for US footwear and chassis parts",
+  "loader": {
+    "type": "python",
+    "callable": "potatobacon.tariff.atoms_hts:tariff_policy_atoms"
+  },
+  "sources": ["HTS demo atoms" ]
+}

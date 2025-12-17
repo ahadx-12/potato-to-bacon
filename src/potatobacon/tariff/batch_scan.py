@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import List
 
+from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID
 from potatobacon.tariff.models import (
     TariffBatchScanRequestModel,
     TariffBatchScanResponseModel,
@@ -44,7 +45,7 @@ def batch_scan_tariffs(request: TariffBatchScanRequestModel) -> TariffBatchScanR
 
     for sku in request.skus:
         try:
-            context = sku.law_context or request.law_context
+            context = sku.law_context or request.law_context or DEFAULT_CONTEXT_ID
             suggest_request = TariffSuggestRequestModel(
                 sku_id=sku.sku_id,
                 description=sku.description,
@@ -60,16 +61,17 @@ def batch_scan_tariffs(request: TariffBatchScanRequestModel) -> TariffBatchScanR
             if suggest_response.status == "NO_CANDIDATES" or not suggest_response.suggestions:
                 suggestions = suggest_response.suggestions if request.include_all_suggestions else None
                 skipped.append(
-                    TariffBatchSkuResultModel(
-                        sku_id=sku.sku_id,
-                        description=sku.description,
-                        status="NO_CANDIDATES",
-                        law_context=suggest_response.law_context,
-                        baseline_scenario=suggest_response.baseline_scenario,
-                        best=None,
-                        suggestions=suggestions,
-                        rank_score=None,
-                        error=None,
+                TariffBatchSkuResultModel(
+                    sku_id=sku.sku_id,
+                    description=sku.description,
+                    status="NO_CANDIDATES",
+                    law_context=suggest_response.law_context,
+                    tariff_manifest_hash=suggest_response.tariff_manifest_hash,
+                    baseline_scenario=suggest_response.baseline_scenario,
+                    best=None,
+                    suggestions=suggestions,
+                    rank_score=None,
+                    error=None,
                     )
                 )
                 continue
@@ -88,6 +90,7 @@ def batch_scan_tariffs(request: TariffBatchScanRequestModel) -> TariffBatchScanR
                     description=sku.description,
                     status="OK",
                     law_context=suggest_response.law_context,
+                    tariff_manifest_hash=suggest_response.tariff_manifest_hash,
                     baseline_scenario=suggest_response.baseline_scenario,
                     best=best,
                     suggestions=suggestions if request.include_all_suggestions else None,
@@ -96,12 +99,14 @@ def batch_scan_tariffs(request: TariffBatchScanRequestModel) -> TariffBatchScanR
                 )
             )
         except Exception as exc:  # pragma: no cover - defensive
+            if isinstance(exc, KeyError):
+                raise
             skipped.append(
                 TariffBatchSkuResultModel(
                     sku_id=sku.sku_id,
                     description=sku.description,
                     status="ERROR",
-                    law_context=sku.law_context or request.law_context,
+                    law_context=sku.law_context or request.law_context or DEFAULT_CONTEXT_ID,
                     baseline_scenario={},
                     best=None,
                     suggestions=None,
@@ -130,6 +135,6 @@ def batch_scan_tariffs(request: TariffBatchScanRequestModel) -> TariffBatchScanR
         results=ranked_results,
         skipped=skipped,
         generated_at=generated_at,
-        law_context=request.law_context,
+        law_context=request.law_context or DEFAULT_CONTEXT_ID,
     )
     return response
