@@ -1,362 +1,1296 @@
 [
   {
     "sku_id": "RW-FOOT-001",
-    "description": "Canvas sneaker with rubber sole, classic court style",
-    "bom_text": "upper: cotton canvas 60%, lining mesh; outsole: vulcanized rubber",
-    "declared_value_per_unit": 78.5,
-    "annual_volume": 12000,
+    "description": "Classic court sneaker #1! upper: canvas+mesh; outsole: rubber (sticky) -- comfy • breathable",
+    "declared_value_per_unit": 152.77,
+    "annual_volume": 882802,
     "expected_category": "footwear",
-    "expect_at_least_one_suggestion": true
+    "expect_at_least_one_suggestion": true,
+    "bom_text": "footwear mix :: 1 // materials include steel, rubber? cotton"
   },
   {
     "sku_id": "RW-FOOT-002",
-    "description": "Hiking boot with felt overlay on outsole >50% contact area",
-    "bom_text": "upper leather/textile blend; rubber lug sole with felt overlay patches",
-    "declared_value_per_unit": 142.0,
-    "annual_volume": 6400,
+    "description": "Classic court sneaker #2! upper: canvas+mesh; outsole: rubber (sticky) -- comfy • breathable",
+    "declared_value_per_unit": 50.31,
+    "annual_volume": 1073020,
     "expected_category": "footwear",
-    "expect_at_least_one_suggestion": true
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "CN",
+    "export_country": "CN",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "COT-001",
+          "description": "cotton component",
+          "material": "cotton",
+          "quantity": 2,
+          "unit_cost": 2.14,
+          "country_of_origin": "CN"
+        }
+      ],
+      "currency": "USD"
+    }
   },
   {
-    "sku_id": "RW-FAST-003",
-    "description": "Metric steel chassis bolt for EV frame",
-    "bom_text": "M12 x 1.75 steel bolt, zinc coating, automotive frame",
-    "declared_value_per_unit": 2.2,
-    "annual_volume": 500000,
-    "expected_category": "fastener",
-    "expect_at_least_one_suggestion": true
+    "sku_id": "RW-FOOT-003",
+    "description": "Classic court sneaker #3! upper: canvas+mesh; outsole: rubber (sticky) -- comfy • breathable",
+    "declared_value_per_unit": 142.16,
+    "annual_volume": 636892,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "VN",
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-3,textile,3,2.08,VN"
   },
   {
-    "sku_id": "RW-FAST-004",
-    "description": "Stainless steel screw, pan head, for battery pack housing",
-    "bom_text": "304 stainless screw, machine thread, 20mm",
-    "declared_value_per_unit": 0.44,
-    "annual_volume": 980000,
-    "expected_category": "fastener",
-    "expect_at_least_one_suggestion": true
+    "sku_id": "RW-FOOT-004",
+    "description": "Classic court sneaker #4! upper: canvas+mesh; outsole: rubber (sticky) -- comfy • breathable",
+    "declared_value_per_unit": 163.92,
+    "annual_volume": 1059205,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true,
+    "bom_text": "footwear mix :: 4 // materials include steel, rubber? pcb"
   },
   {
     "sku_id": "RW-FOOT-005",
-    "description": "Low-top sneaker / trainer with rubber sole and canvas upper",
-    "bom_text": "rubber sole bonded, textile upper (canvas) 70%",
-    "declared_value_per_unit": 63.0,
-    "annual_volume": 22000,
+    "description": "Classic court sneaker #5! upper: canvas+mesh; outsole: rubber (sticky) -- comfy • breathable",
+    "declared_value_per_unit": 54.32,
+    "annual_volume": 199674,
     "expected_category": "footwear",
-    "expect_at_least_one_suggestion": true
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "CN",
+    "export_country": "CN",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "PCB-001",
+          "description": "pcb component",
+          "material": "pcb",
+          "quantity": 2,
+          "unit_cost": 4.04,
+          "country_of_origin": "CN"
+        }
+      ],
+      "currency": "USD"
+    }
   },
   {
-    "sku_id": "RW-ELEC-006",
-    "description": "Control board for smart sprinkler system (PCB assembled)",
-    "bom_text": "4-layer PCB, stm32 chip, aluminum shield, assembled",
-    "declared_value_per_unit": 38.75,
-    "annual_volume": 41000,
-    "expected_category": "electronics",
-    "expect_at_least_one_suggestion": false
+    "sku_id": "RW-FOOT-006",
+    "description": "Classic court sneaker #6! upper: canvas+mesh; outsole: rubber (sticky) -- comfy • breathable",
+    "declared_value_per_unit": 177.77,
+    "annual_volume": 1117666,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "VN",
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-6,plastic,2,1.15,VN"
   },
   {
-    "sku_id": "RW-APP-007",
-    "description": "Organic cotton t-shirt, heavyweight",
-    "bom_text": "180gsm jersey knit, 100% cotton",
-    "declared_value_per_unit": 12.0,
-    "annual_volume": 150000,
-    "expected_category": "textile",
-    "expect_at_least_one_suggestion": false
+    "sku_id": "RW-FOOT-007",
+    "description": "Classic court sneaker #7! upper: canvas+mesh; outsole: rubber (sticky) -- comfy • breathable",
+    "declared_value_per_unit": 132.72,
+    "annual_volume": 693273,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true,
+    "bom_text": "footwear mix :: 7 // materials include steel, rubber? canvas"
   },
   {
-    "sku_id": "RW-FAST-008",
-    "description": "Steel screw for solar racking system, hex head",
-    "bom_text": "galvanized steel screw, outdoor rated",
-    "declared_value_per_unit": 0.55,
-    "annual_volume": 750000,
-    "expected_category": "fastener",
-    "expect_at_least_one_suggestion": true
+    "sku_id": "RW-FOOT-008",
+    "description": "Classic court sneaker #8! upper: canvas+mesh; outsole: rubber (sticky) -- comfy • breathable",
+    "declared_value_per_unit": 102.97,
+    "annual_volume": 742754,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "CN",
+    "export_country": "CN",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "COT-001",
+          "description": "cotton component",
+          "material": "cotton",
+          "quantity": 2,
+          "unit_cost": 1.72,
+          "country_of_origin": "CN"
+        }
+      ],
+      "currency": "USD"
+    }
   },
   {
     "sku_id": "RW-FOOT-009",
-    "description": "\u2728 Fashion sneaker w/ glitter textile upper + rubber outsole",
-    "bom_text": "textile upper 65%, rubber sole 1pc",
-    "declared_value_per_unit": 58.0,
-    "annual_volume": 18000,
+    "description": "Classic court sneaker #9! upper: canvas+mesh; outsole: rubber (sticky) -- comfy • breathable",
+    "declared_value_per_unit": 117.07,
+    "annual_volume": 429620,
     "expected_category": "footwear",
-    "expect_at_least_one_suggestion": true
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "VN",
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-9,plastic,4,1.61,VN"
   },
   {
-    "sku_id": "RW-FAST-010",
-    "description": "Aluminum rivet (not actually a bolt)",
-    "bom_text": "solid aluminum rivet 3mm",
-    "declared_value_per_unit": 0.08,
-    "annual_volume": 220000,
-    "expected_category": "fastener",
-    "expect_at_least_one_suggestion": false
+    "sku_id": "RW-FOOT-010",
+    "description": "Classic court sneaker #10! upper: canvas+mesh; outsole: rubber (sticky) -- comfy • breathable",
+    "declared_value_per_unit": 96.24,
+    "annual_volume": 131409,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true,
+    "bom_text": "footwear mix :: 10 // materials include steel, rubber? ABS"
   },
   {
-    "sku_id": "RW-GAD-011",
-    "description": "Gadget thingamajig with mixed plastics",
-    "bom_text": "ABS shell, silicone gasket, random bits",
-    "declared_value_per_unit": 5.75,
-    "annual_volume": 42000,
-    "expected_category": "unknown",
-    "expect_at_least_one_suggestion": false
+    "sku_id": "RW-FOOT-011",
+    "description": "Classic court sneaker #11! upper: canvas+mesh; outsole: rubber (sticky) -- comfy • breathable",
+    "declared_value_per_unit": 165.3,
+    "annual_volume": 196405,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "CN",
+    "export_country": "CN",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "COT-001",
+          "description": "cotton component",
+          "material": "cotton",
+          "quantity": 2,
+          "unit_cost": 3.61,
+          "country_of_origin": "CN"
+        }
+      ],
+      "currency": "USD"
+    }
   },
   {
     "sku_id": "RW-FOOT-012",
-    "description": "Kids sneaker, rubber sole, stretchy textile upper",
-    "bom_text": "EVA/rubber outsole + knit upper",
-    "declared_value_per_unit": 32.5,
-    "annual_volume": 76000,
+    "description": "Classic court sneaker #12! upper: canvas+mesh; outsole: rubber (sticky) -- comfy • breathable",
+    "declared_value_per_unit": 142.38,
+    "annual_volume": 3196,
     "expected_category": "footwear",
-    "expect_at_least_one_suggestion": true
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "VN",
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-12,plastic,4,2.92,VN"
   },
   {
-    "sku_id": "RW-FAST-013",
-    "description": "Machine screw for enclosure",
-    "bom_text": "steel screw, coarse thread, phillips",
-    "declared_value_per_unit": 0.12,
-    "annual_volume": 300000,
-    "expected_category": "fastener",
-    "expect_at_least_one_suggestion": true
+    "sku_id": "RW-FOOT-013",
+    "description": "Classic court sneaker #13! upper: canvas+mesh; outsole: rubber (sticky) -- comfy • breathable",
+    "declared_value_per_unit": 63.3,
+    "annual_volume": 682802,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true,
+    "bom_text": "footwear mix :: 13 // materials include steel, rubber? cotton"
   },
   {
     "sku_id": "RW-FOOT-014",
-    "description": "Boot, leather vamp w/ felt overlay on outsole",
-    "bom_text": "rubber sole + felt overlay sections; leather upper",
-    "declared_value_per_unit": 120.0,
-    "annual_volume": 9500,
+    "description": "Classic court sneaker #14! upper: canvas+mesh; outsole: rubber (sticky) -- comfy • breathable",
+    "declared_value_per_unit": 38.44,
+    "annual_volume": 1190956,
     "expected_category": "footwear",
-    "expect_at_least_one_suggestion": true
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "CN",
+    "export_country": "CN",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "RUB-001",
+          "description": "rubber component",
+          "material": "rubber",
+          "quantity": 2,
+          "unit_cost": 1.35,
+          "country_of_origin": "CN"
+        }
+      ],
+      "currency": "USD"
+    }
   },
   {
-    "sku_id": "RW-ELEC-015",
-    "description": "Battery pack housing, aluminum extruded, includes screws",
-    "bom_text": "aluminum enclosure + plastic endcaps + screws",
-    "declared_value_per_unit": 19.8,
-    "annual_volume": 33000,
-    "expected_category": "electronics",
-    "expect_at_least_one_suggestion": false
+    "sku_id": "RW-FOOT-015",
+    "description": "Classic court sneaker #15! upper: canvas+mesh; outsole: rubber (sticky) -- comfy • breathable",
+    "declared_value_per_unit": 174.32,
+    "annual_volume": 1139532,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "VN",
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-15,textile,1,0.37,VN"
   },
   {
-    "sku_id": "RW-FAST-016",
-    "description": "Steel bolt with rubber washer kit",
-    "bom_text": "bolt + rubber washer; steel",
-    "declared_value_per_unit": 0.39,
-    "annual_volume": 210000,
-    "expected_category": "fastener",
-    "expect_at_least_one_suggestion": true
+    "sku_id": "RW-FOOT-016",
+    "description": "Classic court sneaker #16! upper: canvas+mesh; outsole: rubber (sticky) -- comfy • breathable",
+    "declared_value_per_unit": 61.01,
+    "annual_volume": 1066028,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true,
+    "bom_text": "footwear mix :: 16 // materials include steel, rubber? canvas"
   },
   {
     "sku_id": "RW-FOOT-017",
-    "description": "Work boot, steel toe, rubber outsole",
-    "bom_text": "rubber sole, textile lining",
-    "declared_value_per_unit": 88.0,
-    "annual_volume": 44000,
+    "description": "Classic court sneaker #17! upper: canvas+mesh; outsole: rubber (sticky) -- comfy • breathable",
+    "declared_value_per_unit": 24.09,
+    "annual_volume": 1156891,
     "expected_category": "footwear",
-    "expect_at_least_one_suggestion": true
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "CN",
+    "export_country": "CN",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "POL-001",
+          "description": "polyester component",
+          "material": "polyester",
+          "quantity": 2,
+          "unit_cost": 3.59,
+          "country_of_origin": "CN"
+        }
+      ],
+      "currency": "USD"
+    }
   },
   {
-    "sku_id": "RW-FAST-018",
-    "description": "Fastener kit: assorted bolts/screws for assembly (messy text)",
-    "bom_text": "bolts, screws, washers in one polybag; steel; random mix",
-    "declared_value_per_unit": 1.1,
-    "annual_volume": 180000,
-    "expected_category": "fastener",
-    "expect_at_least_one_suggestion": true
+    "sku_id": "RW-FOOT-018",
+    "description": "Classic court sneaker #18! upper: canvas+mesh; outsole: rubber (sticky) -- comfy • breathable",
+    "declared_value_per_unit": 100.8,
+    "annual_volume": 1133856,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "VN",
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-18,steel,3,1.61,VN"
   },
   {
-    "sku_id": "RW-GAD-019",
-    "description": "USB gizmo w/ LED + little screw, not sure what it is",
-    "bom_text": "tiny pcb, screw, plastic shell",
-    "declared_value_per_unit": 7.4,
-    "annual_volume": 25000,
-    "expected_category": "unknown",
-    "expect_at_least_one_suggestion": false
+    "sku_id": "RW-FOOT-019",
+    "description": "Classic court sneaker #19! upper: canvas+mesh; outsole: rubber (sticky) -- comfy • breathable",
+    "declared_value_per_unit": 109.35,
+    "annual_volume": 807996,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true,
+    "bom_text": "footwear mix :: 19 // materials include steel, rubber? nylon"
   },
   {
     "sku_id": "RW-FOOT-020",
-    "description": "Slip-on canvas shoe with rubber sole",
-    "bom_text": "rubber sole 1pc, canvas upper",
-    "declared_value_per_unit": 45.0,
-    "annual_volume": 52000,
+    "description": "Classic court sneaker #20! upper: canvas+mesh; outsole: rubber (sticky) -- comfy • breathable",
+    "declared_value_per_unit": 105.74,
+    "annual_volume": 609665,
     "expected_category": "footwear",
-    "expect_at_least_one_suggestion": true
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "CN",
+    "export_country": "CN",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "RUB-001",
+          "description": "rubber component",
+          "material": "rubber",
+          "quantity": 2,
+          "unit_cost": 1.11,
+          "country_of_origin": "CN"
+        }
+      ],
+      "currency": "USD"
+    }
   },
   {
-    "sku_id": "RW-FAST-021",
-    "description": "High-strength steel bolt for wind turbine base",
-    "bom_text": "steel bolt, hot-dip galvanized",
-    "declared_value_per_unit": 5.5,
-    "annual_volume": 12000,
+    "sku_id": "RW-FAST-001",
+    "description": "Carbon steel bolt i=1; zinc-coated; chassis fastener\nthreaded ‣ size M5",
+    "declared_value_per_unit": 37.68,
+    "annual_volume": 546177,
     "expected_category": "fastener",
-    "expect_at_least_one_suggestion": true
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "CN",
+    "export_country": "CN",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "COT-001",
+          "description": "cotton component",
+          "material": "cotton",
+          "quantity": 2,
+          "unit_cost": 0.53,
+          "country_of_origin": "CN"
+        }
+      ],
+      "currency": "USD"
+    }
   },
   {
-    "sku_id": "RW-FOOT-022",
-    "description": "Sneaker w/ rubber sole and textile overlay >50%",
-    "bom_text": "rubber outsole + felt overlay around edge",
-    "declared_value_per_unit": 67.0,
-    "annual_volume": 30500,
-    "expected_category": "footwear",
-    "expect_at_least_one_suggestion": true
-  },
-  {
-    "sku_id": "RW-FAST-023",
-    "description": "Bolt set for aerospace jig (steel)",
-    "bom_text": "steel bolts, captive washer",
-    "declared_value_per_unit": 1.8,
-    "annual_volume": 76000,
+    "sku_id": "RW-FAST-002",
+    "description": "Carbon steel bolt i=2; zinc-coated; chassis fastener\nthreaded ‣ size M6",
+    "declared_value_per_unit": 123.78,
+    "annual_volume": 273900,
     "expected_category": "fastener",
-    "expect_at_least_one_suggestion": true
+    "expect_at_least_one_suggestion": true,
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-2,steel,1,2.96,"
   },
   {
-    "sku_id": "RW-FOOT-024",
-    "description": "Athletic shoe, rubber sole, textile upper",
-    "bom_text": "EVA midsole + rubber outsole + knit upper",
-    "declared_value_per_unit": 58.0,
-    "annual_volume": 89000,
-    "expected_category": "footwear",
-    "expect_at_least_one_suggestion": true
-  },
-  {
-    "sku_id": "RW-FAST-025",
-    "description": "Screw kit for consumer drone",
-    "bom_text": "steel screws, tiny bolt, plastic caps",
-    "declared_value_per_unit": 0.35,
-    "annual_volume": 96000,
+    "sku_id": "RW-FAST-003",
+    "description": "Carbon steel bolt i=3; zinc-coated; chassis fastener\nthreaded ‣ size M7",
+    "declared_value_per_unit": 162.18,
+    "annual_volume": 1134520,
     "expected_category": "fastener",
-    "expect_at_least_one_suggestion": true
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "US",
+    "bom_text": "fastener mix :: 3 // materials include steel, rubber? canvas"
   },
   {
-    "sku_id": "RW-FOOT-026",
-    "description": "Canvas espadrille, rubber sole",
-    "bom_text": "canvas upper, rubber outsole",
-    "declared_value_per_unit": 22.0,
-    "annual_volume": 67000,
-    "expected_category": "footwear",
-    "expect_at_least_one_suggestion": true
-  },
-  {
-    "sku_id": "RW-FAST-027",
-    "description": "Carriage bolt, steel, zinc plated",
-    "bom_text": "steel bolt", 
-    "declared_value_per_unit": 0.42,
-    "annual_volume": 330000,
+    "sku_id": "RW-FAST-004",
+    "description": "Carbon steel bolt i=4; zinc-coated; chassis fastener\nthreaded ‣ size M8",
+    "declared_value_per_unit": 151.63,
+    "annual_volume": 1100911,
     "expected_category": "fastener",
-    "expect_at_least_one_suggestion": true
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "CN",
+    "export_country": "CN",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "POL-001",
+          "description": "polyester component",
+          "material": "polyester",
+          "quantity": 2,
+          "unit_cost": 2.7,
+          "country_of_origin": "CN"
+        }
+      ],
+      "currency": "USD"
+    }
   },
   {
-    "sku_id": "RW-FOOT-028",
-    "description": "Leather sneaker with textile trim + rubber sole",
-    "bom_text": "rubber outsole, leather upper with textile collar",
-    "declared_value_per_unit": 110.0,
-    "annual_volume": 15000,
-    "expected_category": "footwear",
-    "expect_at_least_one_suggestion": true
-  },
-  {
-    "sku_id": "RW-FAST-029",
-    "description": "Bolt & screw assortment (steel) for field kit",
-    "bom_text": "bag with bolts + screws + washers", 
-    "declared_value_per_unit": 1.05,
-    "annual_volume": 120000,
+    "sku_id": "RW-FAST-005",
+    "description": "Carbon steel bolt i=5; zinc-coated; chassis fastener\nthreaded ‣ size M9",
+    "declared_value_per_unit": 46.21,
+    "annual_volume": 452109,
     "expected_category": "fastener",
-    "expect_at_least_one_suggestion": true
+    "expect_at_least_one_suggestion": true,
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-5,plastic,4,2.07,"
   },
   {
-    "sku_id": "RW-FOOT-030",
-    "description": "Outdoor sandal, rubber outsole, textile straps",
-    "bom_text": "rubber outsole, textile straps", 
-    "declared_value_per_unit": 35.5,
-    "annual_volume": 48000,
-    "expected_category": "footwear",
-    "expect_at_least_one_suggestion": true
-  },
-  {
-    "sku_id": "RW-FAST-031",
-    "description": "Steel lag screw for wood construction",
-    "bom_text": "steel lag screw", 
-    "declared_value_per_unit": 0.65,
-    "annual_volume": 86000,
+    "sku_id": "RW-FAST-006",
+    "description": "Carbon steel bolt i=6; zinc-coated; chassis fastener\nthreaded ‣ size M10",
+    "declared_value_per_unit": 83.85,
+    "annual_volume": 750254,
     "expected_category": "fastener",
-    "expect_at_least_one_suggestion": true
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "US",
+    "bom_text": "fastener mix :: 6 // materials include steel, rubber? cotton"
   },
   {
-    "sku_id": "RW-FOOT-032",
-    "description": "Slip-on sneaker, rubber outsole, textile upper",
-    "bom_text": "rubber sole + felt overlay near toe",
-    "declared_value_per_unit": 48.0,
-    "annual_volume": 57000,
-    "expected_category": "footwear",
-    "expect_at_least_one_suggestion": true
+    "sku_id": "RW-FAST-007",
+    "description": "Carbon steel bolt i=7; zinc-coated; chassis fastener\nthreaded ‣ size M11",
+    "declared_value_per_unit": 61.76,
+    "annual_volume": 242705,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "CN",
+    "export_country": "CN",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "COT-001",
+          "description": "cotton component",
+          "material": "cotton",
+          "quantity": 2,
+          "unit_cost": 3.02,
+          "country_of_origin": "CN"
+        }
+      ],
+      "currency": "USD"
+    }
   },
   {
-    "sku_id": "RW-GAD-033",
-    "description": "Mystery widget: plastic gizmo with tiny bolt & led",
-    "bom_text": "plastic shell, bolt, led, wire",
-    "declared_value_per_unit": 3.3,
-    "annual_volume": 9900,
+    "sku_id": "RW-FAST-008",
+    "description": "Carbon steel bolt i=8; zinc-coated; chassis fastener\nthreaded ‣ size M12",
+    "declared_value_per_unit": 63.67,
+    "annual_volume": 400053,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true,
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-8,steel,1,2.59,"
+  },
+  {
+    "sku_id": "RW-FAST-009",
+    "description": "Carbon steel bolt i=9; zinc-coated; chassis fastener\nthreaded ‣ size M13",
+    "declared_value_per_unit": 25.5,
+    "annual_volume": 463139,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "US",
+    "bom_text": "fastener mix :: 9 // materials include steel, rubber? nylon"
+  },
+  {
+    "sku_id": "RW-FAST-010",
+    "description": "Carbon steel bolt i=10; zinc-coated; chassis fastener\nthreaded ‣ size M14",
+    "declared_value_per_unit": 144.05,
+    "annual_volume": 698178,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "CN",
+    "export_country": "CN",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "COT-001",
+          "description": "cotton component",
+          "material": "cotton",
+          "quantity": 2,
+          "unit_cost": 4.12,
+          "country_of_origin": "CN"
+        }
+      ],
+      "currency": "USD"
+    }
+  },
+  {
+    "sku_id": "RW-FAST-011",
+    "description": "Carbon steel bolt i=11; zinc-coated; chassis fastener\nthreaded ‣ size M15",
+    "declared_value_per_unit": 22.61,
+    "annual_volume": 307735,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true,
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-11,plastic,2,0.25,"
+  },
+  {
+    "sku_id": "RW-FAST-012",
+    "description": "Carbon steel bolt i=12; zinc-coated; chassis fastener\nthreaded ‣ size M4",
+    "declared_value_per_unit": 105.43,
+    "annual_volume": 1121094,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "US",
+    "bom_text": "fastener mix :: 12 // materials include steel, rubber? ABS"
+  },
+  {
+    "sku_id": "RW-FAST-013",
+    "description": "Carbon steel bolt i=13; zinc-coated; chassis fastener\nthreaded ‣ size M5",
+    "declared_value_per_unit": 124.1,
+    "annual_volume": 56787,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "CN",
+    "export_country": "CN",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "STE-001",
+          "description": "steel component",
+          "material": "steel",
+          "quantity": 2,
+          "unit_cost": 3.25,
+          "country_of_origin": "CN"
+        }
+      ],
+      "currency": "USD"
+    }
+  },
+  {
+    "sku_id": "RW-FAST-014",
+    "description": "Carbon steel bolt i=14; zinc-coated; chassis fastener\nthreaded ‣ size M6",
+    "declared_value_per_unit": 111.11,
+    "annual_volume": 251819,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true,
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-14,textile,1,1.36,"
+  },
+  {
+    "sku_id": "RW-FAST-015",
+    "description": "Carbon steel bolt i=15; zinc-coated; chassis fastener\nthreaded ‣ size M7",
+    "declared_value_per_unit": 176.59,
+    "annual_volume": 77119,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "US",
+    "bom_text": "fastener mix :: 15 // materials include steel, rubber? ABS"
+  },
+  {
+    "sku_id": "RW-FAST-016",
+    "description": "Carbon steel bolt i=16; zinc-coated; chassis fastener\nthreaded ‣ size M8",
+    "declared_value_per_unit": 8.79,
+    "annual_volume": 388714,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "CN",
+    "export_country": "CN",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "STE-001",
+          "description": "steel component",
+          "material": "steel",
+          "quantity": 2,
+          "unit_cost": 2.5,
+          "country_of_origin": "CN"
+        }
+      ],
+      "currency": "USD"
+    }
+  },
+  {
+    "sku_id": "RW-FAST-017",
+    "description": "Carbon steel bolt i=17; zinc-coated; chassis fastener\nthreaded ‣ size M9",
+    "declared_value_per_unit": 132.25,
+    "annual_volume": 128904,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true,
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-17,plastic,1,1.95,"
+  },
+  {
+    "sku_id": "RW-FAST-018",
+    "description": "Carbon steel bolt i=18; zinc-coated; chassis fastener\nthreaded ‣ size M10",
+    "declared_value_per_unit": 113.6,
+    "annual_volume": 545891,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "US",
+    "bom_text": "fastener mix :: 18 // materials include steel, rubber? cotton"
+  },
+  {
+    "sku_id": "RW-FAST-019",
+    "description": "Carbon steel bolt i=19; zinc-coated; chassis fastener\nthreaded ‣ size M11",
+    "declared_value_per_unit": 43.65,
+    "annual_volume": 632171,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true,
+    "origin_country": "CN",
+    "export_country": "CN",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "POL-001",
+          "description": "polyester component",
+          "material": "polyester",
+          "quantity": 2,
+          "unit_cost": 2.29,
+          "country_of_origin": "CN"
+        }
+      ],
+      "currency": "USD"
+    }
+  },
+  {
+    "sku_id": "RW-FAST-020",
+    "description": "Carbon steel bolt i=20; zinc-coated; chassis fastener\nthreaded ‣ size M12",
+    "declared_value_per_unit": 15.68,
+    "annual_volume": 980445,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true,
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-20,steel,1,2.48,"
+  },
+  {
+    "sku_id": "RW-ELEC-001",
+    "description": "Smart PCB module 1; enclosure, stm32 + sensor pack; lithium-ready??",
+    "declared_value_per_unit": 73.47,
+    "annual_volume": 546338,
+    "expected_category": "electronics",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "MY",
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-1,textile,4,2.95,MY"
+  },
+  {
+    "sku_id": "RW-ELEC-002",
+    "description": "Smart PCB module 2; enclosure, stm32 + sensor pack; lithium-ready??",
+    "declared_value_per_unit": 165.73,
+    "annual_volume": 356109,
+    "expected_category": "electronics",
+    "expect_at_least_one_suggestion": false,
+    "bom_text": "electronics mix :: 2 // materials include steel, rubber? pcb"
+  },
+  {
+    "sku_id": "RW-ELEC-003",
+    "description": "Smart PCB module 3; enclosure, stm32 + sensor pack; lithium-ready??",
+    "declared_value_per_unit": 174.15,
+    "annual_volume": 122541,
+    "expected_category": "electronics",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "CN",
+    "export_country": "CN",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "RUB-001",
+          "description": "rubber component",
+          "material": "rubber",
+          "quantity": 2,
+          "unit_cost": 4.26,
+          "country_of_origin": "CN"
+        }
+      ],
+      "currency": "USD"
+    }
+  },
+  {
+    "sku_id": "RW-ELEC-004",
+    "description": "Smart PCB module 4; enclosure, stm32 + sensor pack; lithium-ready??",
+    "declared_value_per_unit": 64.9,
+    "annual_volume": 526529,
+    "expected_category": "electronics",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "MY",
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-4,steel,4,2.36,MY"
+  },
+  {
+    "sku_id": "RW-ELEC-005",
+    "description": "Smart PCB module 5; enclosure, stm32 + sensor pack; lithium-ready??",
+    "declared_value_per_unit": 7.31,
+    "annual_volume": 860433,
+    "expected_category": "electronics",
+    "expect_at_least_one_suggestion": false,
+    "bom_text": "electronics mix :: 5 // materials include steel, rubber? ABS"
+  },
+  {
+    "sku_id": "RW-ELEC-006",
+    "description": "Smart PCB module 6; enclosure, stm32 + sensor pack; lithium-ready??",
+    "declared_value_per_unit": 158.09,
+    "annual_volume": 653949,
+    "expected_category": "electronics",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "CN",
+    "export_country": "CN",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "POL-001",
+          "description": "polyester component",
+          "material": "polyester",
+          "quantity": 2,
+          "unit_cost": 2.07,
+          "country_of_origin": "CN"
+        }
+      ],
+      "currency": "USD"
+    }
+  },
+  {
+    "sku_id": "RW-ELEC-007",
+    "description": "Smart PCB module 7; enclosure, stm32 + sensor pack; lithium-ready??",
+    "declared_value_per_unit": 120.08,
+    "annual_volume": 322529,
+    "expected_category": "electronics",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "MY",
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-7,plastic,1,1.66,MY"
+  },
+  {
+    "sku_id": "RW-ELEC-008",
+    "description": "Smart PCB module 8; enclosure, stm32 + sensor pack; lithium-ready??",
+    "declared_value_per_unit": 18.84,
+    "annual_volume": 96632,
+    "expected_category": "electronics",
+    "expect_at_least_one_suggestion": false,
+    "bom_text": "electronics mix :: 8 // materials include steel, rubber? ABS"
+  },
+  {
+    "sku_id": "RW-ELEC-009",
+    "description": "Smart PCB module 9; enclosure, stm32 + sensor pack; lithium-ready??",
+    "declared_value_per_unit": 54.15,
+    "annual_volume": 504389,
+    "expected_category": "electronics",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "CN",
+    "export_country": "CN",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "COT-001",
+          "description": "cotton component",
+          "material": "cotton",
+          "quantity": 2,
+          "unit_cost": 1.89,
+          "country_of_origin": "CN"
+        }
+      ],
+      "currency": "USD"
+    }
+  },
+  {
+    "sku_id": "RW-ELEC-010",
+    "description": "Smart PCB module 10; enclosure, stm32 + sensor pack; lithium-ready??",
+    "declared_value_per_unit": 55.38,
+    "annual_volume": 754099,
+    "expected_category": "electronics",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "MY",
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-10,plastic,2,2.53,MY"
+  },
+  {
+    "sku_id": "RW-ELEC-011",
+    "description": "Smart PCB module 11; enclosure, stm32 + sensor pack; lithium-ready??",
+    "declared_value_per_unit": 72.9,
+    "annual_volume": 869897,
+    "expected_category": "electronics",
+    "expect_at_least_one_suggestion": false,
+    "bom_text": "electronics mix :: 11 // materials include steel, rubber? cotton"
+  },
+  {
+    "sku_id": "RW-ELEC-012",
+    "description": "Smart PCB module 12; enclosure, stm32 + sensor pack; lithium-ready??",
+    "declared_value_per_unit": 5.27,
+    "annual_volume": 404102,
+    "expected_category": "electronics",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "CN",
+    "export_country": "CN",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "POL-001",
+          "description": "polyester component",
+          "material": "polyester",
+          "quantity": 2,
+          "unit_cost": 0.97,
+          "country_of_origin": "CN"
+        }
+      ],
+      "currency": "USD"
+    }
+  },
+  {
+    "sku_id": "RW-ELEC-013",
+    "description": "Smart PCB module 13; enclosure, stm32 + sensor pack; lithium-ready??",
+    "declared_value_per_unit": 44.04,
+    "annual_volume": 940607,
+    "expected_category": "electronics",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "MY",
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-13,textile,4,0.21,MY"
+  },
+  {
+    "sku_id": "RW-ELEC-014",
+    "description": "Smart PCB module 14; enclosure, stm32 + sensor pack; lithium-ready??",
+    "declared_value_per_unit": 157.55,
+    "annual_volume": 1190875,
+    "expected_category": "electronics",
+    "expect_at_least_one_suggestion": false,
+    "bom_text": "electronics mix :: 14 // materials include steel, rubber? canvas"
+  },
+  {
+    "sku_id": "RW-ELEC-015",
+    "description": "Smart PCB module 15; enclosure, stm32 + sensor pack; lithium-ready??",
+    "declared_value_per_unit": 140.13,
+    "annual_volume": 98904,
+    "expected_category": "electronics",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "CN",
+    "export_country": "CN",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "RUB-001",
+          "description": "rubber component",
+          "material": "rubber",
+          "quantity": 2,
+          "unit_cost": 2.34,
+          "country_of_origin": "CN"
+        }
+      ],
+      "currency": "USD"
+    }
+  },
+  {
+    "sku_id": "RW-ELEC-016",
+    "description": "Smart PCB module 16; enclosure, stm32 + sensor pack; lithium-ready??",
+    "declared_value_per_unit": 50.36,
+    "annual_volume": 331492,
+    "expected_category": "electronics",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "MY",
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-16,textile,4,3.19,MY"
+  },
+  {
+    "sku_id": "RW-ELEC-017",
+    "description": "Smart PCB module 17; enclosure, stm32 + sensor pack; lithium-ready??",
+    "declared_value_per_unit": 110.7,
+    "annual_volume": 945,
+    "expected_category": "electronics",
+    "expect_at_least_one_suggestion": false,
+    "bom_text": "electronics mix :: 17 // materials include steel, rubber? cotton"
+  },
+  {
+    "sku_id": "RW-ELEC-018",
+    "description": "Smart PCB module 18; enclosure, stm32 + sensor pack; lithium-ready??",
+    "declared_value_per_unit": 91.55,
+    "annual_volume": 655233,
+    "expected_category": "electronics",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "CN",
+    "export_country": "CN",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "COT-001",
+          "description": "cotton component",
+          "material": "cotton",
+          "quantity": 2,
+          "unit_cost": 0.44,
+          "country_of_origin": "CN"
+        }
+      ],
+      "currency": "USD"
+    }
+  },
+  {
+    "sku_id": "RW-ELEC-019",
+    "description": "Smart PCB module 19; enclosure, stm32 + sensor pack; lithium-ready??",
+    "declared_value_per_unit": 148.98,
+    "annual_volume": 871406,
+    "expected_category": "electronics",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "MY",
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-19,steel,1,2.95,MY"
+  },
+  {
+    "sku_id": "RW-ELEC-020",
+    "description": "Smart PCB module 20; enclosure, stm32 + sensor pack; lithium-ready??",
+    "declared_value_per_unit": 27.84,
+    "annual_volume": 31689,
+    "expected_category": "electronics",
+    "expect_at_least_one_suggestion": false,
+    "bom_text": "electronics mix :: 20 // materials include steel, rubber? canvas"
+  },
+  {
+    "sku_id": "RW-APP-001",
+    "description": "Stretch knit hoodie 1; cotton/poly blend, coated panels;\n• moisture-wicking",
+    "declared_value_per_unit": 171.17,
+    "annual_volume": 876329,
+    "expected_category": "apparel_textile",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "CA",
+    "export_country": "CA",
+    "import_country": "US",
+    "bom_text": "apparel_textile mix :: 1 // materials include steel, rubber? nylon"
+  },
+  {
+    "sku_id": "RW-APP-002",
+    "description": "Stretch knit hoodie 2; cotton/poly blend, coated panels;\n• moisture-wicking",
+    "declared_value_per_unit": 5.59,
+    "annual_volume": 30771,
+    "expected_category": "apparel_textile",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "MX",
+    "export_country": "MX",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "STE-001",
+          "description": "steel component",
+          "material": "steel",
+          "quantity": 2,
+          "unit_cost": 4.91,
+          "country_of_origin": "MX"
+        }
+      ],
+      "currency": "USD"
+    }
+  },
+  {
+    "sku_id": "RW-APP-003",
+    "description": "Stretch knit hoodie 3; cotton/poly blend, coated panels;\n• moisture-wicking",
+    "declared_value_per_unit": 123.26,
+    "annual_volume": 205868,
+    "expected_category": "apparel_textile",
+    "expect_at_least_one_suggestion": false,
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-3,steel,1,2.17,"
+  },
+  {
+    "sku_id": "RW-APP-004",
+    "description": "Stretch knit hoodie 4; cotton/poly blend, coated panels;\n• moisture-wicking",
+    "declared_value_per_unit": 39.74,
+    "annual_volume": 635012,
+    "expected_category": "apparel_textile",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "CA",
+    "export_country": "CA",
+    "import_country": "US",
+    "bom_text": "apparel_textile mix :: 4 // materials include steel, rubber? nylon"
+  },
+  {
+    "sku_id": "RW-APP-005",
+    "description": "Stretch knit hoodie 5; cotton/poly blend, coated panels;\n• moisture-wicking",
+    "declared_value_per_unit": 125.49,
+    "annual_volume": 382945,
+    "expected_category": "apparel_textile",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "MX",
+    "export_country": "MX",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "STE-001",
+          "description": "steel component",
+          "material": "steel",
+          "quantity": 2,
+          "unit_cost": 2.48,
+          "country_of_origin": "MX"
+        }
+      ],
+      "currency": "USD"
+    }
+  },
+  {
+    "sku_id": "RW-APP-006",
+    "description": "Stretch knit hoodie 6; cotton/poly blend, coated panels;\n• moisture-wicking",
+    "declared_value_per_unit": 166.48,
+    "annual_volume": 171393,
+    "expected_category": "apparel_textile",
+    "expect_at_least_one_suggestion": false,
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-6,steel,3,3.21,"
+  },
+  {
+    "sku_id": "RW-APP-007",
+    "description": "Stretch knit hoodie 7; cotton/poly blend, coated panels;\n• moisture-wicking",
+    "declared_value_per_unit": 144.97,
+    "annual_volume": 243606,
+    "expected_category": "apparel_textile",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "CA",
+    "export_country": "CA",
+    "import_country": "US",
+    "bom_text": "apparel_textile mix :: 7 // materials include steel, rubber? nylon"
+  },
+  {
+    "sku_id": "RW-APP-008",
+    "description": "Stretch knit hoodie 8; cotton/poly blend, coated panels;\n• moisture-wicking",
+    "declared_value_per_unit": 28.35,
+    "annual_volume": 1093134,
+    "expected_category": "apparel_textile",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "MX",
+    "export_country": "MX",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "POL-001",
+          "description": "polyester component",
+          "material": "polyester",
+          "quantity": 2,
+          "unit_cost": 0.75,
+          "country_of_origin": "MX"
+        }
+      ],
+      "currency": "USD"
+    }
+  },
+  {
+    "sku_id": "RW-APP-009",
+    "description": "Stretch knit hoodie 9; cotton/poly blend, coated panels;\n• moisture-wicking",
+    "declared_value_per_unit": 32.03,
+    "annual_volume": 39753,
+    "expected_category": "apparel_textile",
+    "expect_at_least_one_suggestion": false,
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-9,steel,1,0.8,"
+  },
+  {
+    "sku_id": "RW-APP-010",
+    "description": "Stretch knit hoodie 10; cotton/poly blend, coated panels;\n• moisture-wicking",
+    "declared_value_per_unit": 50.44,
+    "annual_volume": 660801,
+    "expected_category": "apparel_textile",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "CA",
+    "export_country": "CA",
+    "import_country": "US",
+    "bom_text": "apparel_textile mix :: 10 // materials include steel, rubber? nylon"
+  },
+  {
+    "sku_id": "RW-APP-011",
+    "description": "Stretch knit hoodie 11; cotton/poly blend, coated panels;\n• moisture-wicking",
+    "declared_value_per_unit": 169.23,
+    "annual_volume": 88889,
+    "expected_category": "apparel_textile",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "MX",
+    "export_country": "MX",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "PCB-001",
+          "description": "pcb component",
+          "material": "pcb",
+          "quantity": 2,
+          "unit_cost": 3.35,
+          "country_of_origin": "MX"
+        }
+      ],
+      "currency": "USD"
+    }
+  },
+  {
+    "sku_id": "RW-APP-012",
+    "description": "Stretch knit hoodie 12; cotton/poly blend, coated panels;\n• moisture-wicking",
+    "declared_value_per_unit": 129.66,
+    "annual_volume": 962688,
+    "expected_category": "apparel_textile",
+    "expect_at_least_one_suggestion": false,
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-12,plastic,4,1.37,"
+  },
+  {
+    "sku_id": "RW-APP-013",
+    "description": "Stretch knit hoodie 13; cotton/poly blend, coated panels;\n• moisture-wicking",
+    "declared_value_per_unit": 99.14,
+    "annual_volume": 436680,
+    "expected_category": "apparel_textile",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "CA",
+    "export_country": "CA",
+    "import_country": "US",
+    "bom_text": "apparel_textile mix :: 13 // materials include steel, rubber? canvas"
+  },
+  {
+    "sku_id": "RW-APP-014",
+    "description": "Stretch knit hoodie 14; cotton/poly blend, coated panels;\n• moisture-wicking",
+    "declared_value_per_unit": 107.75,
+    "annual_volume": 19458,
+    "expected_category": "apparel_textile",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "MX",
+    "export_country": "MX",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "RUB-001",
+          "description": "rubber component",
+          "material": "rubber",
+          "quantity": 2,
+          "unit_cost": 0.92,
+          "country_of_origin": "MX"
+        }
+      ],
+      "currency": "USD"
+    }
+  },
+  {
+    "sku_id": "RW-APP-015",
+    "description": "Stretch knit hoodie 15; cotton/poly blend, coated panels;\n• moisture-wicking",
+    "declared_value_per_unit": 63.35,
+    "annual_volume": 770877,
+    "expected_category": "apparel_textile",
+    "expect_at_least_one_suggestion": false,
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-15,plastic,1,1.25,"
+  },
+  {
+    "sku_id": "RW-APP-016",
+    "description": "Stretch knit hoodie 16; cotton/poly blend, coated panels;\n• moisture-wicking",
+    "declared_value_per_unit": 113.59,
+    "annual_volume": 87208,
+    "expected_category": "apparel_textile",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "CA",
+    "export_country": "CA",
+    "import_country": "US",
+    "bom_text": "apparel_textile mix :: 16 // materials include steel, rubber? nylon"
+  },
+  {
+    "sku_id": "RW-APP-017",
+    "description": "Stretch knit hoodie 17; cotton/poly blend, coated panels;\n• moisture-wicking",
+    "declared_value_per_unit": 33.68,
+    "annual_volume": 607990,
+    "expected_category": "apparel_textile",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "MX",
+    "export_country": "MX",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "POL-001",
+          "description": "polyester component",
+          "material": "polyester",
+          "quantity": 2,
+          "unit_cost": 2.1,
+          "country_of_origin": "MX"
+        }
+      ],
+      "currency": "USD"
+    }
+  },
+  {
+    "sku_id": "RW-APP-018",
+    "description": "Stretch knit hoodie 18; cotton/poly blend, coated panels;\n• moisture-wicking",
+    "declared_value_per_unit": 100.98,
+    "annual_volume": 616119,
+    "expected_category": "apparel_textile",
+    "expect_at_least_one_suggestion": false,
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-18,steel,4,2.58,"
+  },
+  {
+    "sku_id": "RW-APP-019",
+    "description": "Stretch knit hoodie 19; cotton/poly blend, coated panels;\n• moisture-wicking",
+    "declared_value_per_unit": 168.41,
+    "annual_volume": 646470,
+    "expected_category": "apparel_textile",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "CA",
+    "export_country": "CA",
+    "import_country": "US",
+    "bom_text": "apparel_textile mix :: 19 // materials include steel, rubber? pcb"
+  },
+  {
+    "sku_id": "RW-APP-020",
+    "description": "Stretch knit hoodie 20; cotton/poly blend, coated panels;\n• moisture-wicking",
+    "declared_value_per_unit": 154.98,
+    "annual_volume": 149410,
+    "expected_category": "apparel_textile",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "MX",
+    "export_country": "MX",
+    "import_country": "US",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "POL-001",
+          "description": "polyester component",
+          "material": "polyester",
+          "quantity": 2,
+          "unit_cost": 2.14,
+          "country_of_origin": "MX"
+        }
+      ],
+      "currency": "USD"
+    }
+  },
+  {
+    "sku_id": "RW-MYST-001",
+    "description": "Box of mixed parts 1: screws + fabric scraps? maybe gadgets; description fuzzy...",
+    "declared_value_per_unit": 62.49,
+    "annual_volume": 870534,
     "expected_category": "unknown",
-    "expect_at_least_one_suggestion": false
+    "expect_at_least_one_suggestion": false,
+    "bom_text": "unknown mix :: 1 // materials include steel, rubber? cotton"
   },
   {
-    "sku_id": "RW-FOOT-034",
-    "description": "Trail runner shoe, rubber sole, knit upper, felt overlay",
-    "bom_text": "rubber outsole + felt overlay around lugs",
-    "declared_value_per_unit": 92.0,
-    "annual_volume": 43000,
-    "expected_category": "footwear",
-    "expect_at_least_one_suggestion": true
+    "sku_id": "RW-MYST-002",
+    "description": "Box of mixed parts 2: screws + fabric scraps? maybe gadgets; description fuzzy...",
+    "declared_value_per_unit": 22.4,
+    "annual_volume": 1009891,
+    "expected_category": "unknown",
+    "expect_at_least_one_suggestion": false,
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-2,textile,3,2.96,"
   },
   {
-    "sku_id": "RW-FAST-035",
-    "description": "Tiny steel screw (M2) for glasses repair",
-    "bom_text": "steel screw",
-    "declared_value_per_unit": 0.05,
-    "annual_volume": 500000,
-    "expected_category": "fastener",
-    "expect_at_least_one_suggestion": true
+    "sku_id": "RW-MYST-003",
+    "description": "Box of mixed parts 3: screws + fabric scraps? maybe gadgets; description fuzzy...",
+    "declared_value_per_unit": 175.84,
+    "annual_volume": 721489,
+    "expected_category": "unknown",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "GB",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "STE-001",
+          "description": "steel component",
+          "material": "steel",
+          "quantity": 2,
+          "unit_cost": 2.5,
+          "country_of_origin": "GB"
+        }
+      ],
+      "currency": "USD"
+    }
   },
   {
-    "sku_id": "RW-FOOT-036",
-    "description": "Fashion boot w/ rubber sole + textile overlay",
-    "bom_text": "rubber sole with felt overlay 60%",
-    "declared_value_per_unit": 130.0,
-    "annual_volume": 21000,
-    "expected_category": "footwear",
-    "expect_at_least_one_suggestion": true
+    "sku_id": "RW-MYST-004",
+    "description": "Box of mixed parts 4: screws + fabric scraps? maybe gadgets; description fuzzy...",
+    "declared_value_per_unit": 127.43,
+    "annual_volume": 895309,
+    "expected_category": "unknown",
+    "expect_at_least_one_suggestion": false,
+    "bom_text": "unknown mix :: 4 // materials include steel, rubber? cotton"
   },
   {
-    "sku_id": "RW-FAST-037",
-    "description": "Steel screw with plastic cap",
-    "bom_text": "steel screw, plastic cap",
-    "declared_value_per_unit": 0.12,
-    "annual_volume": 145000,
-    "expected_category": "fastener",
-    "expect_at_least_one_suggestion": true
+    "sku_id": "RW-MYST-005",
+    "description": "Box of mixed parts 5: screws + fabric scraps? maybe gadgets; description fuzzy...",
+    "declared_value_per_unit": 57.83,
+    "annual_volume": 327251,
+    "expected_category": "unknown",
+    "expect_at_least_one_suggestion": false,
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-5,steel,4,2.84,"
   },
   {
-    "sku_id": "RW-FOOT-038",
-    "description": "Canvas high-top sneaker, rubber outsole",
-    "bom_text": "canvas upper, rubber outsole",
-    "declared_value_per_unit": 75.0,
-    "annual_volume": 36000,
-    "expected_category": "footwear",
-    "expect_at_least_one_suggestion": true
+    "sku_id": "RW-MYST-006",
+    "description": "Box of mixed parts 6: screws + fabric scraps? maybe gadgets; description fuzzy...",
+    "declared_value_per_unit": 178.51,
+    "annual_volume": 183088,
+    "expected_category": "unknown",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "GB",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "STE-001",
+          "description": "steel component",
+          "material": "steel",
+          "quantity": 2,
+          "unit_cost": 4.08,
+          "country_of_origin": "GB"
+        }
+      ],
+      "currency": "USD"
+    }
   },
   {
-    "sku_id": "RW-FAST-039",
-    "description": "Steel screw kit + random washers",
-    "bom_text": "steel screws, washers",
-    "declared_value_per_unit": 0.3,
-    "annual_volume": 160000,
-    "expected_category": "fastener",
-    "expect_at_least_one_suggestion": true
+    "sku_id": "RW-MYST-007",
+    "description": "Box of mixed parts 7: screws + fabric scraps? maybe gadgets; description fuzzy...",
+    "declared_value_per_unit": 39.66,
+    "annual_volume": 464393,
+    "expected_category": "unknown",
+    "expect_at_least_one_suggestion": false,
+    "bom_text": "unknown mix :: 7 // materials include steel, rubber? cotton"
   },
   {
-    "sku_id": "RW-FOOT-040",
-    "description": "Slip-on textile slipper with rubber sole (messy unicode \u2603)",
-    "bom_text": "textile upper, rubber outsole",
-    "declared_value_per_unit": 18.0,
-    "annual_volume": 88000,
-    "expected_category": "footwear",
-    "expect_at_least_one_suggestion": true
+    "sku_id": "RW-MYST-008",
+    "description": "Box of mixed parts 8: screws + fabric scraps? maybe gadgets; description fuzzy...",
+    "declared_value_per_unit": 72.34,
+    "annual_volume": 206481,
+    "expected_category": "unknown",
+    "expect_at_least_one_suggestion": false,
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\nP1,line-8,textile,3,1.63,"
+  },
+  {
+    "sku_id": "RW-MYST-009",
+    "description": "Box of mixed parts 9: screws + fabric scraps? maybe gadgets; description fuzzy...",
+    "declared_value_per_unit": 90.51,
+    "annual_volume": 456413,
+    "expected_category": "unknown",
+    "expect_at_least_one_suggestion": false,
+    "origin_country": "GB",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "COT-001",
+          "description": "cotton component",
+          "material": "cotton",
+          "quantity": 2,
+          "unit_cost": 0.6,
+          "country_of_origin": "GB"
+        }
+      ],
+      "currency": "USD"
+    }
+  },
+  {
+    "sku_id": "RW-MYST-010",
+    "description": "Box of mixed parts 10: screws + fabric scraps? maybe gadgets; description fuzzy...",
+    "declared_value_per_unit": 43.52,
+    "annual_volume": 547981,
+    "expected_category": "unknown",
+    "expect_at_least_one_suggestion": false,
+    "bom_text": "unknown mix :: 10 // materials include steel, rubber? ABS"
   }
 ]

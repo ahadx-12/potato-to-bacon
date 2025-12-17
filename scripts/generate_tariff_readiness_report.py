@@ -125,9 +125,59 @@ def _render_category_snapshot(categories: Dict[str, int]) -> str:
     if not categories:
         return "No category data captured."
     lines = []
-    for category, count in sorted(categories.items()):
+    for category, metrics in sorted(categories.items()):
+        count = metrics.get("processed", 0) if isinstance(metrics, dict) else metrics
         lines.append(f"- {category}: {count} SKUs")
     return "\n".join(lines)
+
+
+def _render_category_scorecard(by_category: Dict[str, Dict[str, object]]) -> str:
+    if not by_category:
+        return "No category coverage recorded."
+    lines = ["| Category | Processed | OK rate | NO_CANDIDATES | Errors | Avg annual savings | Avg risk | Load-bearing evidence |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
+    for category in sorted(by_category):
+        metrics = by_category[category]
+        lines.append(
+            "| {cat} | {processed} | {ok_rate:.1f}% | {no_cand} | {errors} | {avg_savings} | {avg_risk} | {load_bearing:.1f}% |".format(
+                cat=category,
+                processed=metrics.get("processed", 0),
+                ok_rate=metrics.get("ok_rate", 0.0),
+                no_cand=metrics.get("no_candidates", 0),
+                errors=metrics.get("errors", 0),
+                avg_savings=(
+                    f"${metrics['avg_best_annual_savings']:.2f}" if metrics.get("avg_best_annual_savings") is not None else "n/a"
+                ),
+                avg_risk=f"{metrics['avg_risk_score']:.1f}" if metrics.get("avg_risk_score") is not None else "n/a",
+                load_bearing=metrics.get("load_bearing_evidence_rate", 0.0),
+            )
+        )
+    return "\n".join(lines)
+
+
+def _compute_known_limitations(aggregates: Dict[str, object]) -> list[str]:
+    limitations: list[str] = []
+    by_category = aggregates.get("by_category", {}) or {}
+    if by_category:
+        max_no_candidates = max((metrics.get("no_candidates", 0) for metrics in by_category.values()), default=0)
+        worst_no_candidates = [
+            name for name, metrics in by_category.items() if metrics.get("no_candidates", 0) == max_no_candidates and max_no_candidates > 0
+        ]
+        if worst_no_candidates:
+            limitations.append(f"Highest NO_CANDIDATES: {', '.join(sorted(worst_no_candidates))} ({max_no_candidates})")
+
+    unknown_bucket = by_category.get("other") or {}
+    unknown_processed = unknown_bucket.get("processed", 0)
+    if unknown_processed:
+        limitations.append(f"Unknown classification volume remains {unknown_processed}")
+
+    origin_stats = aggregates.get("origin_stats", {}) or {}
+    limitations.append(
+        f"Origin missing rate: {100.0 - origin_stats.get('pct_origin_provided', 0.0):.1f}%"
+    )
+    limitations.append(
+        f"AD/CVD possible rate: {origin_stats.get('pct_ad_cvd_possible', 0.0):.1f}%"
+    )
+    return limitations
 
 
 def generate_report() -> Path:
@@ -151,11 +201,15 @@ def generate_report() -> Path:
     risk_distribution = aggregates.get("risk_distribution", {})
     risk_lines = [f"- {grade}: {count}" for grade, count in sorted(risk_distribution.items())]
     evidence = aggregates.get("evidence", {})
-
+    evidence_coverage = aggregates.get("evidence_coverage_rate", 0.0)
+    load_bearing_rate = aggregates.get("load_bearing_evidence_rate", 0.0)
+    by_category = aggregates.get("by_category", {})
     improvements = _build_improvement_plan(aggregates)
+    limitations = _compute_known_limitations(aggregates)
 
     determinism = results.get("determinism", {})
     determinism_status = "PASS" if determinism.get("passed") else "FAIL"
+    origin_stats = aggregates.get("origin_stats", {})
 
     content = f"""# CALE-TARIFF Readiness Audit — {timestamp}
 
@@ -166,12 +220,22 @@ def generate_report() -> Path:
 - Determinism & proof replay: **{determinism_status}**
 
 ## Coverage snapshot
-{_render_category_snapshot(aggregates.get('category_breakdown', {}))}
+{_render_category_snapshot(by_category or aggregates.get('category_breakdown', {}))}
+
+## Category scorecard
+{_render_category_scorecard(by_category)}
 
 ## Evidence quality summary
 - Facts with evidence: {evidence.get('facts_with_evidence', 0)} / {evidence.get('total_facts', 0)}
 - Snippets captured: {evidence.get('snippets', 0)}
 - Evidence requested: **True**
+- Evidence coverage: {_format_percentage(evidence_coverage)}
+- Load-bearing evidence: {_format_percentage(load_bearing_rate)}
+
+## Origin and AD/CVD overview
+- Origin provided: {_format_percentage(origin_stats.get('pct_origin_provided'))}
+- Requires origin data: {_format_percentage(origin_stats.get('pct_requires_origin_data'))}
+- AD/CVD possible: {_format_percentage(origin_stats.get('pct_ad_cvd_possible'))}
 
 ## Proof replay integrity summary
 - Determinism check: **{determinism_status}**
@@ -181,9 +245,7 @@ def generate_report() -> Path:
 {chr(10).join(risk_lines) if risk_lines else 'No risk grades recorded.'}
 
 ## Known limitations
-- NO_CANDIDATES: {aggregates.get('no_candidates', 0)}
-- Errors: {aggregates.get('errors', 0)}
-- Gaps: limited electronics/textile coverage; no AD/CVD or origin logic; mutation library narrow.
+{chr(10).join(f"- {item}" for item in limitations) if limitations else '- None recorded'}
 
 ## Top 10 improvements
 {chr(10).join(improvements)}
