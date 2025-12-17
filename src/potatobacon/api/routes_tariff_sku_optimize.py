@@ -53,5 +53,6 @@ def sku_optimize(
         law_context=result.law_context,
         tariff_manifest_hash=result.tariff_manifest_hash,
         proof_id=result.proof_id,
+        proof_payload_hash=result.proof_payload_hash,
         provenance_chain=result.provenance_chain,
     )

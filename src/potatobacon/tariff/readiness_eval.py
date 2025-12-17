@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import statistics
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+from potatobacon.proofs.canonical import compute_payload_hash
 from potatobacon.proofs.store import get_default_store
 from potatobacon.tariff.models import TariffSuggestRequestModel
 from potatobacon.tariff.product_schema import ProductCategory
@@ -30,16 +30,6 @@ def _annualized_savings(best, annual_volume: int | None) -> float | None:
     if best.savings_per_unit_value is not None and annual_volume is not None:
         return float(best.savings_per_unit_value) * annual_volume
     return float(best.savings_per_unit_value) if best.savings_per_unit_value is not None else None
-
-
-def _normalized_proof_hash(proof: Dict[str, Any] | None) -> str | None:
-    if not proof:
-        return None
-    sanitized = dict(proof)
-    sanitized.pop("timestamp", None)
-    sanitized.pop("proof_id", None)
-    material = json.dumps(sanitized, sort_keys=True)
-    return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
 def _evidence_quality(fact_evidence: list | None) -> Tuple[int, int]:
@@ -217,23 +207,37 @@ def run_readiness_eval(law_context: str | None = None, top_k: int = 3, include_e
         first_best = first.suggestions[0] if first.suggestions else None
         second_best = second.suggestions[0] if second.suggestions else None
 
-        stable = (
-            first_best is not None
-            and second_best is not None
-            and first_best.optimized_duty_rate == second_best.optimized_duty_rate
-            and first_best.best_mutation == second_best.best_mutation
-            and first_best.law_context == second_best.law_context
-            and first_best.tariff_manifest_hash == second_best.tariff_manifest_hash
-        )
+        if not first_best and not second_best:
+            stable = first.status == second.status == "NO_CANDIDATES"
+        else:
+            stable = (
+                first_best is not None
+                and second_best is not None
+                and first_best.optimized_duty_rate == second_best.optimized_duty_rate
+                and first_best.baseline_duty_rate == second_best.baseline_duty_rate
+                and first_best.best_mutation == second_best.best_mutation
+                and first_best.law_context == second_best.law_context
+                and first_best.tariff_manifest_hash == second_best.tariff_manifest_hash
+                and first_best.active_codes_optimized == second_best.active_codes_optimized
+                and first_best.proof_payload_hash == second_best.proof_payload_hash
+            )
 
-        proof_hash_first = _normalized_proof_hash(
-            proof_store.get_proof(first_best.proof_id) if first_best else None
-        )
-        proof_hash_second = _normalized_proof_hash(
-            proof_store.get_proof(second_best.proof_id) if second_best else None
-        )
-        if proof_hash_first and proof_hash_second:
-            stable = stable and proof_hash_first == proof_hash_second
+            proof_first = proof_store.get_proof(first_best.proof_id) if first_best else None
+            proof_second = proof_store.get_proof(second_best.proof_id) if second_best else None
+
+            def _replay_hash(proof: Dict[str, Any] | None) -> str | None:
+                if not proof:
+                    return None
+                return compute_payload_hash(proof)
+
+            proof_hash_first = _replay_hash(proof_first)
+            proof_hash_second = _replay_hash(proof_second)
+            if proof_hash_first and proof_hash_second:
+                stable = stable and proof_hash_first == proof_hash_second
+            if proof_first and proof_hash_first:
+                stable = stable and proof_first.get("proof_payload_hash") == proof_hash_first
+            if proof_second and proof_hash_second:
+                stable = stable and proof_second.get("proof_payload_hash") == proof_hash_second
 
         determinism_passed = determinism_passed and stable
         determinism_details.append(

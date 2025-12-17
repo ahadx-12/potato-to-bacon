@@ -98,6 +98,14 @@ def run_tariff_hack(
     provenance_chain: list[Dict[str, Any]] = []
     provenance_chain.extend(_build_provenance(duty_atoms_baseline, "baseline"))
     provenance_chain.extend(_build_provenance(duty_atoms_optimized, "optimized"))
+    provenance_chain.sort(
+        key=lambda item: (
+            item.get("source_id", ""),
+            item.get("section", ""),
+            item.get("text", ""),
+            item.get("scenario", ""),
+        )
+    )
 
     metrics = {
         "status": status,
@@ -108,7 +116,7 @@ def run_tariff_hack(
         "tariff_manifest_hash": context_meta["manifest_hash"],
     }
 
-    proof_id = record_tariff_proof(
+    proof_handle = record_tariff_proof(
         law_context=context,
         base_facts=baseline.facts,
         mutations=mutations,
@@ -116,14 +124,20 @@ def run_tariff_hack(
         optimized_active=active_atoms_optimized,
         baseline_sat=sat_baseline,
         optimized_sat=sat_optimized,
+        baseline_duty_rate=baseline_rate,
+        optimized_duty_rate=optimized_rate,
+        baseline_scenario=baseline.facts,
+        optimized_scenario=optimized.facts,
         baseline_unsat_core=unsat_core_baseline,
         optimized_unsat_core=unsat_core_optimized,
+        provenance_chain=provenance_chain,
         evidence_pack=evidence_pack,
         tariff_manifest_hash=context_meta["manifest_hash"],
     )
 
     dossier = TariffDossierModel(
-        proof_id=proof_id,
+        proof_id=proof_handle.proof_id,
+        proof_payload_hash=proof_handle.proof_payload_hash,
         law_context=context,
         status=status,
         baseline_duty_rate=baseline_rate,
@@ -131,8 +145,8 @@ def run_tariff_hack(
         savings_per_unit=savings,
         baseline_scenario=baseline.facts,
         optimized_scenario=optimized.facts,
-        active_codes_baseline=[atom.source_id for atom in duty_atoms_baseline],
-        active_codes_optimized=[atom.source_id for atom in duty_atoms_optimized],
+        active_codes_baseline=sorted([atom.source_id for atom in duty_atoms_baseline]),
+        active_codes_optimized=sorted([atom.source_id for atom in duty_atoms_optimized]),
         provenance_chain=provenance_chain,
         tariff_manifest_hash=context_meta["manifest_hash"],
         metrics=metrics,
@@ -169,7 +183,13 @@ def explain_tariff_scenario(
             )
         explanation = "\n".join(parts)
 
-    proof_id = record_tariff_proof(
+    duty_rate: float | None = None
+    try:
+        duty_rate = compute_duty_rate(atoms, scenario)
+    except Exception:
+        duty_rate = None
+
+    proof_handle = record_tariff_proof(
         law_context=context,
         base_facts=scenario.facts,
         mutations=mutations,
@@ -177,6 +197,10 @@ def explain_tariff_scenario(
         optimized_active=active_atoms,
         baseline_sat=is_sat,
         optimized_sat=is_sat,
+        baseline_duty_rate=duty_rate,
+        optimized_duty_rate=duty_rate,
+        baseline_scenario=scenario.facts,
+        optimized_scenario=scenario.facts,
         baseline_unsat_core=unsat_core,
         optimized_unsat_core=unsat_core,
         tariff_manifest_hash=context_meta["manifest_hash"],
@@ -185,7 +209,8 @@ def explain_tariff_scenario(
     return TariffExplainResponseModel(
         status="SAT" if is_sat else "UNSAT",
         explanation=explanation,
-        proof_id=proof_id,
+        proof_id=proof_handle.proof_id,
+        proof_payload_hash=proof_handle.proof_payload_hash,
         law_context=context,
         unsat_core=[
             {
