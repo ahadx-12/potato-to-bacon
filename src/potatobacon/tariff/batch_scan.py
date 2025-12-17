@@ -13,14 +13,27 @@ from potatobacon.tariff.models import (
 from potatobacon.tariff.suggest import suggest_tariff_optimizations
 
 
-def _score_suggestion(best: TariffSuggestionItemModel | None) -> float:
+def _score_suggestion(
+    best: TariffSuggestionItemModel | None,
+    risk_adjusted: bool,
+    risk_penalty: float,
+) -> float:
     if best is None:
         return 0.0
     if best.annual_savings_value is not None:
-        return best.annual_savings_value
-    if best.savings_per_unit_value is not None:
-        return best.savings_per_unit_value
-    return 0.0
+        base_score = best.annual_savings_value
+    elif best.savings_per_unit_value is not None:
+        base_score = best.savings_per_unit_value
+    else:
+        base_score = 0.0
+
+    if not risk_adjusted:
+        return base_score
+
+    risk_score = best.risk_score or 0
+    factor = 1.0 - (risk_penalty * (risk_score / 100.0))
+    factor = max(0.0, factor)
+    return base_score * factor
 
 
 def batch_scan_tariffs(request: TariffBatchScanRequestModel) -> TariffBatchScanResponseModel:
@@ -63,7 +76,11 @@ def batch_scan_tariffs(request: TariffBatchScanRequestModel) -> TariffBatchScanR
 
             suggestions = suggest_response.suggestions
             best = suggestions[0]
-            rank_score = _score_suggestion(best)
+            rank_score = _score_suggestion(
+                best,
+                risk_adjusted=request.risk_adjusted_ranking,
+                risk_penalty=request.risk_penalty,
+            )
 
             ranked_results.append(
                 TariffBatchSkuResultModel(
@@ -93,7 +110,16 @@ def batch_scan_tariffs(request: TariffBatchScanRequestModel) -> TariffBatchScanR
                 )
             )
 
-    ranked_results.sort(key=lambda res: (-_score_suggestion(res.best), res.sku_id))
+    ranked_results.sort(
+        key=lambda res: (
+            -_score_suggestion(
+                res.best,
+                risk_adjusted=request.risk_adjusted_ranking,
+                risk_penalty=request.risk_penalty,
+            ),
+            res.sku_id,
+        )
+    )
     ranked_results = ranked_results[: request.max_results]
 
     generated_at = datetime.now(timezone.utc).isoformat()

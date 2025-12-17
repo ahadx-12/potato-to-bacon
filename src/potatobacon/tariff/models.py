@@ -166,6 +166,8 @@ class TariffSuggestionItemModel(BaseModel):
     law_context: Optional[str]
     proof_id: str
     risk_score: Optional[int] = None
+    defensibility_grade: Optional[str] = None
+    risk_reasons: Optional[List[str]] = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -206,6 +208,13 @@ class TariffBatchScanRequestModel(BaseModel):
     law_context: Optional[str] = None
     seed: Optional[int] = None
     include_all_suggestions: bool = False
+    risk_adjusted_ranking: bool = False
+    risk_penalty: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Penalty multiplier applied to rank score when risk-aware ranking is enabled",
+    )
 
     model_config = ConfigDict(extra="forbid")
 

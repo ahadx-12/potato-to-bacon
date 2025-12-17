@@ -3,6 +3,10 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from potatobacon.tariff.engine import run_tariff_hack
+from potatobacon.tariff.context_loader import (
+    get_default_tariff_context,
+    get_tariff_atoms_for_context,
+)
 from potatobacon.tariff.mutation_generator import (
     baseline_facts_from_profile,
     generate_candidate_mutations,
@@ -14,6 +18,8 @@ from potatobacon.tariff.models import (
     TariffSuggestResponseModel,
     TariffSuggestionItemModel,
 )
+from potatobacon.tariff.risk import assess_tariff_risk
+from potatobacon.law.solver_z3 import analyze_scenario
 
 
 def _compute_savings(
@@ -58,6 +64,8 @@ def suggest_tariff_optimizations(
 
     declared_value = request.declared_value_per_unit or 100.0
     seed = request.seed or 2025
+    law_context = request.law_context or get_default_tariff_context()
+    atoms = get_tariff_atoms_for_context(law_context)
 
     suggestion_items: List[TariffSuggestionItemModel] = []
 
@@ -65,7 +73,7 @@ def suggest_tariff_optimizations(
         dossier = run_tariff_hack(
             base_facts=baseline_facts,
             mutations=mutation,
-            law_context=request.law_context,
+            law_context=law_context,
             seed=seed,
         )
 
@@ -74,6 +82,18 @@ def suggest_tariff_optimizations(
             optimized_rate=dossier.optimized_duty_rate,
             declared_value_per_unit=declared_value,
             annual_volume=request.annual_volume,
+        )
+
+        _, baseline_active_atoms, _ = analyze_scenario(dossier.baseline_scenario, atoms)
+        _, optimized_active_atoms, _ = analyze_scenario(dossier.optimized_scenario, atoms)
+
+        risk = assess_tariff_risk(
+            baseline_facts=dossier.baseline_scenario,
+            optimized_facts=dossier.optimized_scenario,
+            baseline_active_atoms=baseline_active_atoms,
+            optimized_active_atoms=optimized_active_atoms,
+            baseline_duty_rate=dossier.baseline_duty_rate,
+            optimized_duty_rate=dossier.optimized_duty_rate,
         )
 
         suggestion_items.append(
@@ -90,7 +110,9 @@ def suggest_tariff_optimizations(
                 provenance_chain=dossier.provenance_chain,
                 law_context=dossier.law_context,
                 proof_id=dossier.proof_id,
-                risk_score=10,
+                risk_score=risk.risk_score,
+                defensibility_grade=risk.defensibility_grade,
+                risk_reasons=risk.risk_reasons,
             )
         )
 

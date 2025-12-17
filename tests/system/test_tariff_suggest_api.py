@@ -23,6 +23,9 @@ def test_converse_suggest(system_client):
     assert pytest.approx(suggestion["optimized_duty_rate"], rel=1e-6) == 3.0
     assert pytest.approx(suggestion["annual_savings_value"], rel=1e-6) == 345_000.0
     assert isinstance(suggestion.get("proof_id"), str) and suggestion.get("proof_id")
+    assert isinstance(suggestion.get("risk_score"), int)
+    assert suggestion.get("defensibility_grade") in {"A", "B", "C"}
+    assert isinstance(suggestion.get("risk_reasons"), list) and suggestion["risk_reasons"]
 
 
 @pytest.mark.usefixtures("system_client")
@@ -46,6 +49,9 @@ def test_tesla_bolt_suggest(system_client):
     assert pytest.approx(suggestion["optimized_duty_rate"], rel=1e-6) == 2.5
     assert pytest.approx(suggestion["annual_savings_value"], rel=1e-6) == 400_000.0
     assert isinstance(suggestion.get("proof_id"), str) and suggestion.get("proof_id")
+    assert isinstance(suggestion.get("risk_score"), int)
+    assert suggestion.get("defensibility_grade") in {"A", "B", "C"}
+    assert isinstance(suggestion.get("risk_reasons"), list) and suggestion["risk_reasons"]
 
 
 @pytest.mark.usefixtures("system_client")
