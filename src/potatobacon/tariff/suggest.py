@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List
 
 from potatobacon.tariff.engine import run_tariff_hack
@@ -50,6 +51,20 @@ def suggest_tariff_optimizations(
     compiled_facts, fact_evidence = compile_facts_with_evidence(
         spec, request.description, request.bom_text
     )
+    if fact_evidence:
+        fact_evidence = sorted(
+            fact_evidence,
+            key=lambda item: (
+                item.fact_key,
+                json.dumps(item.value, sort_keys=True),
+                len(item.evidence),
+            ),
+        )
+    if extraction_evidence:
+        extraction_evidence = sorted(
+            extraction_evidence,
+            key=lambda item: (item.source, item.start or -1, item.end or -1, item.snippet),
+        )
 
     baseline_facts = baseline_facts_from_profile(profile)
     if compiled_facts:
@@ -126,6 +141,7 @@ def suggest_tariff_optimizations(
                 provenance_chain=dossier.provenance_chain,
                 law_context=dossier.law_context,
                 proof_id=dossier.proof_id,
+                proof_payload_hash=dossier.proof_payload_hash,
                 risk_score=risk.risk_score,
                 defensibility_grade=risk.defensibility_grade,
                 risk_reasons=risk.risk_reasons,

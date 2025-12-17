@@ -6,6 +6,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from potatobacon.proofs.canonical import canonical_json
 
 def _default_path() -> Path:
     base = Path(os.getenv("PTB_DATA_ROOT", "."))
@@ -24,7 +25,7 @@ class ProofStore:
         proof_id = proof.get("proof_id")
         if not proof_id:
             raise ValueError("proof_id is required for persistence")
-        serialized = json.dumps(proof, sort_keys=True)
+        serialized = canonical_json(proof)
         with self._lock:
             with self.path.open("a", encoding="utf-8") as handle:
                 handle.write(serialized + "\n")

@@ -58,6 +58,7 @@ class TariffDossierModel(BaseModel):
     """Response dossier capturing baseline and optimized tariff positions."""
 
     proof_id: str
+    proof_payload_hash: str
     law_context: Optional[str] = None
     status: Literal["OPTIMIZED", "BASELINE"]
     baseline_duty_rate: float
@@ -80,6 +81,7 @@ class TariffExplainResponseModel(BaseModel):
     status: Literal["SAT", "UNSAT"]
     explanation: str
     proof_id: str
+    proof_payload_hash: str
     law_context: Optional[str] = None
     unsat_core: List[Dict[str, Any]] = Field(default_factory=list)
 
@@ -114,6 +116,7 @@ class TariffOptimizationResponseModel(BaseModel):
     law_context: Optional[str]
     tariff_manifest_hash: Optional[str] = None
     proof_id: str
+    proof_payload_hash: str
     provenance_chain: List[Dict[str, Any]]
 
     declared_value_per_unit: Optional[float] = None
@@ -159,6 +162,7 @@ class TariffSkuOptimizationResponseModel(BaseModel):
     law_context: Optional[str]
     tariff_manifest_hash: Optional[str] = None
     proof_id: str
+    proof_payload_hash: str
     provenance_chain: List[Dict[str, Any]]
 
     model_config = ConfigDict(extra="forbid")
@@ -195,6 +199,7 @@ class TariffSuggestionItemModel(BaseModel):
     provenance_chain: List[Dict[str, Any]]
     law_context: Optional[str]
     proof_id: str
+    proof_payload_hash: str
     risk_score: Optional[int] = None
     defensibility_grade: Optional[str] = None
     risk_reasons: Optional[List[str]] = None

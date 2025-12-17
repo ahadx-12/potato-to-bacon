@@ -24,6 +24,7 @@ class OptimizationResult:
     law_context: str
     tariff_manifest_hash: str
     proof_id: str
+    proof_payload_hash: str
     provenance_chain: List[Dict[str, Any]]
     status: str
 
@@ -92,8 +93,8 @@ def optimize_tariff(
     best_mutation: Optional[Dict[str, Any]] = None
     best_eval = baseline_eval
 
-    for key, values in candidate_mutations.items():
-        for value in values:
+    for key in sorted(candidate_mutations.keys()):
+        for value in candidate_mutations[key]:
             mutated_scenario = apply_mutations(baseline_scenario, {key: value})
             evaluation = _evaluate_scenario(atoms, mutated_scenario, "optimized")
             if evaluation.duty_rate is None:
@@ -120,8 +121,16 @@ def optimize_tariff(
     provenance_chain.extend(baseline_eval.provenance)
     if best_eval is not baseline_eval:
         provenance_chain.extend(best_eval.provenance)
+    provenance_chain.sort(
+        key=lambda item: (
+            item.get("source_id", ""),
+            item.get("section", ""),
+            item.get("text", ""),
+            item.get("scenario", ""),
+        )
+    )
 
-    proof_id = record_tariff_proof(
+    proof_handle = record_tariff_proof(
         law_context=context,
         base_facts=base_facts,
         mutations={"candidates": candidate_mutations, "applied": best_mutation or {}},
@@ -129,8 +138,13 @@ def optimize_tariff(
         optimized_active=best_eval.active_atoms,
         baseline_sat=baseline_eval.is_sat,
         optimized_sat=best_eval.is_sat,
+        baseline_duty_rate=baseline_eval.duty_rate,
+        optimized_duty_rate=best_eval.duty_rate,
+        baseline_scenario=baseline_scenario.facts,
+        optimized_scenario=best_eval.scenario.facts,
         baseline_unsat_core=baseline_eval.unsat_core,
         optimized_unsat_core=best_eval.unsat_core,
+        provenance_chain=provenance_chain,
         tariff_manifest_hash=context_meta["manifest_hash"],
     )
 
@@ -140,11 +154,12 @@ def optimize_tariff(
         best_mutation=best_mutation,
         baseline_scenario=baseline_scenario,
         optimized_scenario=best_eval.scenario,
-        active_codes_baseline=[atom.source_id for atom in baseline_eval.duty_atoms],
-        active_codes_optimized=[atom.source_id for atom in best_eval.duty_atoms],
+        active_codes_baseline=sorted([atom.source_id for atom in baseline_eval.duty_atoms]),
+        active_codes_optimized=sorted([atom.source_id for atom in best_eval.duty_atoms]),
         law_context=context,
         tariff_manifest_hash=context_meta["manifest_hash"],
-        proof_id=proof_id,
+        proof_id=proof_handle.proof_id,
+        proof_payload_hash=proof_handle.proof_payload_hash,
         provenance_chain=provenance_chain,
         status=status,
     )
