@@ -182,3 +182,59 @@ class TariffSuggestResponseModel(BaseModel):
     suggestions: List[TariffSuggestionItemModel]
 
     model_config = ConfigDict(extra="forbid")
+
+
+class TariffBatchSkuModel(BaseModel):
+    """SKU entry for batch tariff scanning."""
+
+    sku_id: str
+    description: str
+    bom_text: Optional[str] = None
+    declared_value_per_unit: Optional[float] = 100.0
+    annual_volume: Optional[int] = None
+    law_context: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TariffBatchScanRequestModel(BaseModel):
+    """Request payload for scanning tariffs across multiple SKUs."""
+
+    skus: List[TariffBatchSkuModel]
+    top_k_per_sku: int = 3
+    max_results: int = 20
+    law_context: Optional[str] = None
+    seed: Optional[int] = None
+    include_all_suggestions: bool = False
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TariffBatchSkuResultModel(BaseModel):
+    """Per-SKU result for a batch tariff scan."""
+
+    sku_id: str
+    description: str
+    status: Literal["OK", "NO_CANDIDATES", "ERROR"]
+    law_context: Optional[str]
+    baseline_scenario: Dict[str, Any]
+    best: Optional[TariffSuggestionItemModel] = None
+    suggestions: Optional[List[TariffSuggestionItemModel]] = None
+    rank_score: Optional[float] = None
+    error: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TariffBatchScanResponseModel(BaseModel):
+    """Batch scan response summarizing ranked opportunities."""
+
+    status: Literal["OK"]
+    total_skus: int
+    processed_skus: int
+    results: List[TariffBatchSkuResultModel]
+    skipped: List[TariffBatchSkuResultModel]
+    generated_at: Optional[str] = None
+    law_context: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
