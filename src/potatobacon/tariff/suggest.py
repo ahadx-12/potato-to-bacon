@@ -15,6 +15,7 @@ from potatobacon.tariff.models import (
     TariffSuggestResponseModel,
     TariffSuggestionItemModel,
 )
+from potatobacon.tariff.parser import compile_facts_with_evidence, extract_product_spec
 from potatobacon.tariff.risk import assess_tariff_risk
 from potatobacon.law.solver_z3 import analyze_scenario
 
@@ -45,7 +46,16 @@ def suggest_tariff_optimizations(
     """Generate, evaluate, and rank tariff optimization suggestions."""
 
     profile = infer_product_profile(request.description, request.bom_text)
+    spec, extraction_evidence = extract_product_spec(request.description, request.bom_text)
+    compiled_facts, fact_evidence = compile_facts_with_evidence(
+        spec, request.description, request.bom_text
+    )
+
     baseline_facts = baseline_facts_from_profile(profile)
+    if compiled_facts:
+        for key, value in compiled_facts.items():
+            if value or key not in baseline_facts:
+                baseline_facts[key] = value
     candidates = generate_candidate_mutations(profile)
 
     resolved_context = request.law_context or DEFAULT_CONTEXT_ID
@@ -75,6 +85,12 @@ def suggest_tariff_optimizations(
             mutations=mutation,
             law_context=law_context,
             seed=seed,
+            evidence_pack={
+                "product_spec": spec.model_dump(),
+                "compiled_facts": compiled_facts,
+                "fact_evidence": [item.model_dump() for item in fact_evidence],
+                "extraction_evidence": [item.model_dump() for item in extraction_evidence],
+            },
         )
 
         savings_rate, savings_value, annual_value = _compute_savings(
@@ -138,4 +154,6 @@ def suggest_tariff_optimizations(
         generated_candidates_count=len(candidates),
         suggestions=ordered_suggestions,
         tariff_manifest_hash=context_meta["manifest_hash"],
+        fact_evidence=fact_evidence if request.include_fact_evidence else None,
+        product_spec=spec if request.include_fact_evidence else None,
     )

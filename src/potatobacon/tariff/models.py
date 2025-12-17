@@ -1,9 +1,36 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
+from potatobacon.tariff.product_schema import ProductSpecModel
+
+if TYPE_CHECKING:
+    from potatobacon.tariff.product_schema import ProductSpecModel
+
+
+class TextEvidenceModel(BaseModel):
+    """Span-level evidence extracted from product text inputs."""
+
+    source: Literal["description", "bom_text"]
+    snippet: str
+    start: int | None = None
+    end: int | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class FactEvidenceModel(BaseModel):
+    """Evidence attached to a derived tariff fact."""
+
+    fact_key: str
+    value: Any
+    confidence: float = Field(ge=0.0, le=1.0)
+    evidence: List[TextEvidenceModel] = Field(default_factory=list)
+    derived_from: List[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
 
 
 @dataclass(slots=True)
@@ -148,6 +175,7 @@ class TariffSuggestRequestModel(BaseModel):
     law_context: Optional[str] = None
     top_k: Optional[int] = 5
     seed: Optional[int] = None
+    include_fact_evidence: bool = False
 
     model_config = ConfigDict(extra="forbid")
 
@@ -186,8 +214,36 @@ class TariffSuggestResponseModel(BaseModel):
     generated_candidates_count: int
     suggestions: List[TariffSuggestionItemModel]
     tariff_manifest_hash: Optional[str] = None
+    fact_evidence: Optional[List[FactEvidenceModel]] = None
+    product_spec: Optional["ProductSpecModel"] = None
 
     model_config = ConfigDict(extra="forbid")
+
+
+class TariffParseRequestModel(BaseModel):
+    """Request payload for deterministic tariff parsing."""
+
+    sku_id: Optional[str] = None
+    description: str
+    bom_text: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TariffParseResponseModel(BaseModel):
+    """Response payload for tariff parsing with compiled facts and evidence."""
+
+    sku_id: Optional[str] = None
+    product_spec: "ProductSpecModel"
+    compiled_facts: Dict[str, Any]
+    fact_evidence: List[FactEvidenceModel]
+    extraction_evidence: List[TextEvidenceModel]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+TariffSuggestResponseModel.model_rebuild()
+TariffParseResponseModel.model_rebuild()
 
 
 class TariffBatchSkuModel(BaseModel):

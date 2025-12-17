@@ -65,6 +65,7 @@ def run_tariff_hack(
     mutations: Dict[str, Any] | None = None,
     law_context: str | None = None,
     seed: int = 2025,
+    evidence_pack: Dict[str, Any] | None = None,
 ) -> TariffDossierModel:
     """Compute baseline vs optimized tariff outcomes for a given scenario."""
 
@@ -117,6 +118,7 @@ def run_tariff_hack(
         optimized_sat=sat_optimized,
         baseline_unsat_core=unsat_core_baseline,
         optimized_unsat_core=unsat_core_optimized,
+        evidence_pack=evidence_pack,
     )
 
     dossier = TariffDossierModel(
