@@ -10,6 +10,7 @@ outcomes that can be composed by downstream search/metrics components.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import threading
 from typing import Dict, Iterable, List, Mapping, MutableMapping, Sequence, Tuple
 
 from z3 import (  # type: ignore[import-not-found]
@@ -29,6 +30,7 @@ from potatobacon.cale.parser import PredicateMapper
 from potatobacon.cale.types import LegalRule
 
 _ATOM_CACHE: Dict[Tuple[str, Tuple[str, ...]], Dict[str, object]] = {}
+_Z3_LOCK = threading.Lock()
 
 
 @dataclass(slots=True)
@@ -207,22 +209,23 @@ def check_scenario(
     whose guards are satisfied under the provided facts.
     """
 
-    solver, var_map = build_z3_model_for_scenario(scenario, atoms)
-    # Identify active atoms by evaluating guards under the model's assumptions
-    active_atoms: List[PolicyAtom] = []
-    for atom in atoms:
-        if atom.z3_guard is None:
-            continue
-        # Create a temporary solver to evaluate guard truth under the scenario
-        guard_solver = Solver()
-        for assumption in solver.assertions():
-            guard_solver.add(assumption)
-        guard_solver.add(Not(atom.z3_guard))
-        if guard_solver.check() == sat:
-            continue
-        active_atoms.append(atom)
+    with _Z3_LOCK:
+        solver, var_map = build_z3_model_for_scenario(scenario, atoms)
+        # Identify active atoms by evaluating guards under the model's assumptions
+        active_atoms: List[PolicyAtom] = []
+        for atom in atoms:
+            if atom.z3_guard is None:
+                continue
+            # Create a temporary solver to evaluate guard truth under the scenario
+            guard_solver = Solver()
+            for assumption in solver.assertions():
+                guard_solver.add(assumption)
+            guard_solver.add(Not(atom.z3_guard))
+            if guard_solver.check() == sat:
+                continue
+            active_atoms.append(atom)
 
-    is_sat = solver.check() == sat
+        is_sat = solver.check() == sat
     return is_sat, active_atoms
 
 
@@ -231,29 +234,30 @@ def analyze_scenario(
 ) -> tuple[bool, List[PolicyAtom], List[PolicyAtom]]:
     """Return satisfiability, active atoms, and the UNSAT core if any."""
 
-    var_map: Dict[str, BoolRef] = {}
-    compile_atoms_to_z3(atoms, var_map)
-    solver = Solver()
-    solver.set(unsat_core=True)
+    with _Z3_LOCK:
+        var_map: Dict[str, BoolRef] = {}
+        compile_atoms_to_z3(atoms, var_map)
+        solver = Solver()
+        solver.set(unsat_core=True)
 
-    for name, value in scenario.items():
-        if name not in var_map:
-            var_map[name] = Bool(name)
-        solver.add(var_map[name] == BoolVal(bool(value)))
+        for name, value in scenario.items():
+            if name not in var_map:
+                var_map[name] = Bool(name)
+            solver.add(var_map[name] == BoolVal(bool(value)))
 
-    tracked_atoms: list[tuple[BoolRef, PolicyAtom]] = []
-    for idx, atom in enumerate(atoms):
-        if atom.z3_guard is None or atom.z3_outcome is None:
-            continue
-        tracker = Bool(f"atom_{idx}")
-        solver.assert_and_track(Implies(atom.z3_guard, atom.z3_outcome), tracker)
-        tracked_atoms.append((tracker, atom))
+        tracked_atoms: list[tuple[BoolRef, PolicyAtom]] = []
+        for idx, atom in enumerate(atoms):
+            if atom.z3_guard is None or atom.z3_outcome is None:
+                continue
+            tracker = Bool(f"atom_{idx}")
+            solver.assert_and_track(Implies(atom.z3_guard, atom.z3_outcome), tracker)
+            tracked_atoms.append((tracker, atom))
 
-    sat_result = solver.check()
-    unsat_atoms: list[PolicyAtom] = []
-    if sat_result == unsat:
-        core = set(solver.unsat_core())
-        unsat_atoms = [atom for tracker, atom in tracked_atoms if tracker in core]
+        sat_result = solver.check()
+        unsat_atoms: list[PolicyAtom] = []
+        if sat_result == unsat:
+            core = set(solver.unsat_core())
+            unsat_atoms = [atom for tracker, atom in tracked_atoms if tracker in core]
 
     is_sat, active_atoms = check_scenario(scenario, atoms)
     return is_sat, active_atoms, unsat_atoms

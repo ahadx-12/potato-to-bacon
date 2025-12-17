@@ -131,6 +131,7 @@ def optimize_tariff(
         optimized_sat=best_eval.is_sat,
         baseline_unsat_core=baseline_eval.unsat_core,
         optimized_unsat_core=best_eval.unsat_core,
+        tariff_manifest_hash=context_meta["manifest_hash"],
     )
 
     return OptimizationResult(

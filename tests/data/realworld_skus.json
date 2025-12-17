@@ -1,0 +1,362 @@
+[
+  {
+    "sku_id": "RW-FOOT-001",
+    "description": "Canvas sneaker with rubber sole, classic court style",
+    "bom_text": "upper: cotton canvas 60%, lining mesh; outsole: vulcanized rubber",
+    "declared_value_per_unit": 78.5,
+    "annual_volume": 12000,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FOOT-002",
+    "description": "Hiking boot with felt overlay on outsole >50% contact area",
+    "bom_text": "upper leather/textile blend; rubber lug sole with felt overlay patches",
+    "declared_value_per_unit": 142.0,
+    "annual_volume": 6400,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FAST-003",
+    "description": "Metric steel chassis bolt for EV frame",
+    "bom_text": "M12 x 1.75 steel bolt, zinc coating, automotive frame",
+    "declared_value_per_unit": 2.2,
+    "annual_volume": 500000,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FAST-004",
+    "description": "Stainless steel screw, pan head, for battery pack housing",
+    "bom_text": "304 stainless screw, machine thread, 20mm",
+    "declared_value_per_unit": 0.44,
+    "annual_volume": 980000,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FOOT-005",
+    "description": "Low-top sneaker / trainer with rubber sole and canvas upper",
+    "bom_text": "rubber sole bonded, textile upper (canvas) 70%",
+    "declared_value_per_unit": 63.0,
+    "annual_volume": 22000,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-ELEC-006",
+    "description": "Control board for smart sprinkler system (PCB assembled)",
+    "bom_text": "4-layer PCB, stm32 chip, aluminum shield, assembled",
+    "declared_value_per_unit": 38.75,
+    "annual_volume": 41000,
+    "expected_category": "electronics",
+    "expect_at_least_one_suggestion": false
+  },
+  {
+    "sku_id": "RW-APP-007",
+    "description": "Organic cotton t-shirt, heavyweight",
+    "bom_text": "180gsm jersey knit, 100% cotton",
+    "declared_value_per_unit": 12.0,
+    "annual_volume": 150000,
+    "expected_category": "textile",
+    "expect_at_least_one_suggestion": false
+  },
+  {
+    "sku_id": "RW-FAST-008",
+    "description": "Steel screw for solar racking system, hex head",
+    "bom_text": "galvanized steel screw, outdoor rated",
+    "declared_value_per_unit": 0.55,
+    "annual_volume": 750000,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FOOT-009",
+    "description": "\u2728 Fashion sneaker w/ glitter textile upper + rubber outsole",
+    "bom_text": "textile upper 65%, rubber sole 1pc",
+    "declared_value_per_unit": 58.0,
+    "annual_volume": 18000,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FAST-010",
+    "description": "Aluminum rivet (not actually a bolt)",
+    "bom_text": "solid aluminum rivet 3mm",
+    "declared_value_per_unit": 0.08,
+    "annual_volume": 220000,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": false
+  },
+  {
+    "sku_id": "RW-GAD-011",
+    "description": "Gadget thingamajig with mixed plastics",
+    "bom_text": "ABS shell, silicone gasket, random bits",
+    "declared_value_per_unit": 5.75,
+    "annual_volume": 42000,
+    "expected_category": "unknown",
+    "expect_at_least_one_suggestion": false
+  },
+  {
+    "sku_id": "RW-FOOT-012",
+    "description": "Kids sneaker, rubber sole, stretchy textile upper",
+    "bom_text": "EVA/rubber outsole + knit upper",
+    "declared_value_per_unit": 32.5,
+    "annual_volume": 76000,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FAST-013",
+    "description": "Machine screw for enclosure",
+    "bom_text": "steel screw, coarse thread, phillips",
+    "declared_value_per_unit": 0.12,
+    "annual_volume": 300000,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FOOT-014",
+    "description": "Boot, leather vamp w/ felt overlay on outsole",
+    "bom_text": "rubber sole + felt overlay sections; leather upper",
+    "declared_value_per_unit": 120.0,
+    "annual_volume": 9500,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-ELEC-015",
+    "description": "Battery pack housing, aluminum extruded, includes screws",
+    "bom_text": "aluminum enclosure + plastic endcaps + screws",
+    "declared_value_per_unit": 19.8,
+    "annual_volume": 33000,
+    "expected_category": "electronics",
+    "expect_at_least_one_suggestion": false
+  },
+  {
+    "sku_id": "RW-FAST-016",
+    "description": "Steel bolt with rubber washer kit",
+    "bom_text": "bolt + rubber washer; steel",
+    "declared_value_per_unit": 0.39,
+    "annual_volume": 210000,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FOOT-017",
+    "description": "Work boot, steel toe, rubber outsole",
+    "bom_text": "rubber sole, textile lining",
+    "declared_value_per_unit": 88.0,
+    "annual_volume": 44000,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FAST-018",
+    "description": "Fastener kit: assorted bolts/screws for assembly (messy text)",
+    "bom_text": "bolts, screws, washers in one polybag; steel; random mix",
+    "declared_value_per_unit": 1.1,
+    "annual_volume": 180000,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-GAD-019",
+    "description": "USB gizmo w/ LED + little screw, not sure what it is",
+    "bom_text": "tiny pcb, screw, plastic shell",
+    "declared_value_per_unit": 7.4,
+    "annual_volume": 25000,
+    "expected_category": "unknown",
+    "expect_at_least_one_suggestion": false
+  },
+  {
+    "sku_id": "RW-FOOT-020",
+    "description": "Slip-on canvas shoe with rubber sole",
+    "bom_text": "rubber sole 1pc, canvas upper",
+    "declared_value_per_unit": 45.0,
+    "annual_volume": 52000,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FAST-021",
+    "description": "High-strength steel bolt for wind turbine base",
+    "bom_text": "steel bolt, hot-dip galvanized",
+    "declared_value_per_unit": 5.5,
+    "annual_volume": 12000,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FOOT-022",
+    "description": "Sneaker w/ rubber sole and textile overlay >50%",
+    "bom_text": "rubber outsole + felt overlay around edge",
+    "declared_value_per_unit": 67.0,
+    "annual_volume": 30500,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FAST-023",
+    "description": "Bolt set for aerospace jig (steel)",
+    "bom_text": "steel bolts, captive washer",
+    "declared_value_per_unit": 1.8,
+    "annual_volume": 76000,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FOOT-024",
+    "description": "Athletic shoe, rubber sole, textile upper",
+    "bom_text": "EVA midsole + rubber outsole + knit upper",
+    "declared_value_per_unit": 58.0,
+    "annual_volume": 89000,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FAST-025",
+    "description": "Screw kit for consumer drone",
+    "bom_text": "steel screws, tiny bolt, plastic caps",
+    "declared_value_per_unit": 0.35,
+    "annual_volume": 96000,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FOOT-026",
+    "description": "Canvas espadrille, rubber sole",
+    "bom_text": "canvas upper, rubber outsole",
+    "declared_value_per_unit": 22.0,
+    "annual_volume": 67000,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FAST-027",
+    "description": "Carriage bolt, steel, zinc plated",
+    "bom_text": "steel bolt", 
+    "declared_value_per_unit": 0.42,
+    "annual_volume": 330000,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FOOT-028",
+    "description": "Leather sneaker with textile trim + rubber sole",
+    "bom_text": "rubber outsole, leather upper with textile collar",
+    "declared_value_per_unit": 110.0,
+    "annual_volume": 15000,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FAST-029",
+    "description": "Bolt & screw assortment (steel) for field kit",
+    "bom_text": "bag with bolts + screws + washers", 
+    "declared_value_per_unit": 1.05,
+    "annual_volume": 120000,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FOOT-030",
+    "description": "Outdoor sandal, rubber outsole, textile straps",
+    "bom_text": "rubber outsole, textile straps", 
+    "declared_value_per_unit": 35.5,
+    "annual_volume": 48000,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FAST-031",
+    "description": "Steel lag screw for wood construction",
+    "bom_text": "steel lag screw", 
+    "declared_value_per_unit": 0.65,
+    "annual_volume": 86000,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FOOT-032",
+    "description": "Slip-on sneaker, rubber outsole, textile upper",
+    "bom_text": "rubber sole + felt overlay near toe",
+    "declared_value_per_unit": 48.0,
+    "annual_volume": 57000,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-GAD-033",
+    "description": "Mystery widget: plastic gizmo with tiny bolt & led",
+    "bom_text": "plastic shell, bolt, led, wire",
+    "declared_value_per_unit": 3.3,
+    "annual_volume": 9900,
+    "expected_category": "unknown",
+    "expect_at_least_one_suggestion": false
+  },
+  {
+    "sku_id": "RW-FOOT-034",
+    "description": "Trail runner shoe, rubber sole, knit upper, felt overlay",
+    "bom_text": "rubber outsole + felt overlay around lugs",
+    "declared_value_per_unit": 92.0,
+    "annual_volume": 43000,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FAST-035",
+    "description": "Tiny steel screw (M2) for glasses repair",
+    "bom_text": "steel screw",
+    "declared_value_per_unit": 0.05,
+    "annual_volume": 500000,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FOOT-036",
+    "description": "Fashion boot w/ rubber sole + textile overlay",
+    "bom_text": "rubber sole with felt overlay 60%",
+    "declared_value_per_unit": 130.0,
+    "annual_volume": 21000,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FAST-037",
+    "description": "Steel screw with plastic cap",
+    "bom_text": "steel screw, plastic cap",
+    "declared_value_per_unit": 0.12,
+    "annual_volume": 145000,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FOOT-038",
+    "description": "Canvas high-top sneaker, rubber outsole",
+    "bom_text": "canvas upper, rubber outsole",
+    "declared_value_per_unit": 75.0,
+    "annual_volume": 36000,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FAST-039",
+    "description": "Steel screw kit + random washers",
+    "bom_text": "steel screws, washers",
+    "declared_value_per_unit": 0.3,
+    "annual_volume": 160000,
+    "expected_category": "fastener",
+    "expect_at_least_one_suggestion": true
+  },
+  {
+    "sku_id": "RW-FOOT-040",
+    "description": "Slip-on textile slipper with rubber sole (messy unicode \u2603)",
+    "bom_text": "textile upper, rubber outsole",
+    "declared_value_per_unit": 18.0,
+    "annual_volume": 88000,
+    "expected_category": "footwear",
+    "expect_at_least_one_suggestion": true
+  }
+]

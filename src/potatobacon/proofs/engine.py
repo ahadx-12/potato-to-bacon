@@ -39,6 +39,7 @@ def record_tariff_proof(
     optimized_unsat_core: List[PolicyAtom] | None = None,
     evidence_pack: Dict[str, Any] | None = None,
     store: ProofStore | None = None,
+    tariff_manifest_hash: str | None = None,
 ) -> str:
     """Persist a tariff proof and return its proof_id."""
 
@@ -59,6 +60,9 @@ def record_tariff_proof(
             "sat": optimized_sat,
         },
     }
+
+    if tariff_manifest_hash:
+        proof_material["tariff_manifest_hash"] = tariff_manifest_hash
 
     if evidence_pack:
         proof_material["evidence_pack"] = evidence_pack
