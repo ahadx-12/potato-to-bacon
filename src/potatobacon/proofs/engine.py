@@ -91,6 +91,9 @@ def _sorted_evidence_pack(pack: Dict[str, Any] | None) -> Dict[str, Any] | None:
                 item.get("snippet", ""),
             ),
         )
+    metadata = sorted_pack.get("sku_metadata")
+    if isinstance(metadata, dict):
+        sorted_pack["sku_metadata"] = {key: metadata[key] for key in sorted(metadata.keys())}
     return sorted_pack
 
 

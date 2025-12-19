@@ -34,4 +34,5 @@ def fetch_proof_evidence(proof_id: str):
         "product_spec": pack.get("product_spec"),
         "compiled_facts": pack.get("compiled_facts"),
         "fact_evidence": pack.get("fact_evidence"),
+        "sku_metadata": pack.get("sku_metadata"),
     }

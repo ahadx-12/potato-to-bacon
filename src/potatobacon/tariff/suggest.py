@@ -18,6 +18,7 @@ from potatobacon.tariff.models import (
     TariffSuggestResponseModel,
     TariffSuggestionItemModel,
 )
+from potatobacon.tariff.sku_models import build_sku_metadata_snapshot
 from potatobacon.tariff.normalizer import normalize_compiled_facts, validate_minimum_inputs
 from potatobacon.tariff.parser import compile_facts_with_evidence, extract_product_spec
 from potatobacon.tariff.risk import assess_tariff_risk
@@ -237,6 +238,19 @@ def suggest_tariff_optimizations(
         "fact_evidence": [item.model_dump() for item in fact_evidence] if fact_evidence else [],
         "extraction_evidence": [item.model_dump() for item in extraction_evidence] if extraction_evidence else [],
     }
+    sku_metadata = build_sku_metadata_snapshot(
+        sku_id=request.sku_id,
+        description=request.description,
+        bom_json=request.bom_json,
+        bom_csv=request.bom_csv,
+        origin_country=request.origin_country,
+        export_country=request.export_country,
+        import_country=request.import_country,
+        declared_value_per_unit=request.declared_value_per_unit,
+        annual_volume=request.annual_volume,
+    )
+    if sku_metadata:
+        evidence_pack["sku_metadata"] = sku_metadata
 
     for lever in levers:
         mutated = deepcopy(normalized_facts)
