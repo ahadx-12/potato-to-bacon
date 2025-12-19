@@ -46,7 +46,11 @@ def test_tariff_batch_scan_api(system_client):
         assert res["best"]["proof_id"]
 
     skipped = {item["sku_id"]: item for item in data["skipped"]}
-    assert skipped["RANDOM_GADGET"]["status"] == "NO_CANDIDATES"
+    assert skipped["RANDOM_GADGET"]["status"] in {
+        "OK_BASELINE_ONLY",
+        "INSUFFICIENT_INPUTS",
+        "INSUFFICIENT_RULE_COVERAGE",
+    }
 
 
 @pytest.mark.usefixtures("system_client")

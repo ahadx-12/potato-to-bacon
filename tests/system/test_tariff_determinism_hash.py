@@ -22,8 +22,8 @@ def test_tariff_suggest_determinism_payload_hash(system_client: TestClient):
     first_payload = first.json()
     second_payload = second.json()
 
-    assert first_payload["status"] == "OK"
-    assert second_payload["status"] == "OK"
+    assert first_payload["status"] == "OK_OPTIMIZED"
+    assert second_payload["status"] == "OK_OPTIMIZED"
 
     first_best = first_payload["suggestions"][0]
     second_best = second_payload["suggestions"][0]

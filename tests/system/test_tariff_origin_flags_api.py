@@ -10,7 +10,7 @@ def test_suggest_returns_ad_cvd_flags(system_client):
     response = system_client.post("/api/tariff/suggest", json=payload)
     assert response.status_code == 200, response.text
     data = response.json()
-    assert data["status"] == "OK"
+    assert data["status"] == "OK_OPTIMIZED"
     assert data["suggestions"], data
 
     top = data["suggestions"][0]

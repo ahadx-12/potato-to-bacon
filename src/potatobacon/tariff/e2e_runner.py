@@ -85,7 +85,13 @@ class E2ERunResult:
 
     @property
     def counts(self) -> Dict[str, int]:
-        counts = {"OK": 0, "NO_CANDIDATES": 0, "ERROR": 0}
+        counts = {
+            "OK_OPTIMIZED": 0,
+            "OK_BASELINE_ONLY": 0,
+            "INSUFFICIENT_RULE_COVERAGE": 0,
+            "INSUFFICIENT_INPUTS": 0,
+            "ERROR": 0,
+        }
         for res in self.sku_results:
             if res.status in counts:
                 counts[res.status] += 1
@@ -225,7 +231,7 @@ class TariffE2ERunner:
             import_country=parse_request.import_country,
         )
         suggest_response = suggest_tariff_optimizations(suggest_request)
-        if suggest_response.status != "OK" or not suggest_response.suggestions:
+        if suggest_response.status != "OK_OPTIMIZED" or not suggest_response.suggestions:
             return E2ESkuResult(
                 sku_id=parse_request.sku_id or "unknown",
                 description=parse_request.description,
@@ -233,6 +239,8 @@ class TariffE2ERunner:
                 category=spec.product_category.value,
                 tariff_manifest_hash=suggest_response.tariff_manifest_hash,
                 baseline_scenario=suggest_response.baseline_scenario,
+                proof_id=suggest_response.proof_id,
+                proof_payload_hash=suggest_response.proof_payload_hash,
                 error=None,
             )
 
@@ -300,14 +308,16 @@ class TariffE2ERunner:
             )
         suggest_body = suggest_resp.json()
         suggestions = suggest_body.get("suggestions") or []
-        if suggest_body.get("status") != "OK" or not suggestions:
+        if suggest_body.get("status") != "OK_OPTIMIZED" or not suggestions:
             return E2ESkuResult(
                 sku_id=parse_request.sku_id or "unknown",
                 description=parse_request.description,
-                status=suggest_body.get("status", "NO_CANDIDATES"),
+                status=suggest_body.get("status", "ERROR"),
                 category=category,
                 tariff_manifest_hash=suggest_body.get("tariff_manifest_hash"),
                 baseline_scenario=suggest_body.get("baseline_scenario", {}),
+                proof_id=suggest_body.get("proof_id"),
+                proof_payload_hash=suggest_body.get("proof_payload_hash"),
             )
         best = suggestions[0]
         proof_id = best.get("proof_id")
@@ -327,7 +337,7 @@ class TariffE2ERunner:
         return E2ESkuResult(
             sku_id=parse_request.sku_id or "unknown",
             description=parse_request.description,
-            status="OK",
+            status=suggest_body.get("status", "OK_OPTIMIZED"),
             category=category,
             best_summary=best.get("human_summary"),
             annual_savings=best.get("annual_savings_value"),
@@ -406,8 +416,11 @@ class TariffE2ERunner:
         for entry in targets:
             first = self._run_engine_case(entry)
             second = self._run_engine_case(entry)
-            if first.status != "OK" or second.status != "OK":
+            if first.status != second.status:
                 details.append(f"{entry.get('sku_id')} status diverged {first.status}/{second.status}")
+                continue
+            if first.status != "OK_OPTIMIZED":
+                match_count += 1
                 continue
             match = (
                 first.best_summary == second.best_summary
@@ -480,7 +493,7 @@ class TariffE2ERunner:
                 self._strip_proof_ids(item)
 
     def _compute_proof_pass_rate(self, results: List[E2ESkuResult]) -> float:
-        ok_results = [res for res in results if res.status == "OK" and res.proof_replay is not None]
+        ok_results = [res for res in results if res.status == "OK_OPTIMIZED" and res.proof_replay is not None]
         if not ok_results:
             return 1.0
         passes = sum(1 for res in ok_results if res.proof_replay and res.proof_replay.ok)
@@ -493,7 +506,13 @@ class TariffE2ERunner:
         batch_resp: Any,
     ) -> None:
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
-        counts = {"OK": 0, "NO_CANDIDATES": 0, "ERROR": 0}
+        counts = {
+            "OK_OPTIMIZED": 0,
+            "OK_BASELINE_ONLY": 0,
+            "INSUFFICIENT_RULE_COVERAGE": 0,
+            "INSUFFICIENT_INPUTS": 0,
+            "ERROR": 0,
+        }
         category_stats: Dict[str, Dict[str, Any]] = {}
         evidence_gaps: Dict[str, int] = {}
 
@@ -501,26 +520,40 @@ class TariffE2ERunner:
             counts[res.status] = counts.get(res.status, 0) + 1
             category_entry = category_stats.setdefault(
                 res.category,
-                {"processed": 0, "ok": 0, "no_candidates": 0, "error": 0, "savings": [], "risks": [], "evidence_gaps": 0},
+                {
+                    "processed": 0,
+                    "optimized": 0,
+                    "baseline_only": 0,
+                    "insufficient_inputs": 0,
+                    "insufficient_rules": 0,
+                    "error": 0,
+                    "savings": [],
+                    "risks": [],
+                    "evidence_gaps": 0,
+                },
             )
             category_entry["processed"] += 1
-            if res.status == "OK":
-                category_entry["ok"] += 1
+            if res.status == "OK_OPTIMIZED":
+                category_entry["optimized"] += 1
                 if res.annual_savings is not None:
                     category_entry["savings"].append(res.annual_savings)
                 if res.risk_score is not None:
                     category_entry["risks"].append(res.risk_score)
                 if res.evidence_gap:
                     category_entry["evidence_gaps"] += 1
-            elif res.status == "NO_CANDIDATES":
-                category_entry["no_candidates"] += 1
+            elif res.status == "OK_BASELINE_ONLY":
+                category_entry["baseline_only"] += 1
+            elif res.status == "INSUFFICIENT_INPUTS":
+                category_entry["insufficient_inputs"] += 1
+            elif res.status == "INSUFFICIENT_RULE_COVERAGE":
+                category_entry["insufficient_rules"] += 1
             else:
                 category_entry["error"] += 1
             if res.evidence_gap:
                 evidence_gaps[res.category] = evidence_gaps.get(res.category, 0) + 1
 
         top_opportunities = sorted(
-            [res for res in results if res.status == "OK" and res.annual_savings is not None],
+            [res for res in results if res.status == "OK_OPTIMIZED" and res.annual_savings is not None],
             key=lambda r: r.annual_savings or 0,
             reverse=True,
         )[:10]
@@ -528,8 +561,7 @@ class TariffE2ERunner:
         error_signatures: Dict[str, int] = {}
         for res in results:
             if res.error:
-                signature = res.error.splitlines()[0]
-                error_signatures[signature] = error_signatures.get(signature, 0) + 1
+                error_signatures[res.error] = error_signatures.get(res.error, 0) + 1
 
         categories_sorted = sorted(category_stats.items(), key=lambda item: item[0])
 
@@ -537,27 +569,31 @@ class TariffE2ERunner:
             handle.write(f"# CALE-TARIFF E2E Pilot Run — {dt.datetime.now(dt.timezone.utc).isoformat()}\n\n")
             handle.write("## Executive summary\n")
             total = sum(counts.values())
-            ok_rate = counts.get("OK", 0) / total if total else 0
-            no_cand_rate = counts.get("NO_CANDIDATES", 0) / total if total else 0
+            optimized_rate = counts.get("OK_OPTIMIZED", 0) / total if total else 0
+            baseline_only_rate = counts.get("OK_BASELINE_ONLY", 0) / total if total else 0
+            insufficient_inputs_rate = counts.get("INSUFFICIENT_INPUTS", 0) / total if total else 0
+            insufficient_rules_rate = counts.get("INSUFFICIENT_RULE_COVERAGE", 0) / total if total else 0
             err_rate = counts.get("ERROR", 0) / total if total else 0
             handle.write(
-                f"Processed: **{total}** | OK: **{ok_rate:.1%}** | NO_CANDIDATES: **{no_cand_rate:.1%}** | ERROR: **{err_rate:.1%}**\n\n"
+                f"Processed: **{total}** | OK_OPTIMIZED: **{optimized_rate:.1%}** | OK_BASELINE_ONLY: **{baseline_only_rate:.1%}** | "
+                f"INSUFFICIENT_INPUTS: **{insufficient_inputs_rate:.1%}** | INSUFFICIENT_RULE_COVERAGE: **{insufficient_rules_rate:.1%}** | ERROR: **{err_rate:.1%}**\n\n"
             )
             handle.write(
                 f"Determinism: {'PASS' if determinism.passed else 'FAIL'} (payload hash stability {determinism.payload_match_rate:.1%})\n\n"
             )
             proof_ok = self._compute_proof_pass_rate(results)
-            handle.write(f"Proof replay: {proof_ok:.1%} of OK SKUs passed\n\n")
+            handle.write(f"Proof replay: {proof_ok:.1%} of optimized SKUs passed\n\n")
 
             handle.write("## Category scorecard\n")
             for category, stats in categories_sorted:
                 processed = stats["processed"]
-                ok_pct = (stats["ok"] / processed) if processed else 0.0
-                evidence_cov = 1 - (stats["evidence_gaps"] / stats["ok"] if stats["ok"] else 0)
+                opt_pct = (stats["optimized"] / processed) if processed else 0.0
+                evidence_cov = 1 - (stats["evidence_gaps"] / stats["optimized"] if stats["optimized"] else 0)
                 avg_savings = sum(stats["savings"]) / len(stats["savings"]) if stats["savings"] else 0.0
                 avg_risk = sum(stats["risks"]) / len(stats["risks"]) if stats["risks"] else 0.0
                 handle.write(
-                    f"- **{category}** — processed {processed}, OK {ok_pct:.1%}, NO_CANDIDATES {stats['no_candidates']}, ERROR {stats['error']}; "
+                    f"- **{category}** — processed {processed}, optimized {opt_pct:.1%}, baseline-only {stats['baseline_only']}, "
+                    f"insufficient inputs {stats['insufficient_inputs']}, insufficient rules {stats['insufficient_rules']}, errors {stats['error']}; "
                     f"avg annual savings {avg_savings:.2f}, avg risk {avg_risk:.1f}, evidence coverage {evidence_cov:.1%}\n"
                 )
             handle.write("\n")
@@ -578,13 +614,13 @@ class TariffE2ERunner:
                     handle.write(f"  - {sig} ({count})\n")
             else:
                 handle.write("- No errors observed\n")
-            high_no_candidates = sorted(
-                [(cat, stats["no_candidates"]) for cat, stats in categories_sorted if stats["no_candidates"]],
+            baseline_only_pressure = sorted(
+                [(cat, stats["baseline_only"]) for cat, stats in categories_sorted if stats["baseline_only"]],
                 key=lambda item: -item[1],
             )
-            if high_no_candidates:
-                handle.write("- Categories with NO_CANDIDATES pressure:\n")
-                for cat, count in high_no_candidates:
+            if baseline_only_pressure:
+                handle.write("- Categories with baseline-only outcomes:\n")
+                for cat, count in baseline_only_pressure:
                     handle.write(f"  - {cat}: {count}\n")
             if evidence_gaps:
                 handle.write("- Evidence gaps observed in:\n")
@@ -594,7 +630,7 @@ class TariffE2ERunner:
 
             handle.write("## Next actions\n")
             handle.write("1. Tighten parser keyword coverage for ambiguous gadget/apparel cases.\n")
-            handle.write("2. Add mutation templates to reduce NO_CANDIDATES in textiles and gadgets.\n")
+            handle.write("2. Add baseline dossier pathways for textiles/electronics to reduce insufficient coverage.\n")
             handle.write("3. Expand evidence harvesting for load-bearing facts in footwear and electronics.\n")
             handle.write("4. Validate structured BOM fallbacks for mixed csv/json inputs.\n")
 
@@ -643,7 +679,15 @@ if __name__ == "__main__":
     counts = result.counts
     print(f"Report written to: {result.report_path}")
     print(
-        f"OK={counts.get('OK',0)} NO_CANDIDATES={counts.get('NO_CANDIDATES',0)} ERROR={counts.get('ERROR',0)}"
+        " ".join(
+            [
+                f"OK_OPTIMIZED={counts.get('OK_OPTIMIZED',0)}",
+                f"OK_BASELINE_ONLY={counts.get('OK_BASELINE_ONLY',0)}",
+                f"INSUFFICIENT_INPUTS={counts.get('INSUFFICIENT_INPUTS',0)}",
+                f"INSUFFICIENT_RULE_COVERAGE={counts.get('INSUFFICIENT_RULE_COVERAGE',0)}",
+                f"ERROR={counts.get('ERROR',0)}",
+            ]
+        )
     )
     print(
         f"Determinism={'PASS' if result.determinism.passed else 'FAIL'} payload stability {result.determinism.payload_match_rate:.1%}"

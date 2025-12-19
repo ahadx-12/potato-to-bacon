@@ -20,7 +20,7 @@ def test_suggest_engine_generates_expected_rates(description, expected_baseline,
 
     response = suggest_tariff_optimizations(request)
 
-    assert response.status == "OK"
+    assert response.status == "OK_OPTIMIZED"
     assert response.suggestions
     top = response.suggestions[0]
     assert pytest.approx(top.baseline_duty_rate, rel=1e-6) == expected_baseline
@@ -33,5 +33,5 @@ def test_suggest_engine_handles_unknown_category():
 
     response = suggest_tariff_optimizations(request)
 
-    assert response.status == "NO_CANDIDATES"
+    assert response.status in {"OK_BASELINE_ONLY", "INSUFFICIENT_RULE_COVERAGE", "INSUFFICIENT_INPUTS"}
     assert response.suggestions == []

@@ -134,15 +134,20 @@ def _render_category_snapshot(categories: Dict[str, int]) -> str:
 def _render_category_scorecard(by_category: Dict[str, Dict[str, object]]) -> str:
     if not by_category:
         return "No category coverage recorded."
-    lines = ["| Category | Processed | OK rate | NO_CANDIDATES | Errors | Avg annual savings | Avg risk | Load-bearing evidence |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
+    lines = [
+        "| Category | Processed | Optimized | Baseline-only | Insufficient inputs | Insufficient rules | Errors | Avg annual savings | Avg risk | Load-bearing evidence |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
     for category in sorted(by_category):
         metrics = by_category[category]
         lines.append(
-            "| {cat} | {processed} | {ok_rate:.1f}% | {no_cand} | {errors} | {avg_savings} | {avg_risk} | {load_bearing:.1f}% |".format(
+            "| {cat} | {processed} | {optimized} | {baseline_only} | {ins_inputs} | {ins_rules} | {errors} | {avg_savings} | {avg_risk} | {load_bearing:.1f}% |".format(
                 cat=category,
                 processed=metrics.get("processed", 0),
-                ok_rate=metrics.get("ok_rate", 0.0),
-                no_cand=metrics.get("no_candidates", 0),
+                optimized=metrics.get("optimized", 0),
+                baseline_only=metrics.get("baseline_only", 0),
+                ins_inputs=metrics.get("insufficient_inputs", 0),
+                ins_rules=metrics.get("insufficient_rules", 0),
                 errors=metrics.get("errors", 0),
                 avg_savings=(
                     f"${metrics['avg_best_annual_savings']:.2f}" if metrics.get("avg_best_annual_savings") is not None else "n/a"
@@ -158,12 +163,13 @@ def _compute_known_limitations(aggregates: Dict[str, object]) -> list[str]:
     limitations: list[str] = []
     by_category = aggregates.get("by_category", {}) or {}
     if by_category:
-        max_no_candidates = max((metrics.get("no_candidates", 0) for metrics in by_category.values()), default=0)
-        worst_no_candidates = [
-            name for name, metrics in by_category.items() if metrics.get("no_candidates", 0) == max_no_candidates and max_no_candidates > 0
+        max_baseline_only = max((metrics.get("baseline_only", 0) for metrics in by_category.values()), default=0)
+        worst_baseline_only = [
+            name for name, metrics in by_category.items()
+            if metrics.get("baseline_only", 0) == max_baseline_only and max_baseline_only > 0
         ]
-        if worst_no_candidates:
-            limitations.append(f"Highest NO_CANDIDATES: {', '.join(sorted(worst_no_candidates))} ({max_no_candidates})")
+        if worst_baseline_only:
+            limitations.append(f"Highest baseline-only: {', '.join(sorted(worst_baseline_only))} ({max_baseline_only})")
 
     unknown_bucket = by_category.get("other") or {}
     unknown_processed = unknown_bucket.get("processed", 0)

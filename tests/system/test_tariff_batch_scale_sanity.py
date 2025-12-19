@@ -38,7 +38,7 @@ def test_tariff_batch_scale_sanity(system_client):
     assert data_first["processed_skus"] == len(skus)
 
     for result in data_first["results"]:
-        assert result["status"] == "OK"
+        assert result["status"] in {"OK_OPTIMIZED"}
         assert result["best"]
         assert result["best"]["proof_id"]
 

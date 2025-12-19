@@ -41,6 +41,7 @@ from potatobacon.api.routes_tariff_sku_optimize import router as tariff_sku_opti
 from potatobacon.api.routes_tariff_batch_scan import router as tariff_batch_scan_router
 from potatobacon.api.routes_tariff_suggest import router as tariff_suggest_router
 from potatobacon.api.routes_tariff_parse import router as tariff_parse_router
+from potatobacon.api.routes_tariff_sku_dossier import router as tariff_sku_dossier_router
 from potatobacon.api.routes_proofs import router as proofs_router
 from potatobacon.api.routes_law_contexts import router as law_contexts_router
 from potatobacon.api.security import ENGINE_VERSION, require_api_key
@@ -113,6 +114,7 @@ app.include_router(tariff_sku_optimize_router)
 app.include_router(tariff_batch_scan_router)
 app.include_router(tariff_suggest_router)
 app.include_router(tariff_parse_router)
+app.include_router(tariff_sku_dossier_router)
 app.include_router(proofs_router)
 app.include_router(law_contexts_router)
 
@@ -959,4 +961,3 @@ async def ingest_pdf_manifest(
         extracted_sections=len(sources),
         **result,
     )
-

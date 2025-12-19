@@ -16,7 +16,7 @@ def test_tariff_e2e_subset(tmp_path):
     assert result.determinism.passed, f"Determinism failed: {result.determinism.details}"
     assert abs(result.proof_replay_pass_rate - 1.0) < 1e-9
 
-    ok_results = [res for res in result.sku_results if res.status == "OK" and res.proof_replay]
+    ok_results = [res for res in result.sku_results if res.status == "OK_OPTIMIZED" and res.proof_replay]
     assert all(res.proof_replay.ok for res in ok_results)
 
     assert result.report_path.exists()

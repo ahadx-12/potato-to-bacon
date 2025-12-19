@@ -37,7 +37,15 @@ def main() -> None:
     counts = result.counts
     print(f"Report written to: {result.report_path}")
     print(
-        f"OK={counts.get('OK',0)} NO_CANDIDATES={counts.get('NO_CANDIDATES',0)} ERROR={counts.get('ERROR',0)}"
+        " ".join(
+            [
+                f"OK_OPTIMIZED={counts.get('OK_OPTIMIZED',0)}",
+                f"OK_BASELINE_ONLY={counts.get('OK_BASELINE_ONLY',0)}",
+                f"INSUFFICIENT_INPUTS={counts.get('INSUFFICIENT_INPUTS',0)}",
+                f"INSUFFICIENT_RULE_COVERAGE={counts.get('INSUFFICIENT_RULE_COVERAGE',0)}",
+                f"ERROR={counts.get('ERROR',0)}",
+            ]
+        )
     )
     print(
         f"Determinism={'PASS' if result.determinism.passed else 'FAIL'} payload stability {result.determinism.payload_match_rate:.1%}"
