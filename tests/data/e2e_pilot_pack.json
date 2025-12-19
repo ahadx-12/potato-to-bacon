@@ -1,0 +1,248 @@
+[
+  {
+    "sku_id": "FAST-001",
+    "description": "steel chassis bolt zinc plated",
+    "declared_value_per_unit": 0.35,
+    "annual_volume": 300000,
+    "origin_country": "CN",
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "FAST-002",
+    "description": "aluminum screw fastener for enclosures",
+    "declared_value_per_unit": 0.28,
+    "annual_volume": 180000,
+    "origin_country": "CN",
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "FAST-003",
+    "description": "brass fastener with nylon patch",
+    "declared_value_per_unit": 0.45,
+    "annual_volume": 140000,
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "FAST-004",
+    "description": "stainless screw; textile washer included",
+    "declared_value_per_unit": 0.52,
+    "annual_volume": 120000,
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "FAST-005",
+    "description": "steel bolt for automotive chassis (cn origin)",
+    "declared_value_per_unit": 0.38,
+    "annual_volume": 210000,
+    "origin_country": "CN",
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "FAST-006",
+    "description": "tiny aluminum rivet fastener",
+    "declared_value_per_unit": 0.22,
+    "annual_volume": 90000,
+    "origin_country": "VN",
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "FOOT-001",
+    "description": "athletic sneaker with rubber sole, felt overlay on vamp",
+    "declared_value_per_unit": 24.0,
+    "annual_volume": 16000,
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "FOOT-002",
+    "description": "work boot textile upper >50% surface, rubber sole",
+    "declared_value_per_unit": 48.0,
+    "annual_volume": 8000,
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "FOOT-003",
+    "description": "casual shoe leather-looking textile upper felt overlay",
+    "declared_value_per_unit": 22.0,
+    "annual_volume": 15000,
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "FOOT-004",
+    "description": "kids sneaker mesh knit top + rubber sole",
+    "declared_value_per_unit": 14.0,
+    "annual_volume": 26000,
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "ELEC-001",
+    "description": "Rugged PCB controller board with microcontroller, tiny lithium cell \nbackup and coated traces for damp basements",
+    "bom_json": {
+      "items": [
+        {
+          "part_id": "pcb1",
+          "description": "4-layer FR4 PCB",
+          "material": "pcb",
+          "quantity": 1,
+          "unit_cost": 6.5,
+          "country_of_origin": "CN"
+        },
+        {
+          "part_id": "bat1",
+          "description": "Li-ion coin cell",
+          "material": "battery",
+          "quantity": 1,
+          "unit_cost": 2.2
+        }
+      ]
+    },
+    "declared_value_per_unit": 48.5,
+    "annual_volume": 12000,
+    "origin_country": "CN",
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "ELEC-002",
+    "description": "sensor pod with PCB, rubber gasket + aluminum housing; usb tethered",
+    "bom_csv": "part_id,description,material,quantity,unit_cost,country_of_origin\np1,pcb core,pcb,1,7.2,CN\np2,usb lead,copper,1,1.1,CN\np3,aluminum shell,aluminum,1,3.4,CN",
+    "declared_value_per_unit": 35.0,
+    "annual_volume": 5000,
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "ELEC-003",
+    "description": "compact pcb module coated + conformal spray, nylon harness",
+    "bom_text": "PCB logic board; coated. nylon harness + little battery tap",
+    "declared_value_per_unit": 22.0,
+    "annual_volume": 18000,
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "ELEC-004",
+    "description": "HDMI connector cable w/ pcb stub, molded plastic shell",
+    "bom_text": "hdmi cable + connector; little pcb; plastic shell",
+    "declared_value_per_unit": 9.5,
+    "annual_volume": 40000,
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "ELEC-005",
+    "description": "Enclosure with pcb + steel faceplate, felt overlay inside",
+    "bom_text": "pcb inside steel box; felt overlay liner",
+    "declared_value_per_unit": 18.0,
+    "annual_volume": 9000,
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "ELEC-006",
+    "description": "PCB logic brick / wired harness / lithium pack",
+    "declared_value_per_unit": 14.0,
+    "annual_volume": 15000,
+    "origin_country": "MX",
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "ELEC-007",
+    "description": "tiny pcb sensor \u2022 coated, enclosure plastic shell, usb plug",
+    "declared_value_per_unit": 12.0,
+    "annual_volume": 21000,
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "ELEC-008",
+    "description": "Industrial control PCB with battery pack and aluminum heat spreader",
+    "declared_value_per_unit": 55.0,
+    "annual_volume": 4000,
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "APP-001",
+    "description": "women's knit legging 60% polyester / 40% nylon with laminated knee patch",
+    "declared_value_per_unit": 8.5,
+    "annual_volume": 50000,
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "APP-002",
+    "description": "woven cotton canvas jacket \nwith waterproof coated panels",
+    "declared_value_per_unit": 32.0,
+    "annual_volume": 12000,
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "APP-003",
+    "description": "polyester knit hoodie lined, coated zip \u2022 imports",
+    "declared_value_per_unit": 19.0,
+    "annual_volume": 28000,
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "APP-004",
+    "description": "nylon woven pants with rubberized coating on seat",
+    "declared_value_per_unit": 16.0,
+    "annual_volume": 18000,
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "APP-005",
+    "description": "cotton tshirt, simple knit top, no coating",
+    "declared_value_per_unit": 5.2,
+    "annual_volume": 70000,
+    "expect_candidates": false
+  },
+  {
+    "sku_id": "APP-006",
+    "description": "textile gloves knit nylon / polyester blend; palm coating",
+    "declared_value_per_unit": 6.8,
+    "annual_volume": 34000,
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "APP-007",
+    "description": "woven denim shirt cotton rich, brushed coating inside",
+    "declared_value_per_unit": 14.5,
+    "annual_volume": 15000,
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "APP-008",
+    "description": "knit beanie cap polyester acrylic mix, laminated logo patch",
+    "declared_value_per_unit": 4.5,
+    "annual_volume": 26000,
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "GAD-001",
+    "description": "odd gadget: plastic shell with felt pads and magnet",
+    "declared_value_per_unit": 7.0,
+    "annual_volume": 9000,
+    "expect_candidates": false
+  },
+  {
+    "sku_id": "GAD-002",
+    "description": "household gizmo with textile wrap, usb plug, maybe cable?",
+    "declared_value_per_unit": 11.0,
+    "annual_volume": 7000,
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "GAD-003",
+    "description": "novelty device (rubber + plastic + pcb rumor) unclear use",
+    "declared_value_per_unit": 9.0,
+    "annual_volume": 5000,
+    "expect_candidates": false
+  },
+  {
+    "sku_id": "GAD-004",
+    "description": "mystery widget with textile sleeve, coated finish",
+    "declared_value_per_unit": 6.5,
+    "annual_volume": 6200,
+    "expect_candidates": true
+  },
+  {
+    "sku_id": "GAD-005",
+    "description": "desk gadget: aluminum bar + rubber feet + felt overlay",
+    "declared_value_per_unit": 12.5,
+    "annual_volume": 4000,
+    "expect_candidates": true
+  }
+]
