@@ -15,7 +15,7 @@ def test_converse_suggest(system_client):
     assert response.status_code == 200, response.text
 
     data = response.json()
-    assert data["status"] == "OK"
+    assert data["status"] == "OK_OPTIMIZED"
     assert data["generated_candidates_count"] >= 1
 
     suggestion = data["suggestions"][0]
@@ -42,7 +42,7 @@ def test_tesla_bolt_suggest(system_client):
     assert response.status_code == 200, response.text
 
     data = response.json()
-    assert data["status"] == "OK"
+    assert data["status"] == "OK_OPTIMIZED"
 
     suggestion = data["suggestions"][0]
     assert pytest.approx(suggestion["baseline_duty_rate"], rel=1e-6) == 6.5
@@ -65,7 +65,7 @@ def test_unknown_suggest(system_client):
     assert response.status_code == 200, response.text
 
     data = response.json()
-    assert data["status"] == "NO_CANDIDATES"
+    assert data["status"] in {"OK_BASELINE_ONLY", "INSUFFICIENT_INPUTS", "INSUFFICIENT_RULE_COVERAGE"}
     assert data["suggestions"] == []
 
 

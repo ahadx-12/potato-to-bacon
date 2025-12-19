@@ -58,20 +58,24 @@ def batch_scan_tariffs(request: TariffBatchScanRequestModel) -> TariffBatchScanR
             )
             suggest_response = suggest_tariff_optimizations(suggest_request)
 
-            if suggest_response.status == "NO_CANDIDATES" or not suggest_response.suggestions:
+            if suggest_response.status in {
+                "OK_BASELINE_ONLY",
+                "INSUFFICIENT_RULE_COVERAGE",
+                "INSUFFICIENT_INPUTS",
+            } or not suggest_response.suggestions:
                 suggestions = suggest_response.suggestions if request.include_all_suggestions else None
                 skipped.append(
-                TariffBatchSkuResultModel(
-                    sku_id=sku.sku_id,
-                    description=sku.description,
-                    status="NO_CANDIDATES",
-                    law_context=suggest_response.law_context,
-                    tariff_manifest_hash=suggest_response.tariff_manifest_hash,
-                    baseline_scenario=suggest_response.baseline_scenario,
-                    best=None,
-                    suggestions=suggestions,
-                    rank_score=None,
-                    error=None,
+                    TariffBatchSkuResultModel(
+                        sku_id=sku.sku_id,
+                        description=sku.description,
+                        status=suggest_response.status,
+                        law_context=suggest_response.law_context,
+                        tariff_manifest_hash=suggest_response.tariff_manifest_hash,
+                        baseline_scenario=suggest_response.baseline_scenario,
+                        best=None,
+                        suggestions=suggestions,
+                        rank_score=None,
+                        error=None,
                     )
                 )
                 continue
@@ -88,7 +92,7 @@ def batch_scan_tariffs(request: TariffBatchScanRequestModel) -> TariffBatchScanR
                 TariffBatchSkuResultModel(
                     sku_id=sku.sku_id,
                     description=sku.description,
-                    status="OK",
+                    status=suggest_response.status,
                     law_context=suggest_response.law_context,
                     tariff_manifest_hash=suggest_response.tariff_manifest_hash,
                     baseline_scenario=suggest_response.baseline_scenario,

@@ -101,6 +101,46 @@ class TariffDossierModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class BaselineCandidateModel(BaseModel):
+    """Single baseline classification/duty outcome with provenance."""
+
+    candidate_id: str
+    active_codes: List[str]
+    duty_rate: float
+    provenance_chain: List[Dict[str, Any]]
+    confidence: float = Field(ge=0.0, le=1.0)
+    missing_facts: List[str] = Field(default_factory=list)
+    compliance_flags: Dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TariffSkuDossierModel(BaseModel):
+    """Unified dossier for any tariff SKU evaluation."""
+
+    status: Literal[
+        "OK_OPTIMIZED",
+        "OK_BASELINE_ONLY",
+        "INSUFFICIENT_RULE_COVERAGE",
+        "INSUFFICIENT_INPUTS",
+        "ERROR",
+    ]
+    sku_id: Optional[str]
+    law_context: str
+    tariff_manifest_hash: str
+    proof_id: Optional[str] = None
+    proof_payload_hash: Optional[str] = None
+    product_spec: Optional[Dict[str, Any]] = None
+    compiled_facts: Optional[Dict[str, Any]] = None
+    fact_evidence: Optional[List[Any]] = None
+    baseline_candidates: List[BaselineCandidateModel] = Field(default_factory=list)
+    best_optimization: Optional[Dict[str, Any]] = None
+    why_not_optimized: List[str] = Field(default_factory=list)
+    errors: Optional[List[str]] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class TariffExplainResponseModel(BaseModel):
     """Explainability response for tariff consistency checks."""
 
@@ -247,7 +287,13 @@ class TariffSuggestionItemModel(BaseModel):
 class TariffSuggestResponseModel(BaseModel):
     """Response payload for top-k tariff suggestions."""
 
-    status: Literal["OK", "NO_CANDIDATES"]
+    status: Literal[
+        "OK_OPTIMIZED",
+        "OK_BASELINE_ONLY",
+        "INSUFFICIENT_RULE_COVERAGE",
+        "INSUFFICIENT_INPUTS",
+        "ERROR",
+    ]
     sku_id: Optional[str]
     description: str
     law_context: Optional[str]
@@ -257,6 +303,10 @@ class TariffSuggestResponseModel(BaseModel):
     tariff_manifest_hash: Optional[str] = None
     fact_evidence: Optional[List[FactEvidenceModel]] = None
     product_spec: Optional["ProductSpecModel"] = None
+    baseline_candidates: List[BaselineCandidateModel] = Field(default_factory=list)
+    why_not_optimized: List[str] = Field(default_factory=list)
+    proof_id: Optional[str] = None
+    proof_payload_hash: Optional[str] = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -335,7 +385,13 @@ class TariffBatchSkuResultModel(BaseModel):
 
     sku_id: str
     description: str
-    status: Literal["OK", "NO_CANDIDATES", "ERROR"]
+    status: Literal[
+        "OK_OPTIMIZED",
+        "OK_BASELINE_ONLY",
+        "INSUFFICIENT_RULE_COVERAGE",
+        "INSUFFICIENT_INPUTS",
+        "ERROR",
+    ]
     law_context: Optional[str]
     tariff_manifest_hash: Optional[str] = None
     baseline_scenario: Dict[str, Any]

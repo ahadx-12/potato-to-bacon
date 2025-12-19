@@ -30,7 +30,7 @@ def test_proof_replay_integrity(system_client: TestClient):
         assert response.status_code == 200, response.text
 
         data = response.json()
-        assert data["status"] == "OK"
+        assert data["status"] == "OK_OPTIMIZED"
         best = data["suggestions"][0]
         proof_id = best["proof_id"]
 

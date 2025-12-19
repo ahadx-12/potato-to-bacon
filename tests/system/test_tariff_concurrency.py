@@ -58,7 +58,7 @@ def test_tariff_concurrency(system_client):
     suggest_payloads = [p for label, _, p in statuses if label == "suggest"]
     assert suggest_payloads
     for payload in suggest_payloads:
-        assert payload["status"] == "OK"
+        assert payload["status"] in {"OK_OPTIMIZED", "OK_BASELINE_ONLY"}
         assert payload["suggestions"]
 
     parse_payloads = [p for label, _, p in statuses if label == "parse"]

@@ -10,6 +10,7 @@ from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_f
 from .atoms_hts import DUTY_RATES
 from .engine import apply_mutations
 from .models import TariffScenario
+from .normalizer import normalize_compiled_facts
 
 
 @dataclass
@@ -86,7 +87,8 @@ def optimize_tariff(
     atoms, context_meta = load_atoms_for_context(resolved_context)
     context = context_meta["context_id"]
 
-    baseline_scenario = TariffScenario(name="baseline", facts=dict(base_facts))
+    normalized_base, _ = normalize_compiled_facts(base_facts)
+    baseline_scenario = TariffScenario(name="baseline", facts=normalized_base)
     baseline_eval = _evaluate_scenario(atoms, baseline_scenario, "baseline")
 
     best_rate = baseline_eval.duty_rate
@@ -96,6 +98,8 @@ def optimize_tariff(
     for key in sorted(candidate_mutations.keys()):
         for value in candidate_mutations[key]:
             mutated_scenario = apply_mutations(baseline_scenario, {key: value})
+            normalized_mutated, _ = normalize_compiled_facts(mutated_scenario.facts)
+            mutated_scenario = TariffScenario(name=mutated_scenario.name, facts=normalized_mutated)
             evaluation = _evaluate_scenario(atoms, mutated_scenario, "optimized")
             if evaluation.duty_rate is None:
                 continue
@@ -132,7 +136,7 @@ def optimize_tariff(
 
     proof_handle = record_tariff_proof(
         law_context=context,
-        base_facts=base_facts,
+        base_facts=normalized_base,
         mutations={"candidates": candidate_mutations, "applied": best_mutation or {}},
         baseline_active=baseline_eval.active_atoms,
         optimized_active=best_eval.active_atoms,

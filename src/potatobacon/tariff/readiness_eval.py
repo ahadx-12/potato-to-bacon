@@ -69,8 +69,10 @@ LOAD_BEARING_FACTS: Dict[str, List[str]] = {
 def _init_category_bucket(category: str) -> Dict[str, Any]:
     return {
         "processed": 0,
-        "ok": 0,
-        "no_candidates": 0,
+        "optimized": 0,
+        "baseline_only": 0,
+        "insufficient_inputs": 0,
+        "insufficient_rules": 0,
         "errors": 0,
         "savings_values": [],
         "risk_scores": [],
@@ -198,8 +200,8 @@ def run_readiness_eval(law_context: str | None = None, top_k: int = 3, include_e
                     else:
                         evidence_ok = True
 
-            if status_label == "OK" and not response.suggestions:
-                status_label = "NO_CANDIDATES"
+            if status_label == "OK_OPTIMIZED" and not response.suggestions:
+                status_label = "OK_BASELINE_ONLY"
 
             baseline = response.baseline_scenario or {}
             if baseline.get("requires_origin_data"):
@@ -266,18 +268,24 @@ def run_readiness_eval(law_context: str | None = None, top_k: int = 3, include_e
             origin_stats["origin_provided"] += 1
 
         if category_value in category_buckets:
-            if status_label == "OK":
-                category_buckets[category_value]["ok"] += 1
+            if status_label == "OK_OPTIMIZED":
+                category_buckets[category_value]["optimized"] += 1
                 if annual_savings_value is not None:
                     category_buckets[category_value]["savings_values"].append(annual_savings_value)
-            elif status_label == "NO_CANDIDATES":
-                category_buckets[category_value]["no_candidates"] += 1
+            elif status_label == "OK_BASELINE_ONLY":
+                category_buckets[category_value]["baseline_only"] += 1
+            elif status_label == "INSUFFICIENT_INPUTS":
+                category_buckets[category_value]["insufficient_inputs"] += 1
+            elif status_label == "INSUFFICIENT_RULE_COVERAGE":
+                category_buckets[category_value]["insufficient_rules"] += 1
             elif status_label == "ERROR":
                 category_buckets[category_value]["errors"] += 1
 
     processed = len(results)
-    ok = len([r for r in results if r["status"] == "OK"])
-    no_candidates = len([r for r in results if r["status"] == "NO_CANDIDATES"])
+    ok = len([r for r in results if r["status"] == "OK_OPTIMIZED"])
+    baseline_only = len([r for r in results if r["status"] == "OK_BASELINE_ONLY"])
+    insufficient_inputs = len([r for r in results if r["status"] == "INSUFFICIENT_INPUTS"])
+    insufficient_rules = len([r for r in results if r["status"] == "INSUFFICIENT_RULE_COVERAGE"])
     errors = len([r for r in results if r["status"] == "ERROR"])
     ok_pct = (ok / processed * 100.0) if processed else 0.0
 
@@ -316,15 +324,19 @@ def run_readiness_eval(law_context: str | None = None, top_k: int = 3, include_e
     by_category: Dict[str, Dict[str, Any]] = {}
     for category, bucket in category_buckets.items():
         processed_count = bucket.get("processed", 0)
-        ok_count = bucket.get("ok", 0)
-        no_candidates_count = bucket.get("no_candidates", 0)
+        opt_count = bucket.get("optimized", 0)
+        baseline_only_count = bucket.get("baseline_only", 0)
+        insufficient_inputs_count = bucket.get("insufficient_inputs", 0)
+        insufficient_rules_count = bucket.get("insufficient_rules", 0)
         error_count = bucket.get("errors", 0)
         by_category[category] = {
             "processed": processed_count,
-            "ok": ok_count,
-            "no_candidates": no_candidates_count,
+            "optimized": opt_count,
+            "baseline_only": baseline_only_count,
+            "insufficient_inputs": insufficient_inputs_count,
+            "insufficient_rules": insufficient_rules_count,
             "errors": error_count,
-            "ok_rate": (ok_count / processed_count * 100.0) if processed_count else 0.0,
+            "optimized_rate": (opt_count / processed_count * 100.0) if processed_count else 0.0,
             "avg_best_annual_savings": statistics.mean(bucket["savings_values"])
             if bucket.get("savings_values")
             else None,
@@ -371,7 +383,7 @@ def run_readiness_eval(law_context: str | None = None, top_k: int = 3, include_e
         second_best = second.suggestions[0] if second.suggestions else None
 
         if not first_best and not second_best:
-            stable = first.status == second.status == "NO_CANDIDATES"
+            stable = first.status == second.status in {"OK_BASELINE_ONLY", "INSUFFICIENT_INPUTS", "INSUFFICIENT_RULE_COVERAGE"}
         else:
             stable = (
                 first_best is not None
@@ -414,8 +426,10 @@ def run_readiness_eval(law_context: str | None = None, top_k: int = 3, include_e
 
     aggregates = {
         "processed": processed,
-        "ok": ok,
-        "no_candidates": no_candidates,
+        "ok_optimized": ok,
+        "baseline_only": baseline_only,
+        "insufficient_inputs": insufficient_inputs,
+        "insufficient_rules": insufficient_rules,
         "errors": errors,
         "ok_pct": ok_pct,
         "savings_summary": savings_summary,
