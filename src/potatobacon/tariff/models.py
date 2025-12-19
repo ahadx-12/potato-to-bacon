@@ -264,12 +264,16 @@ class TariffSuggestionItemModel(BaseModel):
     """Single suggestion with optimized tariff projection and provenance."""
 
     human_summary: str
+    lever_id: Optional[str] = None
+    lever_feasibility: Optional[str] = None
+    evidence_requirements: List[str] = Field(default_factory=list)
     baseline_duty_rate: float
     optimized_duty_rate: float
     savings_per_unit_rate: float
     savings_per_unit_value: float
     annual_savings_value: Optional[float]
     best_mutation: Dict[str, Any]
+    classification_confidence: Optional[float] = None
     active_codes_baseline: List[str]
     active_codes_optimized: List[str]
     provenance_chain: List[Dict[str, Any]]

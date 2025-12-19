@@ -159,7 +159,8 @@ def extract_product_spec(
         for key, keywords in fiber_keywords.items():
             hits = _detect_keywords(lowered, keywords)
             if hits and fiber_pcts[key] is None:
-                fiber_pcts[key] = 60.0
+                existing_hits = sum(1 for val in fiber_pcts.values() if val is not None)
+                fiber_pcts[key] = 55.0 if existing_hits == 0 else 45.0
                 evidence.append(_capture_snippet(source_text, hits[0], source_name))
         for keyword, material in material_keywords.items():
             if keyword in lowered:
