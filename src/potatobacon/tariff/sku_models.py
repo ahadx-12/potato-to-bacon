@@ -117,10 +117,86 @@ class TariffSkuDossierV2Model(BaseModel):
     compiled_facts: Optional[Dict[str, Any]] = None
     fact_evidence: Optional[List[FactEvidenceModel]] = None
     evidence_requested: bool = False
+    analysis_session_id: Optional[str] = None
+    attached_evidence_ids: List[str] = Field(default_factory=list)
+    fact_overrides: Optional[Dict[str, FactOverrideModel]] = None
+    data_quality: Optional[Dict[str, Any]] = None
     why_not_optimized: List[str] = Field(default_factory=list)
     errors: Optional[List[str]] = None
 
     model_config = ConfigDict(extra="forbid")
+
+
+class FactOverrideModel(BaseModel):
+    """Session-level fact override with provenance and optional evidence links."""
+
+    value: Any
+    source: str
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    evidence_ids: List[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("evidence_ids", mode="before")
+    @classmethod
+    def _normalize_evidence_ids(cls, value):
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value]
+        return value
+
+    @field_validator("evidence_ids", mode="after")
+    @classmethod
+    def _dedupe_and_sort(cls, values: List[str]) -> List[str]:
+        return sorted({str(item) for item in values})
+
+    def serializable_dict(self) -> Dict[str, Any]:
+        payload = self.model_dump()
+        payload["evidence_ids"] = sorted(self.evidence_ids)
+        return payload
+
+
+class TariffAnalysisSessionModel(BaseModel):
+    """Analysis session tying SKU inputs to iterative dossier refinement."""
+
+    session_id: str
+    sku_id: str
+    law_context: str
+    fact_overrides: Dict[str, FactOverrideModel] = Field(default_factory=dict)
+    attached_evidence_ids: List[str] = Field(default_factory=list)
+    status: Literal["OPEN", "READY_TO_OPTIMIZE", "OPTIMIZED"] = "OPEN"
+    created_at: str
+    updated_at: str
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("created_at", "updated_at", mode="before")
+    @classmethod
+    def _normalize_timestamp(cls, value: Any) -> str:
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return str(value)
+
+    @field_validator("attached_evidence_ids", mode="before")
+    @classmethod
+    def _normalize_attached_ids(cls, value):
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value]
+        return value
+
+    @field_validator("attached_evidence_ids", mode="after")
+    @classmethod
+    def _dedupe_attached(cls, values: List[str]) -> List[str]:
+        return sorted({str(item) for item in values})
+
+    def serializable_dict(self) -> Dict[str, Any]:
+        payload = self.model_dump()
+        payload["attached_evidence_ids"] = sorted(self.attached_evidence_ids)
+        payload["fact_overrides"] = {key: value.serializable_dict() for key, value in sorted(self.fact_overrides.items())}
+        return payload
 
 
 def build_sku_metadata_snapshot(

@@ -9,13 +9,14 @@ from potatobacon.tariff.bom_ingest import bom_to_text, parse_bom_csv
 from potatobacon.tariff.candidate_search import generate_baseline_candidates
 from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_for_context
 from potatobacon.tariff.levers import applicable_levers
-from potatobacon.tariff.models import BaselineCandidateModel, TariffSuggestionItemModel
+from potatobacon.tariff.models import BaselineCandidateModel, FactEvidenceModel, TariffSuggestionItemModel
 from potatobacon.tariff.mutation_generator import baseline_facts_from_profile, infer_product_profile
 from potatobacon.tariff.normalizer import normalize_compiled_facts, validate_minimum_inputs
 from potatobacon.tariff.parser import compile_facts_with_evidence, extract_product_spec
 from potatobacon.tariff.questions import generate_missing_fact_questions
 from potatobacon.tariff.risk import assess_tariff_risk
 from potatobacon.tariff.sku_models import (
+    FactOverrideModel,
     SKUDossierBaselineModel,
     SKUDossierOptimizedModel,
     TariffSkuDossierV2Model,
@@ -40,6 +41,38 @@ def _merge_facts(baseline: Dict[str, Any], compiled: Dict[str, Any]) -> Dict[str
     return merged
 
 
+def _apply_fact_overrides(
+    merged_facts: Dict[str, Any],
+    overrides: Dict[str, FactOverrideModel],
+) -> tuple[Dict[str, Any], Dict[str, Any], list[FactEvidenceModel]]:
+    updated = dict(merged_facts)
+    overrides_payload: Dict[str, Any] = {}
+    override_evidence: list[FactEvidenceModel] = []
+    for key in sorted(overrides.keys()):
+        override = overrides[key]
+        updated[key] = override.value
+        overrides_payload[key] = override.serializable_dict()
+        override_evidence.append(
+            FactEvidenceModel(
+                fact_key=key,
+                value=override.value,
+                confidence=override.confidence if override.confidence is not None else 0.95,
+                evidence=[],
+                derived_from=[override.source],
+                risk_reason="Manual override applied via analysis session",
+            )
+        )
+    override_evidence.sort(
+        key=lambda item: (
+            item.fact_key,
+            str(item.value),
+            item.confidence,
+            len(item.evidence),
+        )
+    )
+    return updated, overrides_payload, override_evidence
+
+
 def _evidence_pack(
     *,
     product_spec: Any,
@@ -47,6 +80,9 @@ def _evidence_pack(
     fact_evidence: Any,
     extraction_evidence: Any,
     sku_metadata: Dict[str, Any],
+    analysis_session_id: str | None = None,
+    attached_evidence_ids: list[str] | None = None,
+    fact_overrides: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     pack: Dict[str, Any] = {
         "product_spec": product_spec,
@@ -54,6 +90,15 @@ def _evidence_pack(
         "fact_evidence": fact_evidence,
         "extraction_evidence": extraction_evidence,
     }
+    if fact_overrides:
+        pack["fact_overrides"] = fact_overrides
+    if analysis_session_id or attached_evidence_ids:
+        session_pack: Dict[str, Any] = {}
+        if analysis_session_id:
+            session_pack["session_id"] = analysis_session_id
+        if attached_evidence_ids:
+            session_pack["attached_evidence_ids"] = sorted(attached_evidence_ids)
+        pack["analysis_session"] = session_pack
     if sku_metadata:
         pack["sku_metadata"] = sku_metadata
     return pack
@@ -104,6 +149,9 @@ def build_sku_dossier_v2(
     optimize: bool = True,
     risk_penalize: Optional[bool] = None,  # reserved for future risk-aware ranking
     store: SKUStore | None = None,
+    fact_overrides: Dict[str, FactOverrideModel] | None = None,
+    attached_evidence_ids: list[str] | None = None,
+    session_id: str | None = None,
 ) -> TariffSkuDossierV2Model:
     """Generate a SKU-first dossier covering baseline, optimization, and questions."""
 
@@ -111,6 +159,12 @@ def build_sku_dossier_v2(
     record = sku_store.get(sku_id)
     if not record:
         raise KeyError(sku_id)
+
+    overrides_input = fact_overrides or {}
+    override_models: Dict[str, FactOverrideModel] = {}
+    for key, value in overrides_input.items():
+        override_models[key] = value if isinstance(value, FactOverrideModel) else FactOverrideModel(**value)
+    attached_evidence_ids = sorted({eid for eid in attached_evidence_ids or []})
 
     bom_structured = record.bom_json
     if bom_structured is None and record.bom_csv:
@@ -136,6 +190,18 @@ def build_sku_dossier_v2(
     )
     baseline_facts = baseline_facts_from_profile(profile)
     merged_facts = _merge_facts(baseline_facts, compiled_facts_raw)
+    merged_facts, overrides_payload, override_evidence = _apply_fact_overrides(merged_facts, override_models)
+    if override_evidence:
+        fact_evidence = list(fact_evidence or [])
+        fact_evidence.extend(override_evidence)
+        fact_evidence.sort(
+            key=lambda item: (
+                item.fact_key,
+                str(item.value),
+                item.confidence,
+                len(item.evidence),
+            )
+        )
     normalized_facts, normalization_notes = normalize_compiled_facts(merged_facts)
     missing_inputs = validate_minimum_inputs(product_spec.model_dump(), normalized_facts)
     compiled_pack = {
@@ -144,6 +210,12 @@ def build_sku_dossier_v2(
         "normalized": normalized_facts,
     }
     compiled_pack.update(compiled_facts_raw)
+    if overrides_payload:
+        compiled_pack["overrides"] = overrides_payload
+    if attached_evidence_ids:
+        compiled_pack["attached_evidence_ids"] = attached_evidence_ids
+    if session_id:
+        compiled_pack["analysis_session_id"] = session_id
 
     resolved_context = law_context or DEFAULT_CONTEXT_ID
     atoms, context_meta = load_atoms_for_context(resolved_context)
@@ -171,6 +243,9 @@ def build_sku_dossier_v2(
             annual_volume=record.annual_volume,
             metadata=record.metadata,
         ),
+        analysis_session_id=session_id,
+        attached_evidence_ids=attached_evidence_ids,
+        fact_overrides=overrides_payload,
     )
 
     questions = generate_missing_fact_questions(
@@ -180,6 +255,11 @@ def build_sku_dossier_v2(
         candidates=baseline_candidates,
     )
     has_blocking_questions = bool(questions.missing_facts)
+    data_quality = {
+        "fact_overrides_applied": len(overrides_payload),
+        "attached_evidence_references": len(attached_evidence_ids),
+        "missing_facts_remaining": len(questions.missing_facts),
+    }
 
     status: str = "OK_BASELINE_ONLY"
     why_not_optimized: list[str] = normalization_notes[:]
@@ -321,6 +401,10 @@ def build_sku_dossier_v2(
         compiled_facts=compiled_pack,
         fact_evidence=fact_evidence if evidence_requested else None,
         evidence_requested=evidence_requested,
+        analysis_session_id=session_id,
+        attached_evidence_ids=attached_evidence_ids,
+        fact_overrides=overrides_payload or None,
+        data_quality=data_quality,
         why_not_optimized=why_not_optimized,
         errors=None if status != "ERROR" else ["Unexpected error"],
     )

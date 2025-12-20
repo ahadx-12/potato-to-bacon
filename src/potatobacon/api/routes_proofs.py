@@ -31,6 +31,8 @@ def fetch_proof_evidence(proof_id: str):
     return {
         "proof_id": proof_id,
         "law_context": proof.get("law_context"),
+        "analysis_session": pack.get("analysis_session"),
+        "fact_overrides": pack.get("fact_overrides"),
         "product_spec": pack.get("product_spec"),
         "compiled_facts": pack.get("compiled_facts"),
         "fact_evidence": pack.get("fact_evidence"),
