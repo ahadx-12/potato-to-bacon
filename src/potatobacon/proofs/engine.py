@@ -94,6 +94,27 @@ def _sorted_evidence_pack(pack: Dict[str, Any] | None) -> Dict[str, Any] | None:
     metadata = sorted_pack.get("sku_metadata")
     if isinstance(metadata, dict):
         sorted_pack["sku_metadata"] = {key: metadata[key] for key in sorted(metadata.keys())}
+    overrides = sorted_pack.get("fact_overrides")
+    if isinstance(overrides, dict):
+        normalized_overrides: Dict[str, Any] = {}
+        for key in sorted(overrides.keys()):
+            value = overrides[key]
+            if isinstance(value, dict) and "evidence_ids" in value:
+                normalized_overrides[key] = {
+                    **value,
+                    "evidence_ids": sorted(value.get("evidence_ids") or []),
+                }
+            else:
+                normalized_overrides[key] = value
+        sorted_pack["fact_overrides"] = normalized_overrides
+    session_info = sorted_pack.get("analysis_session")
+    if isinstance(session_info, dict):
+        normalized_session: Dict[str, Any] = {}
+        if session_info.get("session_id"):
+            normalized_session["session_id"] = session_info["session_id"]
+        if session_info.get("attached_evidence_ids"):
+            normalized_session["attached_evidence_ids"] = sorted(session_info.get("attached_evidence_ids", []))
+        sorted_pack["analysis_session"] = normalized_session
     return sorted_pack
 
 
