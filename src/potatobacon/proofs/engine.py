@@ -119,6 +119,8 @@ def record_tariff_proof(
     optimized_sat: bool,
     baseline_duty_rate: float | None,
     optimized_duty_rate: float | None,
+    baseline_duty_status: str = "OK",
+    optimized_duty_status: str = "OK",
     baseline_scenario: Dict[str, Any] | None = None,
     optimized_scenario: Dict[str, Any] | None = None,
     baseline_unsat_core: List[PolicyAtom] | None = None,
@@ -142,12 +144,14 @@ def record_tariff_proof(
             "unsat_core": _sorted_atoms(baseline_unsat_core or []),
             "sat": baseline_sat,
             "duty_rate": baseline_duty_rate,
+            "duty_status": baseline_duty_status,
         },
         "optimized": {
             "active_atoms": _sorted_atoms(optimized_active),
             "unsat_core": _sorted_atoms(optimized_unsat_core or []),
             "sat": optimized_sat,
             "duty_rate": optimized_duty_rate,
+            "duty_status": optimized_duty_status,
         },
         "compiled_facts": {
             "baseline": deepcopy(baseline_scenario or base_facts),
