@@ -61,7 +61,7 @@ def _evidence_pack(
 
 def _baseline_candidates(
     normalized_facts: Dict[str, Any], atoms: Any
-) -> tuple[list[BaselineCandidateModel], tuple]:
+) -> tuple[list[BaselineCandidateModel], Any]:
     baseline_candidates = generate_baseline_candidates(normalized_facts, atoms, DUTY_RATES, max_candidates=5)
     baseline_eval = _evaluate_scenario(atoms, normalized_facts)
     return baseline_candidates, baseline_eval
@@ -150,8 +150,8 @@ def build_sku_dossier_v2(
     law_context_id = context_meta["context_id"]
 
     baseline_candidates, baseline_eval = _baseline_candidates(normalized_facts, atoms)
-    baseline_duty_atoms = baseline_eval[3]
-    baseline_duty = baseline_candidates[0].duty_rate if baseline_candidates else baseline_eval[4]
+    baseline_duty_atoms = baseline_eval.duty_atoms
+    baseline_duty = baseline_candidates[0].duty_rate if baseline_candidates else baseline_eval.duty_rate
     baseline_confidence = baseline_candidates[0].confidence if baseline_candidates else 0.3
 
     evidence_pack = _evidence_pack(
@@ -190,7 +190,7 @@ def build_sku_dossier_v2(
     if missing_inputs:
         status = "OK_BASELINE_ONLY"
         why_not_optimized = missing_inputs + why_not_optimized
-    elif not baseline_eval[0]:
+    elif not baseline_eval.sat:
         status = "INSUFFICIENT_RULE_COVERAGE"
     elif has_blocking_questions and optimize:
         status = "OK_BASELINE_ONLY"
@@ -202,10 +202,10 @@ def build_sku_dossier_v2(
             mutated.update(lever.mutation)
             mutated_normalized, _ = normalize_compiled_facts(mutated)
             optimized_eval = _evaluate_scenario(atoms, mutated_normalized)
-            optimized_rate = optimized_eval[4]
-            if not optimized_eval[0] or optimized_rate is None:
+            optimized_rate = optimized_eval.duty_rate
+            if not optimized_eval.sat or optimized_rate is None:
                 continue
-            optimized_duty_atoms = _duty_atoms(optimized_eval[1])
+            optimized_duty_atoms = optimized_eval.duty_atoms
 
             optimized_candidates = generate_baseline_candidates(mutated_normalized, atoms, DUTY_RATES, max_candidates=1)
             optimized_confidence = optimized_candidates[0].confidence if optimized_candidates else baseline_confidence
@@ -223,8 +223,8 @@ def build_sku_dossier_v2(
             risk = assess_tariff_risk(
                 baseline_facts=normalized_facts,
                 optimized_facts=mutated_normalized,
-                baseline_active_atoms=baseline_eval[1],
-                optimized_active_atoms=optimized_eval[1],
+                baseline_active_atoms=baseline_eval.active_atoms,
+                optimized_active_atoms=optimized_eval.active_atoms,
                 baseline_duty_rate=baseline_duty or optimized_rate,
                 optimized_duty_rate=optimized_rate,
             )
@@ -285,16 +285,18 @@ def build_sku_dossier_v2(
             law_context=law_context_id,
             base_facts=normalized_facts,
             mutations={},
-            baseline_active=baseline_eval[1],
-            optimized_active=baseline_eval[1],
-            baseline_sat=baseline_eval[0],
-            optimized_sat=baseline_eval[0],
+            baseline_active=baseline_eval.active_atoms,
+            optimized_active=baseline_eval.active_atoms,
+            baseline_sat=baseline_eval.sat,
+            optimized_sat=baseline_eval.sat,
             baseline_duty_rate=baseline_duty,
             optimized_duty_rate=baseline_duty,
+            baseline_duty_status=baseline_eval.duty_status,
+            optimized_duty_status=baseline_eval.duty_status,
             baseline_scenario=normalized_facts,
             optimized_scenario=normalized_facts,
-            baseline_unsat_core=baseline_eval[2],
-            optimized_unsat_core=baseline_eval[2],
+            baseline_unsat_core=baseline_eval.unsat_core,
+            optimized_unsat_core=baseline_eval.unsat_core,
             provenance_chain=_provenance_for_atoms(baseline_duty_atoms, "baseline"),
             evidence_pack=evidence_pack,
             tariff_manifest_hash=context_meta["manifest_hash"],

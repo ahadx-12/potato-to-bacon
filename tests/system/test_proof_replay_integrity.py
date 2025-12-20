@@ -1,11 +1,15 @@
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
 from potatobacon.law.solver_z3 import analyze_scenario
 from potatobacon.proofs.canonical import compute_payload_hash
+from potatobacon.proofs.engine import record_tariff_proof
 from potatobacon.tariff.atoms_hts import DUTY_RATES
-from potatobacon.tariff.context_registry import load_atoms_for_context
-from potatobacon.tariff.engine import compute_duty_rate
+from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_for_context
+from potatobacon.tariff.e2e_runner import TariffE2ERunner
+from potatobacon.tariff.engine import compute_duty_rate, compute_duty_result
 from potatobacon.tariff.models import TariffScenario
 
 
@@ -71,3 +75,47 @@ def test_proof_replay_integrity(system_client: TestClient):
         assert proof_payload.get("tariff_manifest_hash") == context_meta["manifest_hash"]
         assert best["law_context"] == proof_payload["law_context"]
         assert proof_payload["proof_payload_hash"] == compute_payload_hash(proof_payload)
+
+
+@pytest.mark.usefixtures("system_client")
+def test_proof_replay_handles_no_duty_rule(system_client: TestClient):
+    atoms, context_meta = load_atoms_for_context(DEFAULT_CONTEXT_ID)
+    scenario_facts = {"unrelated_fact": True}
+    baseline = TariffScenario(name="baseline", facts=scenario_facts)
+    optimized = TariffScenario(name="optimized", facts=scenario_facts)
+
+    sat_baseline, active_baseline, unsat_baseline = analyze_scenario(baseline.facts, atoms)
+    sat_optimized, active_optimized, unsat_optimized = analyze_scenario(optimized.facts, atoms)
+
+    baseline_result = compute_duty_result(atoms, baseline, active_atoms=active_baseline, is_sat=sat_baseline)
+    optimized_result = compute_duty_result(atoms, optimized, active_atoms=active_optimized, is_sat=sat_optimized)
+    assert baseline_result.status == "NO_DUTY_RULE_ACTIVE"
+    assert optimized_result.status == "NO_DUTY_RULE_ACTIVE"
+
+    proof_handle = record_tariff_proof(
+        law_context=context_meta["context_id"],
+        base_facts=baseline.facts,
+        mutations={},
+        baseline_active=active_baseline,
+        optimized_active=active_optimized,
+        baseline_sat=sat_baseline,
+        optimized_sat=sat_optimized,
+        baseline_duty_rate=baseline_result.duty_rate,
+        optimized_duty_rate=optimized_result.duty_rate,
+        baseline_duty_status=baseline_result.status,
+        optimized_duty_status=optimized_result.status,
+        baseline_scenario=baseline.facts,
+        optimized_scenario=optimized.facts,
+        baseline_unsat_core=unsat_baseline,
+        optimized_unsat_core=unsat_optimized,
+        tariff_manifest_hash=context_meta["manifest_hash"],
+    )
+
+    runner = TariffE2ERunner(dataset_path=Path("tests/data/e2e_pilot_pack.json"))
+    replay_result = runner._validate_proof(
+        {"proof_id": proof_handle.proof_id, "proof_payload_hash": proof_handle.proof_payload_hash},
+        law_context=context_meta["context_id"],
+    )
+
+    assert replay_result.ok is True
+    assert replay_result.message == "ok"

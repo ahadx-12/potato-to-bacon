@@ -8,7 +8,7 @@ from potatobacon.proofs.engine import record_tariff_proof
 from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_for_context
 
 from .atoms_hts import DUTY_RATES
-from .engine import apply_mutations
+from .engine import apply_mutations, compute_duty_result
 from .models import TariffScenario
 from .normalizer import normalize_compiled_facts
 
@@ -39,6 +39,7 @@ class _ScenarioEvaluation:
     active_atoms: List[PolicyAtom]
     unsat_core: List[PolicyAtom]
     provenance: List[Dict[str, Any]]
+    duty_status: str
 
 
 def _build_provenance(duty_atoms: List[PolicyAtom], scenario_label: str) -> List[Dict[str, Any]]:
@@ -61,9 +62,10 @@ def _evaluate_scenario(
     atoms: List[PolicyAtom], scenario: TariffScenario, scenario_label: str
 ) -> _ScenarioEvaluation:
     is_sat, active_atoms, unsat_core = analyze_scenario(scenario.facts, atoms)
-    duty_atoms = [atom for atom in active_atoms if atom.source_id in DUTY_RATES]
-    duty_rate: Optional[float] = None
-    if is_sat and duty_atoms:
+    duty_result = compute_duty_result(atoms, scenario, active_atoms=active_atoms, is_sat=is_sat)
+    duty_atoms = duty_result.active_atoms or [atom for atom in active_atoms if atom.source_id in DUTY_RATES]
+    duty_rate: Optional[float] = duty_result.duty_rate
+    if is_sat and duty_atoms and duty_rate is None:
         duty_rate = float(DUTY_RATES[duty_atoms[-1].source_id])
     provenance = _build_provenance(duty_atoms, scenario_label)
     return _ScenarioEvaluation(
@@ -74,6 +76,7 @@ def _evaluate_scenario(
         active_atoms=active_atoms,
         unsat_core=unsat_core,
         provenance=provenance,
+        duty_status=duty_result.status,
     )
 
 
@@ -144,6 +147,8 @@ def optimize_tariff(
         optimized_sat=best_eval.is_sat,
         baseline_duty_rate=baseline_eval.duty_rate,
         optimized_duty_rate=best_eval.duty_rate,
+        baseline_duty_status=baseline_eval.duty_status,
+        optimized_duty_status=best_eval.duty_status,
         baseline_scenario=baseline_scenario.facts,
         optimized_scenario=best_eval.scenario.facts,
         baseline_unsat_core=baseline_eval.unsat_core,

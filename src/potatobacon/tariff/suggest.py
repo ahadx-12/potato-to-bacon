@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Sequence
 
 from potatobacon.proofs.engine import record_tariff_proof
@@ -9,7 +10,7 @@ from potatobacon.tariff.bom_ingest import bom_to_text, parse_bom_csv
 from potatobacon.tariff.candidate_search import generate_baseline_candidates
 from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_for_context
 from potatobacon.tariff.atoms_hts import DUTY_RATES
-from potatobacon.tariff.engine import _build_provenance
+from potatobacon.tariff.engine import TariffScenario, _build_provenance, compute_duty_result
 from potatobacon.tariff.levers import LeverModel, applicable_levers
 from potatobacon.tariff.mutation_generator import baseline_facts_from_profile, infer_product_profile
 from potatobacon.tariff.models import (
@@ -52,10 +53,22 @@ def _duty_atoms(active_atoms: Sequence[PolicyAtom]) -> List[PolicyAtom]:
     return [atom for atom in active_atoms if atom.source_id in DUTY_RATES]
 
 
-def _evaluate_scenario(atoms: Sequence[PolicyAtom], facts: Mapping[str, object]):
+@dataclass
+class ScenarioEvaluation:
+    sat: bool
+    active_atoms: List[PolicyAtom]
+    unsat_core: List[PolicyAtom]
+    duty_atoms: List[PolicyAtom]
+    duty_rate: float | None
+    duty_status: str
+
+
+def _evaluate_scenario(atoms: Sequence[PolicyAtom], facts: Mapping[str, object]) -> ScenarioEvaluation:
     sat, active_atoms, unsat_core = analyze_scenario(facts, atoms)
-    duty_atoms = _duty_atoms(active_atoms)
-    duty_rate = None
+    scenario = TariffScenario(name="scenario", facts=dict(facts))
+    duty_result = compute_duty_result(atoms, scenario, active_atoms=list(active_atoms), is_sat=sat)
+    duty_atoms = duty_result.active_atoms or _duty_atoms(active_atoms)
+    duty_rate = duty_result.duty_rate
     if sat and duty_atoms:
         ranked = sorted(
             duty_atoms,
@@ -67,7 +80,14 @@ def _evaluate_scenario(atoms: Sequence[PolicyAtom], facts: Mapping[str, object])
         )
         duty_atoms = ranked
         duty_rate = float(DUTY_RATES[ranked[0].source_id])
-    return sat, active_atoms, unsat_core, duty_atoms, duty_rate
+    return ScenarioEvaluation(
+        sat=sat,
+        active_atoms=list(active_atoms),
+        unsat_core=list(unsat_core),
+        duty_atoms=list(duty_atoms),
+        duty_rate=duty_rate,
+        duty_status=duty_result.status,
+    )
 
 
 def _sort_key(item: TariffSuggestionItemModel, annual_volume: int | None, index: int) -> tuple:
@@ -84,13 +104,17 @@ def _record_proof(
     context_meta: Mapping[str, Any],
     baseline_facts: Mapping[str, object],
     optimized_facts: Mapping[str, object],
-    baseline_eval: tuple,
-    optimized_eval: tuple,
+    baseline_eval: ScenarioEvaluation,
+    optimized_eval: ScenarioEvaluation,
     lever: LeverModel | None,
     evidence_pack: Mapping[str, Any] | None = None,
 ):
-    _, baseline_active, baseline_unsat, _, baseline_rate = baseline_eval
-    _, optimized_active, optimized_unsat, _, optimized_rate = optimized_eval
+    baseline_active = baseline_eval.active_atoms
+    baseline_unsat = baseline_eval.unsat_core
+    baseline_rate = baseline_eval.duty_rate
+    optimized_active = optimized_eval.active_atoms
+    optimized_unsat = optimized_eval.unsat_core
+    optimized_rate = optimized_eval.duty_rate
     provenance_chain: List[Dict[str, Any]] = []
     provenance_chain.extend(_build_provenance(_duty_atoms(baseline_active), "baseline"))
     provenance_chain.extend(_build_provenance(_duty_atoms(optimized_active), "optimized"))
@@ -109,10 +133,12 @@ def _record_proof(
         mutations=lever.mutation if lever else {},
         baseline_active=baseline_active,
         optimized_active=optimized_active,
-        baseline_sat=baseline_eval[0],
-        optimized_sat=optimized_eval[0],
+        baseline_sat=baseline_eval.sat,
+        optimized_sat=optimized_eval.sat,
         baseline_duty_rate=baseline_rate,
         optimized_duty_rate=optimized_rate,
+        baseline_duty_status=baseline_eval.duty_status,
+        optimized_duty_status=optimized_eval.duty_status,
         baseline_scenario=dict(baseline_facts),
         optimized_scenario=dict(optimized_facts),
         baseline_unsat_core=baseline_unsat,
@@ -187,7 +213,7 @@ def suggest_tariff_optimizations(
 
     baseline_candidates = generate_baseline_candidates(normalized_facts, atoms, DUTY_RATES, max_candidates=5)
     baseline_eval = _evaluate_scenario(atoms, normalized_facts)
-    baseline_rate = baseline_candidates[0].duty_rate if baseline_candidates else baseline_eval[4]
+    baseline_rate = baseline_candidates[0].duty_rate if baseline_candidates else baseline_eval.duty_rate
     baseline_confidence = baseline_candidates[0].confidence if baseline_candidates else 0.3
 
     suggestion_items: List[TariffSuggestionItemModel] = []
@@ -213,7 +239,7 @@ def suggest_tariff_optimizations(
             proof_payload_hash=None,
         )
 
-    if not baseline_eval[0]:
+    if not baseline_eval.sat:
         return TariffSuggestResponseModel(
             status="INSUFFICIENT_RULE_COVERAGE",
             sku_id=request.sku_id,
@@ -258,8 +284,9 @@ def suggest_tariff_optimizations(
         mutated_normalized, _ = normalize_compiled_facts(mutated)
 
         optimized_eval = _evaluate_scenario(atoms, mutated_normalized)
-        optimized_sat, _, _, optimized_duty_atoms, optimized_rate = optimized_eval
-        if not optimized_sat or optimized_rate is None:
+        optimized_rate = optimized_eval.duty_rate
+        optimized_duty_atoms = optimized_eval.duty_atoms
+        if not optimized_eval.sat or optimized_rate is None:
             continue
 
         optimized_candidates = generate_baseline_candidates(mutated_normalized, atoms, DUTY_RATES, max_candidates=1)
@@ -276,12 +303,14 @@ def suggest_tariff_optimizations(
         if savings_rate <= 0 and not confidence_gain:
             continue
 
-        _, baseline_active_atoms, baseline_unsat, baseline_duty_atoms, _ = baseline_eval
+        baseline_active_atoms = baseline_eval.active_atoms
+        baseline_unsat = baseline_eval.unsat_core
+        baseline_duty_atoms = baseline_eval.duty_atoms
         risk = assess_tariff_risk(
             baseline_facts=normalized_facts,
             optimized_facts=mutated_normalized,
             baseline_active_atoms=baseline_active_atoms,
-            optimized_active_atoms=optimized_eval[1],
+            optimized_active_atoms=optimized_eval.active_atoms,
             baseline_duty_rate=baseline_rate or optimized_rate,
             optimized_duty_rate=optimized_rate,
         )

@@ -16,7 +16,7 @@ from potatobacon.tariff.atoms_hts import DUTY_RATES
 from potatobacon.tariff.batch_scan import batch_scan_tariffs
 from potatobacon.tariff.bom_ingest import bom_to_text, parse_bom_csv
 from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_for_context
-from potatobacon.tariff.engine import TariffScenario, compute_duty_rate
+from potatobacon.tariff.engine import TariffScenario, compute_duty_result
 from potatobacon.tariff.models import (
     TariffBatchScanRequestModel,
     TariffBatchSkuModel,
@@ -390,19 +390,44 @@ class TariffE2ERunner:
         if recorded_baseline != replay_baseline or recorded_optimized != replay_optimized:
             return ProofReplayResult(False, "active duty codes diverged")
 
-        replay_baseline_rate = compute_duty_rate(atoms, TariffScenario(name="baseline", facts=baseline_facts))
-        replay_optimized_rate = compute_duty_rate(atoms, TariffScenario(name="optimized", facts=optimized_facts))
+        baseline_result = compute_duty_result(
+            atoms,
+            TariffScenario(name="baseline", facts=baseline_facts),
+            active_atoms=active_baseline,
+            is_sat=baseline_sat,
+        )
+        optimized_result = compute_duty_result(
+            atoms,
+            TariffScenario(name="optimized", facts=optimized_facts),
+            active_atoms=active_opt,
+            is_sat=optimized_sat,
+        )
 
-        if (
-            record.get("baseline", {}).get("duty_rate") not in (None, replay_baseline_rate)
-            and abs(record.get("baseline", {}).get("duty_rate") - replay_baseline_rate) > 1e-6
-        ):
-            return ProofReplayResult(False, "baseline duty mismatch")
-        if (
-            record.get("optimized", {}).get("duty_rate") not in (None, replay_optimized_rate)
-            and abs(record.get("optimized", {}).get("duty_rate") - replay_optimized_rate) > 1e-6
-        ):
-            return ProofReplayResult(False, "optimized duty mismatch")
+        recorded_baseline_status = record.get("baseline", {}).get("duty_status") or (
+            "NO_DUTY_RULE_ACTIVE" if record.get("baseline", {}).get("duty_rate") is None else "OK"
+        )
+        recorded_optimized_status = record.get("optimized", {}).get("duty_status") or (
+            "NO_DUTY_RULE_ACTIVE" if record.get("optimized", {}).get("duty_rate") is None else "OK"
+        )
+
+        if baseline_result.status != recorded_baseline_status:
+            return ProofReplayResult(False, "baseline duty status mismatch")
+        if optimized_result.status != recorded_optimized_status:
+            return ProofReplayResult(False, "optimized duty status mismatch")
+
+        if baseline_result.status == "OK" and baseline_result.duty_rate is not None:
+            recorded_baseline_rate = record.get("baseline", {}).get("duty_rate")
+            if recorded_baseline_rate not in (None, baseline_result.duty_rate) and abs(
+                recorded_baseline_rate - baseline_result.duty_rate
+            ) > 1e-6:
+                return ProofReplayResult(False, "baseline duty mismatch")
+
+        if optimized_result.status == "OK" and optimized_result.duty_rate is not None:
+            recorded_optimized_rate = record.get("optimized", {}).get("duty_rate")
+            if recorded_optimized_rate not in (None, optimized_result.duty_rate) and abs(
+                recorded_optimized_rate - optimized_result.duty_rate
+            ) > 1e-6:
+                return ProofReplayResult(False, "optimized duty mismatch")
         return ProofReplayResult(True, "ok")
 
     def _check_determinism(self, dataset: List[Dict[str, Any]]) -> DeterminismOutcome:
