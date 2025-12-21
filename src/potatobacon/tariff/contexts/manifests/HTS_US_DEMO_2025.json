@@ -4,7 +4,7 @@
   "jurisdiction": "US",
   "effective_from": "2025-01-01",
   "effective_to": null,
-  "description": "Demo HTS tariff rules for US footwear and chassis parts",
+  "description": "Demo HTS tariff rules for US footwear, chassis parts, and baseline electronics lanes",
   "loader": {
     "type": "python",
     "callable": "potatobacon.tariff.atoms_hts:tariff_policy_atoms"

@@ -1,4 +1,5 @@
-from potatobacon.tariff.atoms_hts import tariff_policy_atoms
+from potatobacon.tariff.atoms_hts import DUTY_RATES, tariff_policy_atoms
+from potatobacon.tariff.candidate_search import generate_baseline_candidates
 from potatobacon.tariff.models import BaselineCandidateModel
 from potatobacon.tariff.questions import generate_missing_fact_questions
 
@@ -39,3 +40,28 @@ def test_generate_missing_fact_questions_deterministic():
     assert "50%" in surface_question.question
     assert surface_question.candidate_rules_affected
     assert first.model_dump() == second.model_dump()
+
+
+def test_electronics_missing_facts_stay_relevant():
+    atoms = tariff_policy_atoms()
+    facts = {
+        "product_category": "electronics",
+        "product_type_electronics": True,
+        "electronics_cable_or_connector": True,
+        "electronics_has_connectors": True,
+        "material_steel": True,
+    }
+
+    candidates = generate_baseline_candidates(facts, atoms, DUTY_RATES, max_candidates=5)
+    candidate_ids = {candidate.candidate_id for candidate in candidates}
+    assert "HTS_STEEL_BOLT" not in candidate_ids
+
+    package = generate_missing_fact_questions(
+        law_context="HTS_US_DEMO_2025",
+        atoms=atoms,
+        compiled_facts=facts,
+        candidates=candidates,
+    )
+
+    assert "product_type_chassis_bolt" not in package.missing_facts
+    assert any(key.startswith("electronics") for key in package.missing_facts)

@@ -19,6 +19,14 @@ def _atom_descriptor(atom: PolicyAtom) -> str:
 def _question_text(fact_key: str) -> str:
     if fact_key.startswith("origin_country") or fact_key.startswith("origin_"):
         return "What is the country of origin for the SKU and its key components?"
+    if "voltage_rating" in fact_key:
+        return "What voltage/current rating applies to the cable or connector assembly?"
+    if "insulated_conductors" in fact_key:
+        return "Are the conductors insulated/jacketed as part of the assembly?"
+    if "has_connectors" in fact_key:
+        return "Does the assembly terminate with defined connectors?"
+    if "is_cable_assembly" in fact_key:
+        return "Is this SKU sold as a complete cable or harness assembly?"
     if "surface_contact_textile_gt_50" in fact_key:
         return "Does textile material cover more than 50% of the outsole contact surface?"
     if "surface_contact_rubber_gt_50" in fact_key:
@@ -33,6 +41,14 @@ def _question_text(fact_key: str) -> str:
 def _evidence_hints(fact_key: str) -> List[str]:
     if fact_key.startswith("origin_country") or fact_key.startswith("origin_"):
         return ["Certificate of origin", "Commercial invoice", "Bill of materials origin column"]
+    if "voltage_rating" in fact_key:
+        return ["Electrical rating sheet", "Connector spec (USB/HDMI class)", "Safety datasheet with voltage/current"]
+    if "insulated_conductors" in fact_key:
+        return ["Cable cross-section photo", "Jacket material declaration", "Harness drawing noting insulation"]
+    if "has_connectors" in fact_key:
+        return ["Connector drawings", "Harness pinout", "BOM line items showing connector part numbers"]
+    if "is_cable_assembly" in fact_key:
+        return ["Harness or cable assembly drawing", "BOM section highlighting assembly form"]
     if "material" in fact_key or "surface_contact" in fact_key:
         return ["BOM line items", "Material certificates", "Photos or measurements"]
     if "electronics" in fact_key:
@@ -58,8 +74,14 @@ def generate_missing_fact_questions(
 ) -> MissingFactsPackageModel:
     """Generate deterministic questions for missing facts from candidate search."""
 
-    missing_keys = {fact for candidate in candidates for fact in candidate.missing_facts}
+    best_confidence = max((candidate.confidence for candidate in candidates), default=0.0)
+    confidence_floor = max(0.05, min(best_confidence - 0.35, 0.25))
+    shortlisted = [candidate for candidate in candidates if candidate.confidence >= confidence_floor]
+
+    candidate_ids = {candidate.candidate_id for candidate in shortlisted}
+    missing_keys = {fact for candidate in shortlisted for fact in candidate.missing_facts}
     atoms_list = list(atoms)
+    atoms_by_id = {atom.source_id: atom for atom in atoms_list if atom.source_id in candidate_ids}
     origin_missing = True
     for key, value in compiled_facts.items():
         if key.startswith("origin_country_") and value:
@@ -69,7 +91,7 @@ def generate_missing_fact_questions(
         missing_keys.add("origin_country")
 
     fact_to_atoms: dict[str, List[PolicyAtom]] = {}
-    for atom in atoms_list:
+    for atom in atoms_by_id.values():
         for literal in atom.guard:
             fact_key = _fact_from_literal(literal)
             if fact_key in missing_keys:

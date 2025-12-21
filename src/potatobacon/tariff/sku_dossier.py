@@ -223,7 +223,9 @@ def build_sku_dossier_v2(
 
     baseline_candidates, baseline_eval = _baseline_candidates(normalized_facts, atoms)
     baseline_duty_atoms = baseline_eval.duty_atoms
-    baseline_duty = baseline_candidates[0].duty_rate if baseline_candidates else baseline_eval.duty_rate
+    baseline_duty = baseline_eval.duty_rate if baseline_eval.duty_rate is not None else (
+        baseline_candidates[0].duty_rate if baseline_candidates else None
+    )
     baseline_confidence = baseline_candidates[0].confidence if baseline_candidates else 0.3
 
     evidence_pack = _evidence_pack(
@@ -254,7 +256,17 @@ def build_sku_dossier_v2(
         compiled_facts=normalized_facts,
         candidates=baseline_candidates,
     )
+    active_ids = {atom.source_id for atom in baseline_duty_atoms}
+    blocking_missing = sorted(
+        {
+            item.fact_key
+            for item in questions.questions
+            if item.candidate_rules_affected
+            and any(rule.split(":")[0] in active_ids for rule in item.candidate_rules_affected)
+        }
+    )
     has_blocking_questions = bool(questions.missing_facts)
+    blocking_for_status = blocking_missing or questions.missing_facts
     data_quality = {
         "fact_overrides_applied": len(overrides_payload),
         "attached_evidence_references": len(attached_evidence_ids),
@@ -274,7 +286,7 @@ def build_sku_dossier_v2(
         status = "INSUFFICIENT_RULE_COVERAGE"
     elif has_blocking_questions and optimize:
         status = "OK_BASELINE_ONLY"
-        why_not_optimized = questions.missing_facts + why_not_optimized
+        why_not_optimized = blocking_for_status + why_not_optimized
     elif optimize:
         levers = applicable_levers(spec=product_spec, facts=normalized_facts)
         for lever in levers:
