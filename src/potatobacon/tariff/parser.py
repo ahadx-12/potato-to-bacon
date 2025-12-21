@@ -72,6 +72,10 @@ def extract_product_spec(
             "electronics",
             "pcb",
             "printed circuit",
+            "cable",
+            "connector",
+            "usb",
+            "hdmi",
         ],
         ProductCategory.APPAREL_TEXTILE: [
             "shirt",
@@ -104,6 +108,8 @@ def extract_product_spec(
         "is_enclosure_or_housing": False,
         "contains_battery": False,
     }
+    wire_harness_present: bool | None = None
+    voltage_rating_known: bool | None = None
     apparel_flags = {
         "is_knit": False,
         "is_woven": False,
@@ -114,9 +120,11 @@ def extract_product_spec(
     electronics_keywords = {
         "has_pcb": ["pcb", "circuit board", "printed circuit", "microcontroller", "controller board"],
         "is_enclosure_or_housing": ["enclosure", "housing", "casing"],
-        "is_cable_or_connector": ["cable", "connector", "usb", "hdmi"],
+        "is_cable_or_connector": ["cable", "connector", "usb", "hdmi", "harness", "pigtail"],
         "contains_battery": ["lithium", "battery pack", "cell", "battery"],
     }
+    harness_keywords = ["harness", "pigtail", "wire lead", "jumper harness"]
+    voltage_keywords = ["usb", "hdmi", "5v", "5 v", "type-c", "type c"]
     apparel_keywords = {
         "is_knit": ["knit"],
         "is_woven": ["woven"],
@@ -151,6 +159,15 @@ def extract_product_spec(
             if hits:
                 electronics_flags[key] = True
                 evidence.append(_capture_snippet(source_text, hits[0], source_name))
+        harness_hits = _detect_keywords(lowered, harness_keywords)
+        if harness_hits:
+            wire_harness_present = True
+            evidence.append(_capture_snippet(source_text, harness_hits[0], source_name))
+        if voltage_rating_known is None:
+            voltage_hits = _detect_keywords(lowered, voltage_keywords)
+            if voltage_hits:
+                voltage_rating_known = True
+                evidence.append(_capture_snippet(source_text, voltage_hits[0], source_name))
         for key, keywords in apparel_keywords.items():
             hits = _detect_keywords(lowered, keywords)
             if hits:
@@ -187,6 +204,8 @@ def extract_product_spec(
         is_cable_or_connector=electronics_flags["is_cable_or_connector"],
         is_enclosure_or_housing=electronics_flags["is_enclosure_or_housing"],
         contains_battery=electronics_flags["contains_battery"],
+        wire_harness_present=wire_harness_present,
+        voltage_rating_known=voltage_rating_known,
         is_knit=apparel_flags["is_knit"],
         is_woven=apparel_flags["is_woven"],
         has_coating_or_lamination=apparel_flags["has_coating_or_lamination"],
@@ -233,6 +252,10 @@ def compile_facts_with_evidence(
         "contains_pcb": ["pcb", "circuit board"],
         "electronics_enclosure": ["enclosure", "housing", "casing"],
         "electronics_cable_or_connector": ["cable", "connector", "usb", "hdmi"],
+        "electronics_has_connectors": ["connector", "plug", "usb", "hdmi"],
+        "electronics_is_cable_assembly": ["cable", "harness", "pigtail"],
+        "electronics_insulated_conductors": ["insulated", "jacketed", "rubber", "plastic"],
+        "electronics_voltage_rating_known": ["usb", "5v", "5 v", "type-c", "hdmi"],
         "contains_battery": ["battery", "cell", "lithium"],
         "textile_knit": ["knit"],
         "textile_woven": ["woven"],

@@ -85,11 +85,37 @@ def _electronics_levers() -> List[LeverModel]:
         LeverModel(
             lever_id="ELEC_CONNECTOR_PATHWAY",
             category_scope=[ProductCategory.ELECTRONICS.value],
-            required_facts={"product_type_electronics": True},
+            required_facts={"product_type_electronics": True, "electronics_cable_or_connector": True},
             mutation={"electronics_cable_or_connector": True, "product_type_electronics": False},
             rationale="Classify device as a cable/connector assembly when harness evidence is present.",
             feasibility="HIGH",
             evidence_requirements=["Connector or harness line items", "Mechanical drawings highlighting connectors"],
+            risk_floor=25,
+            constraints=[],
+        ),
+        LeverModel(
+            lever_id="ELECTRONICS_CABLE_ASSEMBLY_PATHWAY",
+            category_scope=[ProductCategory.ELECTRONICS.value],
+            required_facts={
+                "product_type_electronics": True,
+                "electronics_cable_or_connector": True,
+                "electronics_has_connectors": True,
+            },
+            mutation={
+                "electronics_is_cable_assembly": True,
+                "electronics_insulated_conductors": True,
+                "electronics_voltage_rating_known": True,
+            },
+            rationale=(
+                "Document connectors, insulation, and low-voltage rating to classify as a cable assembly under the "
+                "demo electronics lanes."
+            ),
+            feasibility="HIGH",
+            evidence_requirements=[
+                "Harness or cable assembly drawing",
+                "Connector spec showing voltage/current rating",
+                "Jacket or insulation material declaration",
+            ],
             risk_floor=25,
             constraints=[],
         ),

@@ -223,6 +223,69 @@ def compile_facts(
             calculation="boolean mapping",
         )
 
+    if product.product_category == ProductCategory.ELECTRONICS:
+        insulated_hint = facts.get("material_plastic") or facts.get("material_rubber")
+        if product.is_cable_or_connector:
+            facts["electronics_has_connectors"] = True
+            _add_evidence(
+                evidence,
+                fact_key="electronics_has_connectors",
+                value=True,
+                derived_from_fields=["is_cable_or_connector"],
+                calculation="cable/connector keyword evidence",
+            )
+            facts["electronics_is_cable_assembly"] = True
+            _add_evidence(
+                evidence,
+                fact_key="electronics_is_cable_assembly",
+                value=True,
+                derived_from_fields=["is_cable_or_connector"],
+                calculation="cable/connector keyword evidence",
+            )
+            if insulated_hint:
+                facts["electronics_insulated_conductors"] = True
+                _add_evidence(
+                    evidence,
+                    fact_key="electronics_insulated_conductors",
+                    value=True,
+                    derived_from_fields=["materials"],
+                    calculation="plastic or rubber material implies insulation",
+                )
+        elif product.wire_harness_present:
+            facts["electronics_has_connectors"] = True
+            _add_evidence(
+                evidence,
+                fact_key="electronics_has_connectors",
+                value=True,
+                derived_from_fields=["wire_harness_present"],
+                calculation="harness indicator implies connectors",
+            )
+            facts["electronics_is_cable_assembly"] = True
+            _add_evidence(
+                evidence,
+                fact_key="electronics_is_cable_assembly",
+                value=True,
+                derived_from_fields=["wire_harness_present"],
+                calculation="harness indicator implies assembly",
+            )
+            facts["electronics_insulated_conductors"] = True
+            _add_evidence(
+                evidence,
+                fact_key="electronics_insulated_conductors",
+                value=True,
+                derived_from_fields=["wire_harness_present"],
+                calculation="wire harness implies insulated conductors",
+            )
+        if product.voltage_rating_known is not None:
+            facts["electronics_voltage_rating_known"] = bool(product.voltage_rating_known)
+            _add_evidence(
+                evidence,
+                fact_key="electronics_voltage_rating_known",
+                value=bool(product.voltage_rating_known),
+                derived_from_fields=["voltage_rating_known"],
+                calculation="explicit voltage hint",
+            )
+
     apparel_mapping = {
         "textile_knit": product.is_knit,
         "textile_woven": product.is_woven,

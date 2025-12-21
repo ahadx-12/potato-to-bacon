@@ -8,6 +8,30 @@ from potatobacon.law.solver_z3 import PolicyAtom, analyze_scenario
 from potatobacon.tariff.models import BaselineCandidateModel
 
 
+def _fact_key(literal: str) -> str:
+    return literal[1:] if literal.startswith("¬") else literal
+
+
+def _infer_atom_categories(guard: Sequence[str]) -> set[str]:
+    categories: set[str] = set()
+    for literal in guard:
+        fact_key = _fact_key(literal)
+        if fact_key in {"product_type_electronics"} or fact_key.startswith("electronics_") or fact_key in {
+            "contains_pcb",
+            "contains_battery",
+        }:
+            categories.add("electronics")
+        if fact_key in {"product_type_chassis_bolt", "is_fastener"} or fact_key.startswith("fastener_"):
+            categories.add("fastener")
+        if fact_key.startswith("surface_contact_") or fact_key.startswith("upper_material_") or fact_key.startswith(
+            "outer_sole_material_"
+        ):
+            categories.add("footwear")
+        if fact_key == "product_type_apparel_textile" or fact_key.startswith("textile_") or fact_key.startswith("fiber_"):
+            categories.add("apparel_textile")
+    return categories
+
+
 def _provenance_for_atom(atom: PolicyAtom, scenario_label: str) -> Dict[str, str]:
     return {
         "scenario": scenario_label,
@@ -57,9 +81,14 @@ def generate_baseline_candidates(
     active_lookup = {atom.source_id for atom in active_duty_atoms}
 
     ranked: list[tuple[float, int, str, BaselineCandidateModel]] = []
+    declared_category = str(facts.get("product_category") or "").lower()
 
     for atom in atoms:
         if atom.source_id not in duty_rates:
+            continue
+
+        atom_categories = _infer_atom_categories(atom.guard)
+        if declared_category and atom_categories and declared_category not in atom_categories:
             continue
 
         missing, satisfied, contradiction = _evaluate_guard(facts, atom.guard)

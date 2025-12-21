@@ -112,6 +112,14 @@ class ProductSpecModel(BaseModel):
         default=None,
         description="True when the primary function is a cable or connector",
     )
+    wire_harness_present: Optional[bool] = Field(
+        default=None,
+        description="True when the assembly includes a wire harness or pigtail lead",
+    )
+    voltage_rating_known: Optional[bool] = Field(
+        default=None,
+        description="Whether the cable/connector has a declared low-voltage rating (e.g., USB/HDMI class)",
+    )
     is_enclosure_or_housing: Optional[bool] = Field(
         default=None,
         description="True when the product is an enclosure or housing for electronics",
