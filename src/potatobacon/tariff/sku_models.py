@@ -6,12 +6,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from potatobacon.tariff.models import (
-    BaselineCandidateModel,
-    FactEvidenceModel,
-    StructuredBOMModel,
-    TariffSuggestionItemModel,
-)
+from potatobacon.tariff.models import BaselineCandidateModel, FactEvidenceModel, StructuredBOMModel, TariffSuggestionItemModel
 
 
 class SKURecordModel(BaseModel):
@@ -99,6 +94,29 @@ class SKUDossierOptimizedModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class BaselineAssignmentModel(BaseModel):
+    """Concrete baseline assignment that does not rely on missing facts."""
+
+    atom_id: Optional[str] = None
+    duty_rate: Optional[float] = None
+    duty_status: Optional[str] = None
+    confidence: Optional[float] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ConditionalPathwayModel(BaseModel):
+    """Cheaper candidate pathway blocked by missing facts/evidence."""
+
+    atom_id: str
+    duty_rate: float
+    missing_facts: List[str] = Field(default_factory=list)
+    why_needed: List[str] = Field(default_factory=list)
+    accepted_evidence_types: List[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class TariffSkuDossierV2Model(BaseModel):
     """Unified SKU-first dossier response."""
 
@@ -116,6 +134,8 @@ class TariffSkuDossierV2Model(BaseModel):
     proof_payload_hash: Optional[str] = None
     baseline: SKUDossierBaselineModel
     optimized: Optional[SKUDossierOptimizedModel] = None
+    baseline_assigned: Optional[BaselineAssignmentModel] = None
+    conditional_pathways: List[ConditionalPathwayModel] = Field(default_factory=list)
     questions: MissingFactsPackageModel = Field(default_factory=MissingFactsPackageModel)
     product_spec: Optional[Dict[str, Any]] = None
     compiled_facts: Optional[Dict[str, Any]] = None

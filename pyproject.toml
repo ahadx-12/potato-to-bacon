@@ -52,7 +52,8 @@ graph = [
 ]
 tests = [
   "pytest",
-  "hypothesis"
+  "hypothesis",
+  "pytest-cov>=4.1"
 ]
 dev = [
   "pytest>=7.4",

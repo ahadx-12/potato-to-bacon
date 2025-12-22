@@ -34,6 +34,29 @@ class FactEvidenceModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class TariffFeasibility(BaseModel):
+    """Implementation feasibility and cost profile for an optimization lever."""
+
+    one_time_cost: float = 0.0
+    recurring_cost_per_unit: float = 0.0
+    implementation_time_days: int = 0
+    requires_recertification: bool = False
+    supply_chain_risk: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class NetSavings(BaseModel):
+    """Net savings projection after implementation and timing adjustments."""
+
+    gross_duty_savings: float | None = None
+    first_year_savings: float | None = None
+    net_annual_savings: float | None = None
+    payback_months: float | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class BOMLineItemModel(BaseModel):
     """Structured Bill of Materials line item."""
 
@@ -195,6 +218,9 @@ class TariffOptimizationResponseModel(BaseModel):
     savings_per_unit_value: Optional[float] = None
     annual_volume: Optional[int] = None
     annual_savings_value: Optional[float] = None
+    feasibility: Optional[TariffFeasibility] = None
+    net_savings: Optional[NetSavings] = None
+    ranking_score: Optional[float] = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -235,6 +261,9 @@ class TariffSkuOptimizationResponseModel(BaseModel):
     proof_id: str
     proof_payload_hash: str
     provenance_chain: List[Dict[str, Any]]
+    feasibility: Optional[TariffFeasibility] = None
+    net_savings: Optional[NetSavings] = None
+    ranking_score: Optional[float] = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -256,6 +285,10 @@ class TariffSuggestRequestModel(BaseModel):
     origin_country: Optional[str] = None
     export_country: Optional[str] = None
     import_country: Optional[str] = None
+    min_net_savings: float = 0.0
+    max_payback_months: Optional[float] = None
+    allow_recertification: bool = False
+    risk_tolerance: str = "B"
 
     model_config = ConfigDict(extra="forbid")
 
@@ -266,12 +299,15 @@ class TariffSuggestionItemModel(BaseModel):
     human_summary: str
     lever_id: Optional[str] = None
     lever_feasibility: Optional[str] = None
+    feasibility: Optional[TariffFeasibility] = None
     evidence_requirements: List[str] = Field(default_factory=list)
     baseline_duty_rate: float
     optimized_duty_rate: float
     savings_per_unit_rate: float
     savings_per_unit_value: float
     annual_savings_value: Optional[float]
+    net_savings: Optional[NetSavings] = None
+    ranking_score: Optional[float] = None
     best_mutation: Dict[str, Any]
     classification_confidence: Optional[float] = None
     active_codes_baseline: List[str]

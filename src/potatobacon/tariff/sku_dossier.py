@@ -8,14 +8,18 @@ from potatobacon.tariff.atoms_hts import DUTY_RATES
 from potatobacon.tariff.bom_ingest import bom_to_text, parse_bom_csv
 from potatobacon.tariff.candidate_search import generate_baseline_candidates
 from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_for_context
+from potatobacon.tariff.fact_requirements import FactRequirementRegistry
 from potatobacon.tariff.levers import applicable_levers, lever_library
 from potatobacon.tariff.models import BaselineCandidateModel, FactEvidenceModel, TariffSuggestionItemModel
 from potatobacon.tariff.mutation_generator import baseline_facts_from_profile, infer_product_profile
 from potatobacon.tariff.normalizer import normalize_compiled_facts, validate_minimum_inputs
 from potatobacon.tariff.parser import compile_facts_with_evidence, extract_product_spec
+from potatobacon.tariff.product_schema import ProductCategory
 from potatobacon.tariff.questions import generate_missing_fact_questions
 from potatobacon.tariff.risk import assess_tariff_risk
 from potatobacon.tariff.sku_models import (
+    BaselineAssignmentModel,
+    ConditionalPathwayModel,
     FactOverrideModel,
     SKUDossierBaselineModel,
     SKUDossierOptimizedModel,
@@ -165,6 +169,86 @@ def _combined_provenance(baseline_atoms: Any, optimized_atoms: Any) -> list[Dict
     return chain
 
 
+def _select_baseline_assignment(
+    baseline_eval: Any, baseline_candidates: list[BaselineCandidateModel]
+) -> BaselineAssignmentModel:
+    if getattr(baseline_eval, "duty_atoms", None):
+        ranked_atoms = sorted(
+            baseline_eval.duty_atoms,
+            key=lambda atom: (float(DUTY_RATES.get(atom.source_id, 999.0)), atom.source_id),
+        )
+        top_atom = ranked_atoms[0]
+        candidate_lookup = {cand.candidate_id: cand for cand in baseline_candidates}
+        candidate = candidate_lookup.get(top_atom.source_id)
+        return BaselineAssignmentModel(
+            atom_id=top_atom.source_id,
+            duty_rate=float(DUTY_RATES.get(top_atom.source_id, baseline_eval.duty_rate)),
+            duty_status=getattr(baseline_eval, "duty_status", None),
+            confidence=candidate.confidence if candidate else None,
+        )
+
+    eligible = [
+        cand
+        for cand in baseline_candidates
+        if not cand.missing_facts and cand.compliance_flags.get("guard_satisfied", False)
+    ]
+    eligible.sort(
+        key=lambda cand: (
+            cand.duty_rate,
+            -len(cand.active_codes),
+            -(cand.confidence or 0.0),
+            cand.candidate_id,
+        )
+    )
+    if eligible:
+        best = eligible[0]
+        return BaselineAssignmentModel(
+            atom_id=best.candidate_id,
+            duty_rate=best.duty_rate,
+            duty_status=getattr(baseline_eval, "duty_status", None),
+            confidence=best.confidence,
+        )
+
+    return BaselineAssignmentModel(
+        atom_id=None,
+        duty_rate=getattr(baseline_eval, "duty_rate", None),
+        duty_status=getattr(baseline_eval, "duty_status", None),
+        confidence=None,
+    )
+
+
+def _conditional_pathways(
+    baseline_candidates: list[BaselineCandidateModel],
+    baseline_assignment: BaselineAssignmentModel,
+    *,
+    requirement_registry: FactRequirementRegistry,
+) -> list[ConditionalPathwayModel]:
+    base_rate = baseline_assignment.duty_rate
+    pathways: list[ConditionalPathwayModel] = []
+    for candidate in baseline_candidates:
+        if not candidate.missing_facts:
+            continue
+        if base_rate is not None and candidate.duty_rate >= base_rate:
+            continue
+        why: list[str] = []
+        evidence_types: set[str] = set()
+        for fact_key in candidate.missing_facts:
+            requirement = requirement_registry.describe(fact_key)
+            why.append(requirement.render_question())
+            evidence_types.update(requirement.evidence_types)
+        pathways.append(
+            ConditionalPathwayModel(
+                atom_id=candidate.candidate_id,
+                duty_rate=candidate.duty_rate,
+                missing_facts=list(candidate.missing_facts),
+                why_needed=sorted(set(why)),
+                accepted_evidence_types=sorted(evidence_types),
+            )
+        )
+    pathways.sort(key=lambda path: (path.duty_rate, path.atom_id))
+    return pathways
+
+
 def build_sku_dossier_v2(
     sku_id: str,
     *,
@@ -226,6 +310,37 @@ def build_sku_dossier_v2(
                 len(item.evidence),
             )
         )
+    if (
+        product_spec.product_category == ProductCategory.ELECTRONICS
+        and attached_evidence_ids
+        and merged_facts.get("electronics_insulation_documented") is None
+    ):
+        merged_facts["electronics_insulation_documented"] = True
+        derived_from = [f"evidence:{eid}" for eid in attached_evidence_ids]
+        doc_evidence = FactEvidenceModel(
+            fact_key="electronics_insulation_documented",
+            value=True,
+            confidence=0.75,
+            evidence=[],
+            derived_from=derived_from,
+            risk_reason="Declared insulated conductors via attached evidence",
+        )
+        if merged_facts.get("electronics_insulated_conductors") is None:
+            merged_facts["electronics_insulated_conductors"] = True
+            fact_evidence = list(fact_evidence or [])
+            fact_evidence.append(
+                FactEvidenceModel(
+                    fact_key="electronics_insulated_conductors",
+                    value=True,
+                    confidence=0.7,
+                    evidence=[],
+                    derived_from=derived_from,
+                    risk_reason="Documented insulation using attached evidence",
+                )
+            )
+        fact_evidence = list(fact_evidence or [])
+        fact_evidence.append(doc_evidence)
+
     normalized_facts, normalization_notes = normalize_compiled_facts(merged_facts)
     missing_inputs = validate_minimum_inputs(product_spec.model_dump(), normalized_facts)
     compiled_pack = {
@@ -234,6 +349,7 @@ def build_sku_dossier_v2(
         "normalized": normalized_facts,
     }
     compiled_pack.update(compiled_facts_raw)
+    compiled_pack.update({key: value for key, value in merged_facts.items() if key not in compiled_pack})
     if overrides_payload:
         compiled_pack["overrides"] = overrides_payload
     if attached_evidence_ids:
@@ -241,16 +357,31 @@ def build_sku_dossier_v2(
     if session_id:
         compiled_pack["analysis_session_id"] = session_id
 
+    if fact_evidence:
+        fact_evidence = sorted(
+            fact_evidence,
+            key=lambda item: (
+                item.fact_key,
+                str(item.value),
+                item.confidence,
+                len(item.evidence),
+            ),
+        )
+
     resolved_context = law_context or DEFAULT_CONTEXT_ID
     atoms, context_meta = load_atoms_for_context(resolved_context)
     law_context_id = context_meta["context_id"]
 
     baseline_candidates, baseline_eval = _baseline_candidates(normalized_facts, atoms)
+    baseline_assignment = _select_baseline_assignment(baseline_eval, baseline_candidates)
+    requirement_registry = FactRequirementRegistry()
     baseline_duty_atoms = baseline_eval.duty_atoms
-    baseline_duty = baseline_eval.duty_rate if baseline_eval.duty_rate is not None else (
-        baseline_candidates[0].duty_rate if baseline_candidates else None
+    baseline_duty = baseline_assignment.duty_rate if baseline_assignment.duty_rate is not None else (
+        baseline_eval.duty_rate if baseline_eval.duty_rate is not None else (baseline_candidates[0].duty_rate if baseline_candidates else None)
     )
-    baseline_confidence = baseline_candidates[0].confidence if baseline_candidates else 0.3
+    baseline_confidence = baseline_assignment.confidence if baseline_assignment.confidence is not None else (
+        baseline_candidates[0].confidence if baseline_candidates else 0.3
+    )
 
     evidence_pack = _evidence_pack(
         product_spec=product_spec.model_dump(),
@@ -275,6 +406,11 @@ def build_sku_dossier_v2(
     )
 
     lever_requirements = _lever_requirement_gaps(product_spec, normalized_facts)
+    conditional_pathways = _conditional_pathways(
+        baseline_candidates,
+        baseline_assignment,
+        requirement_registry=requirement_registry,
+    )
     questions = generate_missing_fact_questions(
         law_context=law_context_id,
         atoms=atoms,
@@ -437,6 +573,8 @@ def build_sku_dossier_v2(
         proof_payload_hash=proof_payload_hash,
         baseline=SKUDossierBaselineModel(duty_rate=baseline_duty, candidates=baseline_candidates),
         optimized=optimized_section,
+        baseline_assigned=baseline_assignment,
+        conditional_pathways=conditional_pathways,
         questions=questions,
         product_spec=product_spec.model_dump(),
         compiled_facts=compiled_pack,

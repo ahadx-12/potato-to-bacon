@@ -8,7 +8,8 @@ from potatobacon.tariff.models import (
     TariffOptimizationRequestModel,
     TariffOptimizationResponseModel,
 )
-from potatobacon.tariff.optimizer import optimize_tariff
+from potatobacon.tariff.models import TariffFeasibility
+from potatobacon.tariff.optimizer import compute_net_savings_projection, optimize_tariff
 
 
 router = APIRouter(
@@ -40,6 +41,19 @@ def optimize_tariff_endpoint(
     annual_savings_value = None
     if request.annual_volume is not None:
         annual_savings_value = savings_per_unit_value * request.annual_volume
+    feasibility = TariffFeasibility()
+    net_savings = compute_net_savings_projection(
+        baseline_rate=result.baseline_rate,
+        optimized_rate=result.optimized_rate,
+        declared_value_per_unit=declared_value,
+        annual_volume=request.annual_volume,
+        feasibility=feasibility,
+    )
+    ranking_score = (
+        net_savings.net_annual_savings
+        if net_savings.net_annual_savings is not None
+        else (annual_savings_value if annual_savings_value is not None else savings_per_unit_value)
+    )
 
     return TariffOptimizationResponseModel(
         status=result.status,
@@ -61,4 +75,7 @@ def optimize_tariff_endpoint(
         savings_per_unit_value=savings_per_unit_value,
         annual_volume=request.annual_volume,
         annual_savings_value=annual_savings_value,
+        feasibility=feasibility,
+        net_savings=net_savings,
+        ranking_score=ranking_score,
     )

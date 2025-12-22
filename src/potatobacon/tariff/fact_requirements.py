@@ -49,11 +49,19 @@ class FactRequirementRegistry:
                 evidence_types=["connector_spec_sheet", "safety_datasheet_pdf", "bom_csv"],
                 measurement_hint="Provide rated volts/amps from spec or certification.",
             ),
-            "electronics_insulated_conductors": FactRequirement(
-                fact_key="electronics_insulated_conductors",
-                question_template="Are the conductors insulated/jacketed as part of the assembly?",
-                evidence_types=["harness_cross_section_photo", "material_declaration", "bom_csv"],
-            ),
+        "electronics_insulated_conductors": FactRequirement(
+            fact_key="electronics_insulated_conductors",
+            question_template="Are the conductors insulated/jacketed as part of the assembly?",
+            evidence_types=[
+                "harness_cross_section_photo",
+                "material_declaration",
+                "bom_csv",
+                "spec_sheet",
+                "manufacturer_datasheet_pdf",
+                "lab_test_report",
+                "product_photo_label",
+            ],
+        ),
             "electronics_has_connectors": FactRequirement(
                 fact_key="electronics_has_connectors",
                 question_template="Does the assembly terminate with defined connectors?",
