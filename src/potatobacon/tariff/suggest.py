@@ -11,6 +11,7 @@ from potatobacon.tariff.candidate_search import generate_baseline_candidates
 from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_for_context
 from potatobacon.tariff.atoms_hts import DUTY_RATES
 from potatobacon.tariff.engine import TariffScenario, _build_provenance, compute_duty_result
+from potatobacon.tariff.fact_requirements import FactRequirementRegistry
 from potatobacon.tariff.levers import LeverModel, applicable_levers
 from potatobacon.tariff.mutation_generator import baseline_facts_from_profile, infer_product_profile
 from potatobacon.tariff.models import (
@@ -107,6 +108,205 @@ class ScenarioEvaluation:
     effective_duty_rate: float
 
 
+DOCUMENTATION_LEVER_ID = "LEVER_DOC_SUBSTANTIATE_FACTS"
+
+
+def _assumed_facts_for_candidate(atom: PolicyAtom, missing_facts: Sequence[str]) -> Dict[str, bool]:
+    assumed: Dict[str, bool] = {}
+    missing_set = set(missing_facts)
+    for literal in atom.guard:
+        negated = literal.startswith("¬")
+        fact_key = literal[1:] if negated else literal
+        if fact_key not in missing_set:
+            continue
+        assumed[fact_key] = not negated
+    return assumed
+
+
+def _documentation_lever_inputs(
+    *,
+    candidate: BaselineCandidateModel,
+    atoms: Sequence[PolicyAtom],
+    requirement_registry: FactRequirementRegistry,
+) -> tuple[Dict[str, bool], list[str], list[str], list[str]]:
+    atom_lookup = {atom.source_id: atom for atom in atoms}
+    atom = atom_lookup.get(candidate.candidate_id)
+    if atom is None:
+        return {}, [], [], []
+
+    assumed_facts = _assumed_facts_for_candidate(atom, candidate.missing_facts)
+    fact_gaps = sorted(candidate.missing_facts)
+    evidence_templates: list[str] = []
+    why_needed: list[str] = []
+    for fact_key in fact_gaps:
+        requirement = requirement_registry.describe(fact_key)
+        evidence_templates.extend(requirement.evidence_types)
+        why_needed.append(requirement.render_question())
+    evidence_templates = sorted({tmpl for tmpl in evidence_templates})
+    return assumed_facts, fact_gaps, evidence_templates, sorted(set(why_needed))
+
+
+def _documentation_feasibility() -> TariffFeasibility:
+    return TariffFeasibility(
+        one_time_cost=250.0,
+        recurring_cost_per_unit=0.0,
+        implementation_time_days=5,
+        requires_recertification=False,
+        supply_chain_risk="LOW",
+    )
+
+
+def _documentation_levers(
+    *,
+    baseline_candidates: Sequence[BaselineCandidateModel],
+    atoms: Sequence[PolicyAtom],
+    duty_rates: Mapping[str, float],
+    baseline_eval: ScenarioEvaluation,
+    baseline_facts: Mapping[str, object],
+    baseline_rate: float | None,
+    baseline_rate_raw: float | None,
+    baseline_confidence: float,
+    declared_value: float,
+    annual_volume: int | None,
+    law_context: str,
+    context_meta: Mapping[str, Any],
+    evidence_pack: Mapping[str, Any],
+    overlay_context: Mapping[str, Any],
+) -> list[TariffSuggestionItemModel]:
+    requirement_registry = FactRequirementRegistry()
+    documentation_levers: list[TariffSuggestionItemModel] = []
+    for candidate in baseline_candidates:
+        if not candidate.missing_facts:
+            continue
+        if baseline_rate is None:
+            continue
+        if baseline_rate is not None and candidate.duty_rate >= baseline_rate:
+            continue
+        assumed_facts, fact_gaps, evidence_templates, why_needed = _documentation_lever_inputs(
+            candidate=candidate,
+            atoms=atoms,
+            requirement_registry=requirement_registry,
+        )
+        if not assumed_facts:
+            continue
+
+        mutated = deepcopy(baseline_facts)
+        mutated.update(assumed_facts)
+        mutated_normalized, _ = normalize_compiled_facts(mutated)
+
+        optimized_eval = _evaluate_scenario(atoms, mutated_normalized, duty_rates, overlay_context=overlay_context)
+        optimized_rate = optimized_eval.effective_duty_rate
+        if not optimized_eval.sat or optimized_rate is None:
+            continue
+        if any(ov.stop_optimization for ov in optimized_eval.overlays):
+            continue
+
+        optimized_candidates = generate_baseline_candidates(mutated_normalized, atoms, duty_rates, max_candidates=1)
+        optimized_confidence = optimized_candidates[0].confidence if optimized_candidates else baseline_confidence
+
+        savings_rate, savings_value, annual_value = _compute_savings(
+            baseline_rate=baseline_rate,
+            optimized_rate=optimized_rate,
+            declared_value_per_unit=declared_value,
+            annual_volume=annual_volume,
+        )
+        if savings_rate <= 0 and optimized_confidence <= baseline_confidence + 0.2:
+            continue
+
+        feasibility_profile = _documentation_feasibility()
+        net_savings = _compute_net_savings(
+            baseline_rate=baseline_rate,
+            optimized_rate=optimized_rate,
+            declared_value_per_unit=declared_value,
+            annual_volume=annual_volume,
+            feasibility=feasibility_profile,
+        )
+        ranking_score = (
+            net_savings.net_annual_savings
+            if net_savings.net_annual_savings is not None
+            else (annual_value if annual_value is not None else savings_value)
+        )
+
+        risk = assess_tariff_risk(
+            baseline_facts=baseline_facts,
+            optimized_facts=mutated_normalized,
+            baseline_active_atoms=baseline_eval.active_atoms,
+            optimized_active_atoms=optimized_eval.active_atoms,
+            baseline_duty_rate=baseline_rate or optimized_rate,
+            optimized_duty_rate=optimized_rate,
+        )
+        adjusted_risk_score = min(25, max(risk.risk_score, 10))
+        adjusted_grade = _defensibility_grade(adjusted_risk_score)
+
+        proof_handle = _record_proof(
+            law_context=law_context,
+            context_meta=context_meta,
+            baseline_facts=baseline_facts,
+            optimized_facts=mutated_normalized,
+            baseline_eval=baseline_eval,
+            optimized_eval=optimized_eval,
+            lever=None,
+            evidence_pack=evidence_pack,
+            overlays={
+                "baseline": [ov.model_dump() for ov in baseline_eval.overlays],
+                "optimized": [ov.model_dump() for ov in optimized_eval.overlays],
+            },
+        )
+
+        provenance_chain: List[Dict[str, Any]] = []
+        provenance_chain.extend(_build_provenance(baseline_eval.duty_atoms, "baseline"))
+        provenance_chain.extend(_build_provenance(optimized_eval.duty_atoms, "optimized"))
+        provenance_chain.sort(
+            key=lambda item: (
+                item.get("source_id", ""),
+                item.get("section", ""),
+                item.get("text", ""),
+                item.get("scenario", ""),
+            )
+        )
+
+        documentation_levers.append(
+            TariffSuggestionItemModel(
+                human_summary="Substantiate missing facts to unlock lower-duty pathway",
+                lever_category=DOCUMENTATION_LEVER_ID,
+                lever_id=f"{DOCUMENTATION_LEVER_ID}:{candidate.candidate_id}",
+                lever_feasibility="LOW",
+                feasibility=feasibility_profile,
+                evidence_requirements=list(evidence_templates),
+                accepted_evidence_templates=list(evidence_templates),
+                fact_gaps=fact_gaps,
+                why_needed=why_needed,
+                target_candidate=candidate.candidate_id,
+                optimization_type="CONDITIONAL_OPTIMIZATION",
+                baseline_duty_rate=baseline_rate_raw or baseline_eval.duty_rate or optimized_rate,
+                optimized_duty_rate=optimized_eval.duty_rate if optimized_eval.duty_rate is not None else optimized_rate,
+                baseline_effective_duty_rate=baseline_rate,
+                optimized_effective_duty_rate=optimized_rate,
+                savings_per_unit_rate=savings_rate,
+                savings_per_unit_value=savings_value,
+                annual_savings_value=annual_value,
+                net_savings=net_savings,
+                ranking_score=ranking_score,
+                best_mutation=assumed_facts,
+                classification_confidence=optimized_confidence,
+                active_codes_baseline=sorted({atom.source_id for atom in baseline_eval.duty_atoms}),
+                active_codes_optimized=sorted({atom.source_id for atom in optimized_eval.duty_atoms}),
+                provenance_chain=provenance_chain,
+                overlays={"baseline": baseline_eval.overlays, "optimized": optimized_eval.overlays},
+                law_context=law_context,
+                proof_id=proof_handle.proof_id,
+                proof_payload_hash=proof_handle.proof_payload_hash,
+                risk_score=adjusted_risk_score,
+                defensibility_grade=adjusted_grade,
+                risk_reasons=risk.risk_reasons,
+                tariff_manifest_hash=context_meta["manifest_hash"],
+            )
+        )
+
+    documentation_levers.sort(key=lambda item: item.optimized_duty_rate)
+    return documentation_levers
+
+
 def _evaluate_scenario(
     atoms: Sequence[PolicyAtom],
     facts: Mapping[str, object],
@@ -152,6 +352,44 @@ def _evaluate_scenario(
         overlays=overlays,
         effective_duty_rate=effective_rate,
     )
+
+
+def _select_baseline_rate(
+    baseline_eval: ScenarioEvaluation,
+    baseline_candidates: Sequence[BaselineCandidateModel],
+    duty_rates: Mapping[str, float],
+) -> tuple[float | None, float | None]:
+    if getattr(baseline_eval, "duty_atoms", None):
+        ranked_atoms = sorted(
+            baseline_eval.duty_atoms,
+            key=lambda atom: (float(duty_rates.get(atom.source_id, 999.0)), atom.source_id),
+        )
+        top_atom = ranked_atoms[0]
+        candidate_lookup = {cand.candidate_id: cand for cand in baseline_candidates}
+        candidate = candidate_lookup.get(top_atom.source_id)
+        confidence = candidate.confidence if candidate else None
+        rate = float(duty_rates.get(top_atom.source_id, baseline_eval.duty_rate))
+        return rate, confidence
+
+    eligible = [
+        cand
+        for cand in baseline_candidates
+        if not cand.missing_facts and cand.compliance_flags.get("guard_satisfied", False)
+    ]
+    eligible.sort(
+        key=lambda cand: (
+            cand.duty_rate,
+            -len(cand.active_codes),
+            -(cand.confidence or 0.0),
+            cand.candidate_id,
+        )
+    )
+    if eligible:
+        best = eligible[0]
+        return best.duty_rate, best.confidence
+
+    fallback_confidence = baseline_candidates[0].confidence if baseline_candidates else None
+    return baseline_eval.duty_rate, fallback_confidence
 
 
 def _sort_key(item: TariffSuggestionItemModel, annual_volume: int | None, index: int) -> tuple:
@@ -319,9 +557,18 @@ def suggest_tariff_optimizations(
     baseline_eval = _evaluate_scenario(
         atoms, normalized_facts, duty_rates, overlay_context=overlay_context
     )
-    baseline_rate_raw = baseline_candidates[0].duty_rate if baseline_candidates else baseline_eval.duty_rate
-    baseline_rate = baseline_eval.effective_duty_rate
-    baseline_confidence = baseline_candidates[0].confidence if baseline_candidates else 0.3
+    baseline_safe_rate, baseline_safe_confidence = _select_baseline_rate(baseline_eval, baseline_candidates, duty_rates)
+    baseline_rate_raw = (
+        baseline_safe_rate
+        if baseline_safe_rate is not None
+        else (baseline_candidates[0].duty_rate if baseline_candidates else baseline_eval.duty_rate)
+    )
+    baseline_rate = baseline_safe_rate if baseline_safe_rate is not None else baseline_eval.effective_duty_rate
+    baseline_confidence = (
+        baseline_safe_confidence
+        if baseline_safe_confidence is not None
+        else (baseline_candidates[0].confidence if baseline_candidates else 0.3)
+    )
 
     suggestion_items: List[TariffSuggestionItemModel] = []
     why_not_optimized: List[str] = normalization_notes[:]
@@ -539,6 +786,24 @@ def suggest_tariff_optimizations(
                 tariff_manifest_hash=context_meta["manifest_hash"],
             )
         )
+
+    documentation_levers = _documentation_levers(
+        baseline_candidates=baseline_candidates,
+        atoms=atoms,
+        duty_rates=duty_rates,
+        baseline_eval=baseline_eval,
+        baseline_facts=normalized_facts,
+        baseline_rate=baseline_rate,
+        baseline_rate_raw=baseline_rate_raw,
+        baseline_confidence=baseline_confidence,
+        declared_value=declared_value,
+        annual_volume=request.annual_volume,
+        law_context=law_context,
+        context_meta=context_meta,
+        evidence_pack=evidence_pack,
+        overlay_context=overlay_context,
+    )
+    suggestion_items.extend(documentation_levers)
 
     suggestion_items = [item for item in suggestion_items if _passes_constraints(item, request)]
 
