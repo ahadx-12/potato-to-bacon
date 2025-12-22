@@ -1,5 +1,6 @@
 from potatobacon.tariff.atoms_hts import DUTY_RATES, tariff_policy_atoms
 from potatobacon.tariff.candidate_search import generate_baseline_candidates
+from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID
 from potatobacon.tariff.models import BaselineCandidateModel
 from potatobacon.tariff.questions import generate_missing_fact_questions
 
@@ -19,13 +20,13 @@ def test_generate_missing_fact_questions_deterministic():
 
     compiled_facts = {"requires_origin_data": True}
     first = generate_missing_fact_questions(
-        law_context="HTS_US_DEMO_2025",
+        law_context=DEFAULT_CONTEXT_ID,
         atoms=atoms,
         compiled_facts=compiled_facts,
         candidates=[candidate],
     )
     second = generate_missing_fact_questions(
-        law_context="HTS_US_DEMO_2025",
+        law_context=DEFAULT_CONTEXT_ID,
         atoms=atoms,
         compiled_facts=compiled_facts,
         candidates=[candidate],
@@ -57,7 +58,7 @@ def test_electronics_missing_facts_stay_relevant():
     assert "HTS_STEEL_BOLT" not in candidate_ids
 
     package = generate_missing_fact_questions(
-        law_context="HTS_US_DEMO_2025",
+        law_context=DEFAULT_CONTEXT_ID,
         atoms=atoms,
         compiled_facts=facts,
         candidates=candidates,

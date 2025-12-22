@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Tuple
 
 from potatobacon.law.arbitrage_hunter import ArbitrageHunter
 from potatobacon.law.solver_z3 import PolicyAtom, analyze_scenario, check_scenario
 from potatobacon.proofs.engine import record_tariff_proof
 from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_for_context
 
+from .atom_utils import atom_provenance
 from .atoms_hts import DUTY_RATES
 from .models import TariffDossierModel, TariffExplainResponseModel, TariffScenario
 
@@ -22,11 +23,15 @@ class DutyResult:
     missing_facts: List[str]
 
 
-def _active_duty_atoms(atoms: Iterable[PolicyAtom], scenario: TariffScenario) -> Tuple[bool, List[PolicyAtom]]:
+def _active_duty_atoms(
+    atoms: Iterable[PolicyAtom],
+    scenario: TariffScenario,
+    duty_rates: Mapping[str, float],
+) -> Tuple[bool, List[PolicyAtom]]:
     """Return active duty-bearing atoms for a scenario."""
 
     is_sat, active_atoms = check_scenario(scenario.facts, list(atoms))
-    duty_atoms = [atom for atom in active_atoms if atom.source_id in DUTY_RATES]
+    duty_atoms = [atom for atom in active_atoms if atom.source_id in duty_rates]
     return is_sat, duty_atoms
 
 
@@ -36,13 +41,15 @@ def compute_duty_result(
     *,
     active_atoms: List[PolicyAtom] | None = None,
     is_sat: bool | None = None,
+    duty_rates: Mapping[str, float] | None = None,
 ) -> DutyResult:
     """Compute the duty outcome for ``scenario`` without throwing."""
 
+    rates = duty_rates or DUTY_RATES
     if active_atoms is None or is_sat is None:
-        is_sat, duty_atoms = _active_duty_atoms(atoms, scenario)
+        is_sat, duty_atoms = _active_duty_atoms(atoms, scenario, rates)
     else:
-        duty_atoms = [atom for atom in active_atoms if atom.source_id in DUTY_RATES]
+        duty_atoms = [atom for atom in active_atoms if atom.source_id in rates]
 
     if not is_sat:
         return DutyResult(
@@ -61,7 +68,7 @@ def compute_duty_result(
             missing_facts=[],
         )
     active_atom = duty_atoms[-1]
-    duty_rate = float(DUTY_RATES[active_atom.source_id])
+    duty_rate = float(rates[active_atom.source_id])
     return DutyResult(
         status="OK",
         duty_rate=duty_rate,
@@ -76,10 +83,11 @@ def compute_duty_rate(
     scenario: TariffScenario,
     *,
     strict: bool = True,
+    duty_rates: Mapping[str, float] | None = None,
 ) -> float | None:
     """Compute the duty rate for ``scenario`` using the provided atoms."""
 
-    result = compute_duty_result(atoms, scenario)
+    result = compute_duty_result(atoms, scenario, duty_rates=duty_rates)
     if result.status == "UNSAT":
         if strict:
             raise ValueError("Scenario is logically inconsistent with the tariff atoms")
@@ -106,16 +114,8 @@ def apply_mutations(base_scenario: TariffScenario, mutations: Dict[str, Any]) ->
 def _build_provenance(duty_atoms: Iterable[PolicyAtom], scenario_label: str) -> List[Dict[str, Any]]:
     provenance: list[Dict[str, Any]] = []
     for atom in duty_atoms:
-        provenance.append(
-            {
-                "scenario": scenario_label,
-                "source_id": atom.source_id,
-                "statute": getattr(atom, "statute", ""),
-                "section": getattr(atom, "section", ""),
-                "text": getattr(atom, "text", ""),
-                "jurisdiction": atom.outcome.get("jurisdiction", ""),
-            }
-        )
+        entry = atom_provenance(atom, scenario_label)
+        provenance.append(entry)
     return provenance
 
 
@@ -133,15 +133,16 @@ def run_tariff_hack(
     context = context_meta["context_id"]
     ArbitrageHunter(atoms, seed=seed)  # placeholder wiring for future GA usage
 
+    duty_rates = context_meta.get("duty_rates") or DUTY_RATES
     baseline = TariffScenario(name="baseline", facts=deepcopy(base_facts))
-    baseline_result = compute_duty_result(atoms, baseline)
+    baseline_result = compute_duty_result(atoms, baseline, duty_rates=duty_rates)
     baseline_rate = baseline_result.duty_rate if baseline_result.duty_rate is not None else 0.0
 
     if mutations:
         optimized = apply_mutations(baseline, mutations)
     else:
         optimized = TariffScenario(name="baseline", facts=deepcopy(base_facts))
-    optimized_result = compute_duty_result(atoms, optimized)
+    optimized_result = compute_duty_result(atoms, optimized, duty_rates=duty_rates)
     optimized_rate = optimized_result.duty_rate if optimized_result.duty_rate is not None else baseline_rate
 
     status = "OPTIMIZED" if optimized_rate < baseline_rate else "BASELINE"
@@ -153,8 +154,8 @@ def run_tariff_hack(
     sat_optimized, active_atoms_optimized, unsat_core_optimized = analyze_scenario(
         optimized.facts, atoms
     )
-    duty_atoms_baseline = [atom for atom in active_atoms_baseline if atom.source_id in DUTY_RATES]
-    duty_atoms_optimized = [atom for atom in active_atoms_optimized if atom.source_id in DUTY_RATES]
+    duty_atoms_baseline = [atom for atom in active_atoms_baseline if atom.source_id in duty_rates]
+    duty_atoms_optimized = [atom for atom in active_atoms_optimized if atom.source_id in duty_rates]
 
     provenance_chain: list[Dict[str, Any]] = []
     provenance_chain.extend(_build_provenance(duty_atoms_baseline, "baseline"))
@@ -235,6 +236,7 @@ def explain_tariff_scenario(
         scenario = apply_mutations(scenario, mutations)
 
     is_sat, active_atoms, unsat_core = analyze_scenario(scenario.facts, atoms)
+    duty_rates = context_meta.get("duty_rates") or DUTY_RATES
 
     if is_sat:
         explanation = "Scenario is logically consistent with tariff rules."
@@ -248,7 +250,9 @@ def explain_tariff_scenario(
             )
         explanation = "\n".join(parts)
 
-    duty_result = compute_duty_result(atoms, scenario, active_atoms=active_atoms, is_sat=is_sat)
+    duty_result = compute_duty_result(
+        atoms, scenario, active_atoms=active_atoms, is_sat=is_sat, duty_rates=duty_rates
+    )
     duty_rate: float | None = duty_result.duty_rate
 
     proof_handle = record_tariff_proof(

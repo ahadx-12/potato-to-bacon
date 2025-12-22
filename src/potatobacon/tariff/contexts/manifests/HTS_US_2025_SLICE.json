@@ -1,0 +1,16 @@
+{
+  "context_id": "HTS_US_2025_SLICE",
+  "domain": "tariff",
+  "jurisdiction": "US",
+  "effective_from": "2025-01-01",
+  "effective_to": null,
+  "description": "HTSUS 2025 slice generated from structured extract for chapters 64, 73, 85.",
+  "loader": {
+    "type": "python",
+    "callable": "potatobacon.tariff.hts_ingest.ingest:load_policy_atoms"
+  },
+  "sources": [
+    "data/hts_extract/hts_lines_sample.jsonl",
+    "data/hts_extract/notes_sample.json"
+  ]
+}

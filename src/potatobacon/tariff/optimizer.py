@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from potatobacon.law.solver_z3 import PolicyAtom, analyze_scenario
 from potatobacon.proofs.engine import record_tariff_proof
+from potatobacon.tariff.atom_utils import atom_provenance
 from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_for_context
 
 from .atoms_hts import DUTY_RATES
@@ -72,30 +73,20 @@ def compute_net_savings_projection(
 
 
 def _build_provenance(duty_atoms: List[PolicyAtom], scenario_label: str) -> List[Dict[str, Any]]:
-    provenance: list[Dict[str, Any]] = []
-    for atom in duty_atoms:
-        provenance.append(
-            {
-                "scenario": scenario_label,
-                "source_id": atom.source_id,
-                "statute": getattr(atom, "statute", ""),
-                "section": getattr(atom, "section", ""),
-                "text": getattr(atom, "text", ""),
-                "jurisdiction": atom.outcome.get("jurisdiction", ""),
-            }
-        )
-    return provenance
+    return [atom_provenance(atom, scenario_label) for atom in duty_atoms]
 
 
 def _evaluate_scenario(
-    atoms: List[PolicyAtom], scenario: TariffScenario, scenario_label: str
+    atoms: List[PolicyAtom], scenario: TariffScenario, scenario_label: str, duty_rates: Dict[str, float]
 ) -> _ScenarioEvaluation:
     is_sat, active_atoms, unsat_core = analyze_scenario(scenario.facts, atoms)
-    duty_result = compute_duty_result(atoms, scenario, active_atoms=active_atoms, is_sat=is_sat)
-    duty_atoms = duty_result.active_atoms or [atom for atom in active_atoms if atom.source_id in DUTY_RATES]
+    duty_result = compute_duty_result(
+        atoms, scenario, active_atoms=active_atoms, is_sat=is_sat, duty_rates=duty_rates
+    )
+    duty_atoms = duty_result.active_atoms or [atom for atom in active_atoms if atom.source_id in duty_rates]
     duty_rate: Optional[float] = duty_result.duty_rate
     if is_sat and duty_atoms and duty_rate is None:
-        duty_rate = float(DUTY_RATES[duty_atoms[-1].source_id])
+        duty_rate = float(duty_rates[duty_atoms[-1].source_id])
     provenance = _build_provenance(duty_atoms, scenario_label)
     return _ScenarioEvaluation(
         scenario=scenario,
@@ -118,10 +109,11 @@ def optimize_tariff(
     resolved_context = law_context or DEFAULT_CONTEXT_ID
     atoms, context_meta = load_atoms_for_context(resolved_context)
     context = context_meta["context_id"]
+    duty_rates = context_meta.get("duty_rates") or DUTY_RATES
 
     normalized_base, _ = normalize_compiled_facts(base_facts)
     baseline_scenario = TariffScenario(name="baseline", facts=normalized_base)
-    baseline_eval = _evaluate_scenario(atoms, baseline_scenario, "baseline")
+    baseline_eval = _evaluate_scenario(atoms, baseline_scenario, "baseline", duty_rates)
 
     best_rate = baseline_eval.duty_rate
     best_mutation: Optional[Dict[str, Any]] = None
@@ -132,7 +124,7 @@ def optimize_tariff(
             mutated_scenario = apply_mutations(baseline_scenario, {key: value})
             normalized_mutated, _ = normalize_compiled_facts(mutated_scenario.facts)
             mutated_scenario = TariffScenario(name=mutated_scenario.name, facts=normalized_mutated)
-            evaluation = _evaluate_scenario(atoms, mutated_scenario, "optimized")
+            evaluation = _evaluate_scenario(atoms, mutated_scenario, "optimized", duty_rates)
             if evaluation.duty_rate is None:
                 continue
             if best_rate is None or evaluation.duty_rate < best_rate:

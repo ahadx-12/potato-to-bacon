@@ -66,9 +66,10 @@ def generate_audit_pack_pdf(proof_id: str) -> bytes:
     except KeyError:
         law_context = DEFAULT_CONTEXT_ID
         atoms, context_meta = load_atoms_for_context(law_context)
-    baseline_candidates = generate_baseline_candidates(normalized_facts, atoms, DUTY_RATES, max_candidates=5)
-    baseline_eval = _evaluate_scenario(atoms, normalized_facts)
-    baseline_assignment = _select_baseline_assignment(baseline_eval, baseline_candidates)
+    duty_rates = context_meta.get("duty_rates") or DUTY_RATES
+    baseline_candidates = generate_baseline_candidates(normalized_facts, atoms, duty_rates, max_candidates=5)
+    baseline_eval = _evaluate_scenario(atoms, normalized_facts, duty_rates)
+    baseline_assignment = _select_baseline_assignment(baseline_eval, baseline_candidates, duty_rates)
     requirement_registry = FactRequirementRegistry()
     conditional_pathways = _conditional_pathways(
         baseline_candidates, baseline_assignment, requirement_registry=requirement_registry

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Dict, Iterable, List, Mapping, Sequence
 
 from potatobacon.law.solver_z3 import PolicyAtom, analyze_scenario
+from potatobacon.tariff.atom_utils import atom_provenance
 from potatobacon.tariff.models import BaselineCandidateModel
 
 
@@ -33,14 +34,7 @@ def _infer_atom_categories(guard: Sequence[str]) -> set[str]:
 
 
 def _provenance_for_atom(atom: PolicyAtom, scenario_label: str) -> Dict[str, str]:
-    return {
-        "scenario": scenario_label,
-        "source_id": atom.source_id,
-        "statute": getattr(atom, "statute", ""),
-        "section": getattr(atom, "section", ""),
-        "text": getattr(atom, "text", ""),
-        "jurisdiction": atom.outcome.get("jurisdiction", ""),
-    }
+    return atom_provenance(atom, scenario_label)
 
 
 def _evaluate_guard(facts: Mapping[str, object], guard: Sequence[str]) -> tuple[list[str], int, bool]:
