@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import threading
-from typing import Dict, Iterable, List, Mapping, MutableMapping, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Sequence, Tuple
 
 from z3 import (  # type: ignore[import-not-found]
     And,
@@ -52,6 +52,7 @@ class PolicyAtom:
     action: str = ""
     rule_type: str = "STATUTE"
     atom_id: str | None = None
+    metadata: Mapping[str, Any] | None = None
     z3_guard: BoolRef | None = None
     z3_outcome: BoolRef | None = None
 
@@ -130,6 +131,7 @@ def build_policy_atoms_from_rules(
             modality=rule.modality,
             action=rule.action,
             atom_id=f"{getattr(rule, 'id', rule.action)}_atom_{idx}",
+            metadata=getattr(rule, "metadata", None),
         )
         atoms.append(atom)
     var_map: Dict[str, BoolRef] = {}

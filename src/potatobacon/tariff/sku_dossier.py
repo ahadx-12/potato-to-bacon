@@ -4,6 +4,7 @@ from copy import deepcopy
 from typing import Any, Dict, Mapping, Optional
 
 from potatobacon.proofs.engine import record_tariff_proof
+from potatobacon.tariff.atom_utils import atom_provenance
 from potatobacon.tariff.atoms_hts import DUTY_RATES
 from potatobacon.tariff.bom_ingest import bom_to_text, parse_bom_csv
 from potatobacon.tariff.candidate_search import generate_baseline_candidates
@@ -133,26 +134,17 @@ def _lever_requirement_gaps(spec: Any, facts: Mapping[str, object]) -> dict[str,
 
 
 def _baseline_candidates(
-    normalized_facts: Dict[str, Any], atoms: Any
+    normalized_facts: Dict[str, Any], atoms: Any, duty_rates: Dict[str, float]
 ) -> tuple[list[BaselineCandidateModel], Any]:
-    baseline_candidates = generate_baseline_candidates(normalized_facts, atoms, DUTY_RATES, max_candidates=5)
-    baseline_eval = _evaluate_scenario(atoms, normalized_facts)
+    baseline_candidates = generate_baseline_candidates(normalized_facts, atoms, duty_rates, max_candidates=5)
+    baseline_eval = _evaluate_scenario(atoms, normalized_facts, duty_rates)
     return baseline_candidates, baseline_eval
 
 
 def _provenance_for_atoms(atoms: Any, scenario_label: str) -> list[Dict[str, Any]]:
     chain: list[Dict[str, Any]] = []
     for atom in atoms or []:
-        chain.append(
-            {
-                "scenario": scenario_label,
-                "source_id": atom.source_id,
-                "statute": getattr(atom, "statute", ""),
-                "section": getattr(atom, "section", ""),
-                "text": getattr(atom, "text", ""),
-                "jurisdiction": atom.outcome.get("jurisdiction", ""),
-            }
-        )
+        chain.append(atom_provenance(atom, scenario_label))
     return chain
 
 
@@ -170,19 +162,19 @@ def _combined_provenance(baseline_atoms: Any, optimized_atoms: Any) -> list[Dict
 
 
 def _select_baseline_assignment(
-    baseline_eval: Any, baseline_candidates: list[BaselineCandidateModel]
+    baseline_eval: Any, baseline_candidates: list[BaselineCandidateModel], duty_rates: Dict[str, float]
 ) -> BaselineAssignmentModel:
     if getattr(baseline_eval, "duty_atoms", None):
         ranked_atoms = sorted(
             baseline_eval.duty_atoms,
-            key=lambda atom: (float(DUTY_RATES.get(atom.source_id, 999.0)), atom.source_id),
+            key=lambda atom: (float(duty_rates.get(atom.source_id, 999.0)), atom.source_id),
         )
         top_atom = ranked_atoms[0]
         candidate_lookup = {cand.candidate_id: cand for cand in baseline_candidates}
         candidate = candidate_lookup.get(top_atom.source_id)
         return BaselineAssignmentModel(
             atom_id=top_atom.source_id,
-            duty_rate=float(DUTY_RATES.get(top_atom.source_id, baseline_eval.duty_rate)),
+            duty_rate=float(duty_rates.get(top_atom.source_id, baseline_eval.duty_rate)),
             duty_status=getattr(baseline_eval, "duty_status", None),
             confidence=candidate.confidence if candidate else None,
         )
@@ -371,9 +363,10 @@ def build_sku_dossier_v2(
     resolved_context = law_context or DEFAULT_CONTEXT_ID
     atoms, context_meta = load_atoms_for_context(resolved_context)
     law_context_id = context_meta["context_id"]
+    duty_rates = context_meta.get("duty_rates") or DUTY_RATES
 
-    baseline_candidates, baseline_eval = _baseline_candidates(normalized_facts, atoms)
-    baseline_assignment = _select_baseline_assignment(baseline_eval, baseline_candidates)
+    baseline_candidates, baseline_eval = _baseline_candidates(normalized_facts, atoms, duty_rates)
+    baseline_assignment = _select_baseline_assignment(baseline_eval, baseline_candidates, duty_rates)
     requirement_registry = FactRequirementRegistry()
     baseline_duty_atoms = baseline_eval.duty_atoms
     baseline_duty = baseline_assignment.duty_rate if baseline_assignment.duty_rate is not None else (
@@ -458,13 +451,13 @@ def build_sku_dossier_v2(
             mutated = deepcopy(normalized_facts)
             mutated.update(lever.mutation)
             mutated_normalized, _ = normalize_compiled_facts(mutated)
-            optimized_eval = _evaluate_scenario(atoms, mutated_normalized)
+            optimized_eval = _evaluate_scenario(atoms, mutated_normalized, duty_rates)
             optimized_rate = optimized_eval.duty_rate
             if not optimized_eval.sat or optimized_rate is None:
                 continue
             optimized_duty_atoms = optimized_eval.duty_atoms
 
-            optimized_candidates = generate_baseline_candidates(mutated_normalized, atoms, DUTY_RATES, max_candidates=1)
+            optimized_candidates = generate_baseline_candidates(mutated_normalized, atoms, duty_rates, max_candidates=1)
             optimized_confidence = optimized_candidates[0].confidence if optimized_candidates else baseline_confidence
 
             savings_rate, savings_value, annual_value = _compute_savings(

@@ -1,0 +1,39 @@
+{
+  "chapter_notes": [
+    {
+      "note_id": "CH85_NOTE_SIGNAL",
+      "text": "Insulated signal conductors and active cables must evidence connectors and circuit integrity.",
+      "chapter": "85",
+      "heading": null,
+      "guard_tokens": ["electronics_has_connectors"],
+      "source_ref": "HTSUS 2025 Chapter 85 Note",
+      "modality": "PERMIT",
+      "action": "note_ch85_signal",
+      "effective_date": "2025-01-01"
+    },
+    {
+      "note_id": "CH73_NOTE_BOLTS",
+      "text": "Torque critical bolts under chapter 73 treated as chassis hardware unless excluded elsewhere.",
+      "chapter": "73",
+      "heading": null,
+      "guard_tokens": ["product_type_chassis_bolt"],
+      "source_ref": "HTSUS 2025 Chapter 73 Note",
+      "modality": "PERMIT",
+      "action": "note_ch73_fasteners",
+      "effective_date": "2025-01-01"
+    }
+  ],
+  "heading_notes": [
+    {
+      "note_id": "HD8544_NOTE_VOLTAGE",
+      "text": "Heading 8544 note: insulated conductors for signal circuits rated not over 80V.",
+      "chapter": "85",
+      "heading": "8544",
+      "guard_tokens": ["electronics_insulated_conductors"],
+      "source_ref": "HTSUS 2025 heading 8544 note",
+      "modality": "PERMIT",
+      "action": "note_8544_signal",
+      "effective_date": "2025-01-01"
+    }
+  ]
+}

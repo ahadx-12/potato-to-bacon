@@ -7,13 +7,20 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
 from potatobacon.law.solver_z3 import PolicyAtom
+from potatobacon.tariff.atom_utils import duty_rate_index
 
 CONTEXTS_DIR = Path(__file__).resolve().parent / "contexts"
 MANIFESTS_DIR = CONTEXTS_DIR / "manifests"
 RULES_DIR = CONTEXTS_DIR / "rules"
-DEFAULT_CONTEXT_ID = "HTS_US_DEMO_2025"
+DEFAULT_CONTEXT_ID = "HTS_US_2025_SLICE"
 
 _atoms_cache: Dict[str, Tuple[List[PolicyAtom], Dict[str, Any]]] = {}
+
+
+def _normalized_metadata(metadata: Any) -> Any:
+    if metadata is None:
+        return None
+    return json.loads(json.dumps(metadata, sort_keys=True, separators=(",", ":")))
 
 
 def list_context_manifests(domain: str = "tariff") -> List[Dict[str, Any]]:
@@ -62,6 +69,7 @@ def _atom_to_dict(atom: PolicyAtom) -> Dict[str, Any]:
         "action": atom.action,
         "rule_type": atom.rule_type,
         "atom_id": atom.atom_id,
+        "metadata": _normalized_metadata(getattr(atom, "metadata", None)),
     }
 
 
@@ -111,6 +119,7 @@ def _rule_obj_to_atom(rule: Dict[str, Any]) -> PolicyAtom:
         action=rule.get("action", outcome.get("action", "")),
         rule_type=rule.get("rule_type", "STATUTE"),
         atom_id=rule.get("atom_id"),
+        metadata=rule.get("metadata"),
     )
 
 
@@ -161,6 +170,7 @@ def load_atoms_for_context(context_id: str) -> Tuple[List[PolicyAtom], Dict[str,
     _validate_atoms(atoms)
 
     manifest_hash = compute_context_hash(manifest, atoms)
+    duty_rates = duty_rate_index(atoms)
     metadata = {
         "context_id": manifest.get("context_id", context_id),
         "domain": manifest.get("domain", "tariff"),
@@ -170,6 +180,7 @@ def load_atoms_for_context(context_id: str) -> Tuple[List[PolicyAtom], Dict[str,
         "description": manifest.get("description"),
         "manifest_hash": manifest_hash,
         "atoms_count": len(atoms),
+        "duty_rates": duty_rates,
     }
 
     _atoms_cache[context_id] = (list(atoms), dict(metadata))

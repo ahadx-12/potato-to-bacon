@@ -91,7 +91,7 @@ class TariffHuntRequestModel(BaseModel):
     """Request payload for tariff arbitrage analysis."""
 
     law_context: Optional[str] = Field(
-        default=None, description="Versioned tariff context identifier (e.g. HTS_US_DEMO_2025)",
+        default=None, description="Versioned tariff context identifier (e.g. HTS_US_2025_SLICE)",
     )
     scenario: Dict[str, Any]
     mutations: Optional[Dict[str, Any]] = None

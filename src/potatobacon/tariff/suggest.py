@@ -88,8 +88,9 @@ def _defensibility_grade(score: int) -> str:
     return "C"
 
 
-def _duty_atoms(active_atoms: Sequence[PolicyAtom]) -> List[PolicyAtom]:
-    return [atom for atom in active_atoms if atom.source_id in DUTY_RATES]
+def _duty_atoms(active_atoms: Sequence[PolicyAtom], duty_rates: Mapping[str, float] | None = None) -> List[PolicyAtom]:
+    rates = duty_rates or DUTY_RATES
+    return [atom for atom in active_atoms if atom.source_id in rates]
 
 
 @dataclass
@@ -102,23 +103,30 @@ class ScenarioEvaluation:
     duty_status: str
 
 
-def _evaluate_scenario(atoms: Sequence[PolicyAtom], facts: Mapping[str, object]) -> ScenarioEvaluation:
+def _evaluate_scenario(
+    atoms: Sequence[PolicyAtom],
+    facts: Mapping[str, object],
+    duty_rates: Mapping[str, float] | None = None,
+) -> ScenarioEvaluation:
+    rates = duty_rates or DUTY_RATES
     sat, active_atoms, unsat_core = analyze_scenario(facts, atoms)
     scenario = TariffScenario(name="scenario", facts=dict(facts))
-    duty_result = compute_duty_result(atoms, scenario, active_atoms=list(active_atoms), is_sat=sat)
-    duty_atoms = duty_result.active_atoms or _duty_atoms(active_atoms)
+    duty_result = compute_duty_result(
+        atoms, scenario, active_atoms=list(active_atoms), is_sat=sat, duty_rates=rates
+    )
+    duty_atoms = duty_result.active_atoms or _duty_atoms(active_atoms, rates)
     duty_rate = duty_result.duty_rate
     if sat and duty_atoms:
         ranked = sorted(
             duty_atoms,
             key=lambda atom: (
-                float(DUTY_RATES[atom.source_id]),
+                float(rates[atom.source_id]),
                 -len(atom.guard),
                 atom.source_id,
             ),
         )
         duty_atoms = ranked
-        duty_rate = float(DUTY_RATES[ranked[0].source_id])
+        duty_rate = float(rates[ranked[0].source_id])
     return ScenarioEvaluation(
         sat=sat,
         active_atoms=list(active_atoms),
@@ -278,12 +286,13 @@ def suggest_tariff_optimizations(
     resolved_context = request.law_context or DEFAULT_CONTEXT_ID
     atoms, context_meta = load_atoms_for_context(resolved_context)
     law_context = context_meta["context_id"]
+    duty_rates = context_meta.get("duty_rates") or DUTY_RATES
 
     declared_value = request.declared_value_per_unit or 100.0
     seed = request.seed or 2025  # reserved for future stochastic flows
 
-    baseline_candidates = generate_baseline_candidates(normalized_facts, atoms, DUTY_RATES, max_candidates=5)
-    baseline_eval = _evaluate_scenario(atoms, normalized_facts)
+    baseline_candidates = generate_baseline_candidates(normalized_facts, atoms, duty_rates, max_candidates=5)
+    baseline_eval = _evaluate_scenario(atoms, normalized_facts, duty_rates)
     baseline_rate = baseline_candidates[0].duty_rate if baseline_candidates else baseline_eval.duty_rate
     baseline_confidence = baseline_candidates[0].confidence if baseline_candidates else 0.3
 
@@ -354,13 +363,13 @@ def suggest_tariff_optimizations(
         mutated.update(lever.mutation)
         mutated_normalized, _ = normalize_compiled_facts(mutated)
 
-        optimized_eval = _evaluate_scenario(atoms, mutated_normalized)
+        optimized_eval = _evaluate_scenario(atoms, mutated_normalized, duty_rates)
         optimized_rate = optimized_eval.duty_rate
         optimized_duty_atoms = optimized_eval.duty_atoms
         if not optimized_eval.sat or optimized_rate is None:
             continue
 
-        optimized_candidates = generate_baseline_candidates(mutated_normalized, atoms, DUTY_RATES, max_candidates=1)
+        optimized_candidates = generate_baseline_candidates(mutated_normalized, atoms, duty_rates, max_candidates=1)
         optimized_confidence = optimized_candidates[0].confidence if optimized_candidates else baseline_confidence
 
         savings_rate, savings_value, annual_value = _compute_savings(
