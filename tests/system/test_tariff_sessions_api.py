@@ -60,6 +60,54 @@ def test_analysis_session_refine_flow(system_client: TestClient):
     assert "description" not in (proof_body["sku_metadata"] or {})
 
 
+@pytest.mark.usefixtures("system_client")
+def test_session_refine_persists_evidence_and_is_deterministic(system_client: TestClient):
+    sku_id = "SKU-SESSION-DETERMINISTIC"
+    sku_payload = {
+        "sku_id": sku_id,
+        "description": "Textile sneaker with rubber outsole",
+        "declared_value_per_unit": 33.0,
+    }
+    create_resp = system_client.post("/api/tariff/skus", json=sku_payload)
+    assert create_resp.status_code == 200, create_resp.text
+
+    session_resp = system_client.post(f"/api/tariff/skus/{sku_id}/sessions", json={})
+    assert session_resp.status_code == 200, session_resp.text
+    session_id = session_resp.json()["session_id"]
+
+    upload = system_client.post(
+        "/api/tariff/evidence/upload",
+        files={"file": ("evidence.json", b'{"doc": true}', "application/json")},
+    )
+    assert upload.status_code == 200, upload.text
+    evidence_id = upload.json()["evidence_id"]
+
+    refine_payload = {"attached_evidence_ids": [evidence_id], "fact_overrides": {}, "evidence_requested": True}
+    first = system_client.post(f"/api/tariff/sessions/{session_id}/refine", json=refine_payload)
+    assert first.status_code == 200, first.text
+    first_body = first.json()
+
+    second = system_client.post(f"/api/tariff/sessions/{session_id}/refine", json=refine_payload)
+    assert second.status_code == 200, second.text
+    second_body = second.json()
+
+    first_dossier = first_body["dossier"]
+    second_dossier = second_body["dossier"]
+    assert first_dossier["attached_evidence_ids"] == [evidence_id]
+    assert second_dossier["attached_evidence_ids"] == [evidence_id]
+    assert first_dossier["questions"]["missing_facts"] == second_dossier["questions"]["missing_facts"]
+    assert first_dossier["baseline"]["candidates"]
+    assert second_dossier["baseline"]["candidates"]
+    assert first_dossier["baseline"]["candidates"][0]["candidate_id"] == second_dossier["baseline"]["candidates"][0]["candidate_id"]
+
+    proof_id = first_dossier["proof_id"]
+    proof_evidence = system_client.get(f"/v1/proofs/{proof_id}/evidence")
+    assert proof_evidence.status_code == 200, proof_evidence.text
+    proof_body = proof_evidence.json()
+    assert proof_body["analysis_session"]["session_id"] == session_id
+    assert evidence_id in proof_body["analysis_session"]["attached_evidence_ids"]
+
+
 def test_tariff_session_endpoints_require_auth(make_client):
     with make_client(headers=None) as (client, _env):
         resp = client.post(

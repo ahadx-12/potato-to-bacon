@@ -62,9 +62,13 @@ class QuestionItemModel(BaseModel):
 
     fact_key: str
     question: str
-    why_it_matters: str
-    evidence_requested: List[str] = Field(default_factory=list)
+    why_needed: str
+    accepted_evidence_types: List[str] = Field(default_factory=list)
+    measurement_hint: str | None = None
     candidate_rules_affected: List[str] = Field(default_factory=list)
+    lever_ids_affected: List[str] = Field(default_factory=list)
+    blocks_classification: bool = False
+    blocks_optimization: bool = False
 
     model_config = ConfigDict(extra="forbid")
 
