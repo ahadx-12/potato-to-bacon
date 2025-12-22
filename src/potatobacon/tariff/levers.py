@@ -27,6 +27,7 @@ class LeverModel:
     rationale: str
     feasibility: str
     evidence_requirements: Sequence[str]
+    feasibility_profile: Mapping[str, object] | None = field(default=None)
     risk_floor: int = 0
     constraints: Sequence[Constraint] = field(default_factory=list)
 
@@ -67,6 +68,10 @@ def _requires_knit_confirmation(facts: Mapping[str, object]) -> bool:
 
 def _no_knit_flip(facts: Mapping[str, object]) -> bool:
     return not (facts.get("textile_knit") and facts.get("textile_woven"))
+
+
+def _has_insulation_documentation(facts: Mapping[str, object]) -> bool:
+    return bool(facts.get("electronics_insulation_documented") or facts.get("electronics_insulated_conductors"))
 
 
 def _electronics_levers() -> List[LeverModel]:
@@ -118,6 +123,33 @@ def _electronics_levers() -> List[LeverModel]:
             ],
             risk_floor=25,
             constraints=[],
+        ),
+        LeverModel(
+            lever_id="ELECTRONICS_INSULATION_DOCUMENTATION",
+            category_scope=[ProductCategory.ELECTRONICS.value],
+            required_facts={
+                "product_type_electronics": True,
+                "electronics_cable_or_connector": True,
+                "electronics_insulated_conductors": None,
+            },
+            mutation={"electronics_insulated_conductors": True, "electronics_insulation_documented": True},
+            rationale="Document insulation on conductors with spec sheet or lab proof to unlock low-voltage lanes.",
+            feasibility="HIGH",
+            feasibility_profile={
+                "one_time_cost": 200.0,
+                "recurring_cost_per_unit": 0.0,
+                "implementation_time_days": 7,
+                "requires_recertification": False,
+                "supply_chain_risk": "LOW",
+            },
+            evidence_requirements=[
+                "spec_sheet",
+                "manufacturer_datasheet_pdf",
+                "lab_test_report",
+                "product_photo_label",
+            ],
+            risk_floor=10,
+            constraints=[_has_insulation_documentation],
         ),
         LeverModel(
             lever_id="ELEC_MODULE_PACKAGING",

@@ -21,7 +21,11 @@ def _score_suggestion(
 ) -> float:
     if best is None:
         return 0.0
-    if best.annual_savings_value is not None:
+    if best.net_savings and best.net_savings.net_annual_savings is not None:
+        base_score = best.net_savings.net_annual_savings
+    elif best.ranking_score is not None:
+        base_score = best.ranking_score
+    elif best.annual_savings_value is not None:
         base_score = best.annual_savings_value
     elif best.savings_per_unit_value is not None:
         base_score = best.savings_per_unit_value

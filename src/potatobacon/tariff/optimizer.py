@@ -9,7 +9,7 @@ from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_f
 
 from .atoms_hts import DUTY_RATES
 from .engine import apply_mutations, compute_duty_result
-from .models import TariffScenario
+from .models import NetSavings, TariffFeasibility, TariffScenario
 from .normalizer import normalize_compiled_facts
 
 
@@ -40,6 +40,35 @@ class _ScenarioEvaluation:
     unsat_core: List[PolicyAtom]
     provenance: List[Dict[str, Any]]
     duty_status: str
+
+
+def compute_net_savings_projection(
+    *,
+    baseline_rate: float | None,
+    optimized_rate: float | None,
+    declared_value_per_unit: float,
+    annual_volume: int | None,
+    feasibility: TariffFeasibility | None = None,
+) -> NetSavings:
+    feasibility = feasibility or TariffFeasibility()
+    if baseline_rate is None or optimized_rate is None or annual_volume is None:
+        return NetSavings()
+    gross = (baseline_rate - optimized_rate) / 100.0 * declared_value_per_unit * annual_volume
+    implementation_cost = feasibility.one_time_cost + feasibility.recurring_cost_per_unit * annual_volume
+    first_year_adjustment = max(0.0, (365 - feasibility.implementation_time_days) / 365)
+    first_year_savings = gross * first_year_adjustment
+    net = first_year_savings - implementation_cost
+    payback_months = None
+    if gross > 0:
+        monthly = gross / 12.0
+        if monthly > 0:
+            payback_months = implementation_cost / monthly
+    return NetSavings(
+        gross_duty_savings=gross,
+        first_year_savings=first_year_savings,
+        net_annual_savings=net,
+        payback_months=payback_months,
+    )
 
 
 def _build_provenance(duty_atoms: List[PolicyAtom], scenario_label: str) -> List[Dict[str, Any]]:

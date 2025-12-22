@@ -8,7 +8,8 @@ from potatobacon.tariff.models import (
     TariffSkuOptimizationRequestModel,
     TariffSkuOptimizationResponseModel,
 )
-from potatobacon.tariff.optimizer import optimize_tariff
+from potatobacon.tariff.models import TariffFeasibility
+from potatobacon.tariff.optimizer import compute_net_savings_projection, optimize_tariff
 
 router = APIRouter(
     prefix="/api/tariff",
@@ -35,6 +36,19 @@ def sku_optimize(
     rate_delta = result.baseline_rate - result.optimized_rate
     savings_per_unit_value = rate_delta / 100.0 * request.declared_value_per_unit
     annual_savings_value = savings_per_unit_value * request.annual_volume
+    feasibility = TariffFeasibility()
+    net_savings = compute_net_savings_projection(
+        baseline_rate=result.baseline_rate,
+        optimized_rate=result.optimized_rate,
+        declared_value_per_unit=request.declared_value_per_unit,
+        annual_volume=request.annual_volume,
+        feasibility=feasibility,
+    )
+    ranking_score = (
+        net_savings.net_annual_savings
+        if net_savings.net_annual_savings is not None
+        else annual_savings_value
+    )
 
     return TariffSkuOptimizationResponseModel(
         sku_id=request.sku_id,
@@ -55,4 +69,7 @@ def sku_optimize(
         proof_id=result.proof_id,
         proof_payload_hash=result.proof_payload_hash,
         provenance_chain=result.provenance_chain,
+        feasibility=feasibility,
+        net_savings=net_savings,
+        ranking_score=ranking_score,
     )

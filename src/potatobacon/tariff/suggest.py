@@ -15,6 +15,8 @@ from potatobacon.tariff.levers import LeverModel, applicable_levers
 from potatobacon.tariff.mutation_generator import baseline_facts_from_profile, infer_product_profile
 from potatobacon.tariff.models import (
     BaselineCandidateModel,
+    NetSavings,
+    TariffFeasibility,
     TariffSuggestRequestModel,
     TariffSuggestResponseModel,
     TariffSuggestionItemModel,
@@ -39,6 +41,43 @@ def _compute_savings(
     if annual_volume is not None:
         annual_savings_value = savings_per_unit_value * annual_volume
     return rate_delta, savings_per_unit_value, annual_savings_value
+
+
+def _feasibility_for_lever(lever: LeverModel | None) -> TariffFeasibility:
+    if lever and lever.feasibility_profile:
+        try:
+            return TariffFeasibility(**lever.feasibility_profile)
+        except Exception:
+            pass
+    return TariffFeasibility()
+
+
+def _compute_net_savings(
+    *,
+    baseline_rate: float | None,
+    optimized_rate: float | None,
+    declared_value_per_unit: float,
+    annual_volume: int | None,
+    feasibility: TariffFeasibility,
+) -> NetSavings:
+    if baseline_rate is None or optimized_rate is None or annual_volume is None:
+        return NetSavings()
+    gross = (baseline_rate - optimized_rate) / 100.0 * declared_value_per_unit * annual_volume
+    implementation_cost = feasibility.one_time_cost + feasibility.recurring_cost_per_unit * annual_volume
+    first_year_adjustment = max(0.0, (365 - feasibility.implementation_time_days) / 365)
+    first_year_savings = gross * first_year_adjustment
+    net = first_year_savings - implementation_cost
+    payback_months = None
+    if gross > 0:
+        monthly = gross / 12.0
+        if monthly > 0:
+            payback_months = implementation_cost / monthly
+    return NetSavings(
+        gross_duty_savings=gross,
+        first_year_savings=first_year_savings,
+        net_annual_savings=net,
+        payback_months=payback_months,
+    )
 
 
 def _defensibility_grade(score: int) -> str:
@@ -91,11 +130,43 @@ def _evaluate_scenario(atoms: Sequence[PolicyAtom], facts: Mapping[str, object])
 
 
 def _sort_key(item: TariffSuggestionItemModel, annual_volume: int | None, index: int) -> tuple:
-    primary = item.annual_savings_value if annual_volume is not None else item.savings_per_unit_value
+    net_value = item.net_savings.net_annual_savings if item.net_savings else None
+    primary = net_value if net_value is not None else (
+        item.annual_savings_value if annual_volume is not None else item.savings_per_unit_value
+    )
     primary_value = primary if primary is not None else item.savings_per_unit_rate
     risk_score = item.risk_score if item.risk_score is not None else 999
     confidence = item.classification_confidence if item.classification_confidence is not None else 0.0
     return (-primary_value, risk_score, -confidence, item.lever_id or "", index)
+
+
+def _grade_rank(value: str | None) -> int:
+    lookup = {"A": 0, "B": 1, "C": 2}
+    return lookup.get((value or "C").upper(), 2)
+
+
+def _passes_constraints(item: TariffSuggestionItemModel, request: TariffSuggestRequestModel) -> bool:
+    tolerance_rank = _grade_rank(request.risk_tolerance)
+    item_rank = _grade_rank(item.defensibility_grade)
+    if item_rank > tolerance_rank:
+        return False
+
+    if item.net_savings and item.net_savings.net_annual_savings is not None:
+        if item.net_savings.net_annual_savings < request.min_net_savings:
+            return False
+    elif request.min_net_savings > 0:
+        return False
+
+    if request.max_payback_months is not None:
+        if not item.net_savings or item.net_savings.payback_months is None:
+            return False
+        if item.net_savings.payback_months > request.max_payback_months:
+            return False
+
+    if not request.allow_recertification and item.feasibility and item.feasibility.requires_recertification:
+        return False
+
+    return True
 
 
 def _record_proof(
@@ -298,6 +369,19 @@ def suggest_tariff_optimizations(
             declared_value_per_unit=declared_value,
             annual_volume=request.annual_volume,
         )
+        feasibility_profile = _feasibility_for_lever(lever)
+        net_savings = _compute_net_savings(
+            baseline_rate=baseline_rate,
+            optimized_rate=optimized_rate,
+            declared_value_per_unit=declared_value,
+            annual_volume=request.annual_volume,
+            feasibility=feasibility_profile,
+        )
+        ranking_score = (
+            net_savings.net_annual_savings
+            if net_savings.net_annual_savings is not None
+            else (annual_value if annual_value is not None else savings_value)
+        )
 
         confidence_gain = optimized_confidence > baseline_confidence + 0.2
         if savings_rate <= 0 and not confidence_gain:
@@ -345,12 +429,15 @@ def suggest_tariff_optimizations(
                 human_summary=lever.rationale,
                 lever_id=lever.lever_id,
                 lever_feasibility=lever.feasibility,
+                feasibility=feasibility_profile,
                 evidence_requirements=list(lever.evidence_requirements),
                 baseline_duty_rate=baseline_rate or optimized_rate,
                 optimized_duty_rate=optimized_rate,
                 savings_per_unit_rate=savings_rate,
                 savings_per_unit_value=savings_value,
                 annual_savings_value=annual_value,
+                net_savings=net_savings,
+                ranking_score=ranking_score,
                 best_mutation=dict(lever.mutation),
                 classification_confidence=optimized_confidence,
                 active_codes_baseline=sorted({atom.source_id for atom in baseline_duty_atoms}),
@@ -365,6 +452,8 @@ def suggest_tariff_optimizations(
                 tariff_manifest_hash=context_meta["manifest_hash"],
             )
         )
+
+    suggestion_items = [item for item in suggestion_items if _passes_constraints(item, request)]
 
     indexed_items = list(enumerate(suggestion_items))
     indexed_items.sort(key=lambda pair: _sort_key(pair[1], request.annual_volume, pair[0]))

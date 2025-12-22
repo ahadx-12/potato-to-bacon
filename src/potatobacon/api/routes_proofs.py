@@ -1,13 +1,20 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 
 from potatobacon.api.security import require_api_key
 from potatobacon.proofs.store import get_default_store
+from potatobacon.tariff.audit_pack import generate_audit_pack_pdf
 
 router = APIRouter(
     prefix="/v1/proofs",
     tags=["proofs"],
+    dependencies=[Depends(require_api_key)],
+)
+
+tariff_proofs_router = APIRouter(
+    prefix="/api/tariff",
+    tags=["tariff"],
     dependencies=[Depends(require_api_key)],
 )
 
@@ -38,3 +45,12 @@ def fetch_proof_evidence(proof_id: str):
         "fact_evidence": pack.get("fact_evidence"),
         "sku_metadata": pack.get("sku_metadata"),
     }
+
+
+@tariff_proofs_router.get("/proofs/{proof_id}/audit-pack")
+def fetch_audit_pack(proof_id: str) -> Response:
+    try:
+        pdf_bytes = generate_audit_pack_pdf(proof_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Proof not found") from exc
+    return Response(content=pdf_bytes, media_type="application/pdf")

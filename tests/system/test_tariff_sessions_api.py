@@ -118,3 +118,56 @@ def test_tariff_session_endpoints_require_auth(make_client):
 
         session_resp = client.post("/api/tariff/skus/UNKNOWN/sessions", json={})
         assert session_resp.status_code == 401
+
+
+@pytest.mark.usefixtures("system_client")
+def test_usb_cable_refine_unlocks_low_voltage_lane(system_client: TestClient):
+    sku_id = "RW-ELEC-USB-CABLE-API"
+    sku_payload = {
+        "sku_id": sku_id,
+        "description": "USB-C braided cable assembly with connector pair and copper conductors",
+        "declared_value_per_unit": 3.2,
+        "annual_volume": 100000,
+        "origin_country": "VN",
+    }
+    create_resp = system_client.post("/api/tariff/skus", json=sku_payload)
+    assert create_resp.status_code == 200, create_resp.text
+
+    initial = system_client.post(f"/api/tariff/skus/{sku_id}/dossier", json={"optimize": True})
+    assert initial.status_code == 200, initial.text
+    initial_body = initial.json()
+    assert initial_body["baseline_assigned"]["duty_rate"] == pytest.approx(2.0)
+    conditional = next(
+        path for path in initial_body["conditional_pathways"] if path["atom_id"] == "HTS_ELECTRONICS_SIGNAL_LOW_VOLT"
+    )
+    assert "electronics_insulated_conductors" in conditional["missing_facts"]
+
+    session_resp = system_client.post(f"/api/tariff/skus/{sku_id}/sessions", json={})
+    assert session_resp.status_code == 200, session_resp.text
+    session_id = session_resp.json()["session_id"]
+
+    upload = system_client.post(
+        "/api/tariff/evidence/upload",
+        files={"file": ("insulation.pdf", b"dummy insulation proof", "application/pdf")},
+    )
+    assert upload.status_code == 200, upload.text
+    evidence_id = upload.json()["evidence_id"]
+
+    refine_payload = {
+        "attached_evidence_ids": [evidence_id],
+        "fact_overrides": {
+            "electronics_insulated_conductors": {
+                "value": True,
+                "source": "documentation",
+                "confidence": 0.92,
+                "evidence_ids": [evidence_id],
+            }
+        },
+        "optimize": True,
+    }
+    refined = system_client.post(f"/api/tariff/sessions/{session_id}/refine", json=refine_payload)
+    assert refined.status_code == 200, refined.text
+    refined_body = refined.json()["dossier"]
+    assert refined_body["baseline_assigned"]["duty_rate"] == pytest.approx(1.0)
+    assert refined_body["baseline"]["duty_rate"] == pytest.approx(1.0)
+    assert refined_body["analysis_session_id"] == session_id
