@@ -390,18 +390,24 @@ class TariffE2ERunner:
         if recorded_baseline != replay_baseline or recorded_optimized != replay_optimized:
             return ProofReplayResult(False, "active duty codes diverged")
 
-        baseline_result = compute_duty_result(
-            atoms,
-            TariffScenario(name="baseline", facts=baseline_facts),
-            active_atoms=active_baseline,
-            is_sat=baseline_sat,
-        )
-        optimized_result = compute_duty_result(
-            atoms,
-            TariffScenario(name="optimized", facts=optimized_facts),
-            active_atoms=active_opt,
-            is_sat=optimized_sat,
-        )
+        def _rate_and_status(active_atoms: Iterable[Any], sat: bool) -> tuple[float | None, str]:
+            duty_atoms = [atom for atom in active_atoms if atom.source_id in DUTY_RATES]
+            if not sat:
+                return None, "UNSAT"
+            if not duty_atoms:
+                return None, "NO_DUTY_RULE_ACTIVE"
+            ranked = sorted(
+                duty_atoms,
+                key=lambda atom: (
+                    float(DUTY_RATES.get(atom.source_id, 999.0)),
+                    -len(getattr(atom, "guard", []) or []),
+                    atom.source_id,
+                ),
+            )
+            return float(DUTY_RATES[ranked[0].source_id]), "OK"
+
+        baseline_rate_calc, baseline_status_calc = _rate_and_status(active_baseline, baseline_sat)
+        optimized_rate_calc, optimized_status_calc = _rate_and_status(active_opt, optimized_sat)
 
         recorded_baseline_status = record.get("baseline", {}).get("duty_status") or (
             "NO_DUTY_RULE_ACTIVE" if record.get("baseline", {}).get("duty_rate") is None else "OK"
@@ -410,22 +416,22 @@ class TariffE2ERunner:
             "NO_DUTY_RULE_ACTIVE" if record.get("optimized", {}).get("duty_rate") is None else "OK"
         )
 
-        if baseline_result.status != recorded_baseline_status:
+        if baseline_status_calc != recorded_baseline_status:
             return ProofReplayResult(False, "baseline duty status mismatch")
-        if optimized_result.status != recorded_optimized_status:
+        if optimized_status_calc != recorded_optimized_status:
             return ProofReplayResult(False, "optimized duty status mismatch")
 
-        if baseline_result.status == "OK" and baseline_result.duty_rate is not None:
+        if baseline_status_calc == "OK" and baseline_rate_calc is not None:
             recorded_baseline_rate = record.get("baseline", {}).get("duty_rate")
-            if recorded_baseline_rate not in (None, baseline_result.duty_rate) and abs(
-                recorded_baseline_rate - baseline_result.duty_rate
+            if recorded_baseline_rate not in (None, baseline_rate_calc) and abs(
+                recorded_baseline_rate - baseline_rate_calc
             ) > 1e-6:
                 return ProofReplayResult(False, "baseline duty mismatch")
 
-        if optimized_result.status == "OK" and optimized_result.duty_rate is not None:
+        if optimized_status_calc == "OK" and optimized_rate_calc is not None:
             recorded_optimized_rate = record.get("optimized", {}).get("duty_rate")
-            if recorded_optimized_rate not in (None, optimized_result.duty_rate) and abs(
-                recorded_optimized_rate - optimized_result.duty_rate
+            if recorded_optimized_rate not in (None, optimized_rate_calc) and abs(
+                recorded_optimized_rate - optimized_rate_calc
             ) > 1e-6:
                 return ProofReplayResult(False, "optimized duty mismatch")
         return ProofReplayResult(True, "ok")
