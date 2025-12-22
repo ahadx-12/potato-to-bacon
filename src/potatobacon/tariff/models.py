@@ -34,6 +34,19 @@ class FactEvidenceModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class TariffOverlayResultModel(BaseModel):
+    """Additive duty overlay applied to a baseline or optimized scenario."""
+
+    overlay_name: str
+    applies: bool
+    additional_rate: float
+    reason: str
+    requires_review: bool = False
+    stop_optimization: bool = False
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class TariffFeasibility(BaseModel):
     """Implementation feasibility and cost profile for an optimization lever."""
 
@@ -109,15 +122,18 @@ class TariffDossierModel(BaseModel):
     proof_id: str
     proof_payload_hash: str
     law_context: Optional[str] = None
-    status: Literal["OPTIMIZED", "BASELINE"]
+    status: Literal["OPTIMIZED", "BASELINE", "REQUIRES_REVIEW"]
     baseline_duty_rate: float
     optimized_duty_rate: float
+    baseline_effective_duty_rate: float
+    optimized_effective_duty_rate: float
     savings_per_unit: float
     baseline_scenario: Dict[str, Any]
     optimized_scenario: Dict[str, Any]
     active_codes_baseline: List[str]
     active_codes_optimized: List[str]
     provenance_chain: List[Dict[str, Any]]
+    overlays: Dict[str, List["TariffOverlayResultModel"]] | None = None
     tariff_manifest_hash: Optional[str] = None
     metrics: Optional[Dict[str, Any]] = None
 
@@ -198,9 +214,11 @@ class TariffOptimizationRequestModel(BaseModel):
 class TariffOptimizationResponseModel(BaseModel):
     """Optimizer response highlighting tariff savings."""
 
-    status: Literal["OPTIMIZED", "BASELINE", "INFEASIBLE"]
+    status: Literal["OPTIMIZED", "BASELINE", "INFEASIBLE", "REQUIRES_REVIEW"]
     baseline_duty_rate: float
     optimized_duty_rate: float
+    baseline_effective_duty_rate: float
+    optimized_effective_duty_rate: float
     savings_per_unit: float
     best_mutation: Optional[Dict[str, Any]]
     baseline_scenario: Dict[str, Any]
@@ -212,6 +230,7 @@ class TariffOptimizationResponseModel(BaseModel):
     proof_id: str
     proof_payload_hash: str
     provenance_chain: List[Dict[str, Any]]
+    overlays: Dict[str, List["TariffOverlayResultModel"]] | None = None
 
     declared_value_per_unit: Optional[float] = None
     savings_per_unit_rate: Optional[float] = None
@@ -261,6 +280,7 @@ class TariffSkuOptimizationResponseModel(BaseModel):
     proof_id: str
     proof_payload_hash: str
     provenance_chain: List[Dict[str, Any]]
+    overlays: Dict[str, List["TariffOverlayResultModel"]] | None = None
     feasibility: Optional[TariffFeasibility] = None
     net_savings: Optional[NetSavings] = None
     ranking_score: Optional[float] = None
@@ -306,6 +326,8 @@ class TariffSuggestionItemModel(BaseModel):
     savings_per_unit_rate: float
     savings_per_unit_value: float
     annual_savings_value: Optional[float]
+    baseline_effective_duty_rate: Optional[float] = None
+    optimized_effective_duty_rate: Optional[float] = None
     net_savings: Optional[NetSavings] = None
     ranking_score: Optional[float] = None
     best_mutation: Dict[str, Any]
@@ -313,6 +335,7 @@ class TariffSuggestionItemModel(BaseModel):
     active_codes_baseline: List[str]
     active_codes_optimized: List[str]
     provenance_chain: List[Dict[str, Any]]
+    overlays: Dict[str, List["TariffOverlayResultModel"]] | None = None
     law_context: Optional[str]
     proof_id: str
     proof_payload_hash: str
@@ -332,6 +355,7 @@ class TariffSuggestResponseModel(BaseModel):
         "OK_BASELINE_ONLY",
         "INSUFFICIENT_RULE_COVERAGE",
         "INSUFFICIENT_INPUTS",
+        "REQUIRES_REVIEW",
         "ERROR",
     ]
     sku_id: Optional[str]

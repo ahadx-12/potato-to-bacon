@@ -1,0 +1,20 @@
+[
+  {
+    "overlay_name": "Section 232 Steel",
+    "hts_prefixes": ["72", "73"],
+    "import_countries": ["US"],
+    "additional_rate": 25.0,
+    "reason": "Section 232 steel safeguard",
+    "requires_review": true,
+    "stop_optimization": false
+  },
+  {
+    "overlay_name": "Section 232 Aluminum",
+    "hts_prefixes": ["76"],
+    "import_countries": ["US"],
+    "additional_rate": 10.0,
+    "reason": "Section 232 aluminum safeguard",
+    "requires_review": true,
+    "stop_optimization": false
+  }
+]

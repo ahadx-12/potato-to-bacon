@@ -24,6 +24,7 @@ def test_generate_audit_pack_pdf_contains_metadata(monkeypatch, tmp_path):
         baseline_unsat_core=[],
         optimized_unsat_core=[],
         provenance_chain=[],
+        overlays={"baseline": [{"overlay_name": "Overlay Demo", "additional_rate": 5.0, "applies": True, "reason": "demo", "requires_review": True, "stop_optimization": False}], "optimized": []},
         tariff_manifest_hash="HASH",
     )
 
@@ -31,3 +32,4 @@ def test_generate_audit_pack_pdf_contains_metadata(monkeypatch, tmp_path):
     assert len(pdf_bytes) > 800
     assert f"Proof: {handle.proof_id}".encode("utf-8") in pdf_bytes
     assert f"Law context: {DEFAULT_CONTEXT_ID}".encode("utf-8") in pdf_bytes
+    assert b"Overlay Demo" in pdf_bytes

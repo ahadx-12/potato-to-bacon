@@ -17,10 +17,12 @@ from potatobacon.tariff.models import (
     BaselineCandidateModel,
     NetSavings,
     TariffFeasibility,
+    TariffOverlayResultModel,
     TariffSuggestRequestModel,
     TariffSuggestResponseModel,
     TariffSuggestionItemModel,
 )
+from potatobacon.tariff.overlays import effective_duty_rate, evaluate_overlays
 from potatobacon.tariff.sku_models import build_sku_metadata_snapshot
 from potatobacon.tariff.normalizer import normalize_compiled_facts, validate_minimum_inputs
 from potatobacon.tariff.parser import compile_facts_with_evidence, extract_product_spec
@@ -101,12 +103,16 @@ class ScenarioEvaluation:
     duty_atoms: List[PolicyAtom]
     duty_rate: float | None
     duty_status: str
+    overlays: List[TariffOverlayResultModel]
+    effective_duty_rate: float
 
 
 def _evaluate_scenario(
     atoms: Sequence[PolicyAtom],
     facts: Mapping[str, object],
     duty_rates: Mapping[str, float] | None = None,
+    *,
+    overlay_context: Mapping[str, Any] | None = None,
 ) -> ScenarioEvaluation:
     rates = duty_rates or DUTY_RATES
     sat, active_atoms, unsat_core = analyze_scenario(facts, atoms)
@@ -127,6 +133,15 @@ def _evaluate_scenario(
         )
         duty_atoms = ranked
         duty_rate = float(rates[ranked[0].source_id])
+    overlay_ctx = overlay_context or {}
+    overlays = evaluate_overlays(
+        facts=facts,
+        active_codes=[atom.source_id for atom in duty_atoms],
+        origin_country=overlay_ctx.get("origin_country"),
+        import_country=overlay_ctx.get("import_country"),
+        hts_code=overlay_ctx.get("hts_code"),
+    )
+    effective_rate = effective_duty_rate(duty_rate, overlays)
     return ScenarioEvaluation(
         sat=sat,
         active_atoms=list(active_atoms),
@@ -134,6 +149,8 @@ def _evaluate_scenario(
         duty_atoms=list(duty_atoms),
         duty_rate=duty_rate,
         duty_status=duty_result.status,
+        overlays=overlays,
+        effective_duty_rate=effective_rate,
     )
 
 
@@ -187,6 +204,7 @@ def _record_proof(
     optimized_eval: ScenarioEvaluation,
     lever: LeverModel | None,
     evidence_pack: Mapping[str, Any] | None = None,
+    overlays: Mapping[str, Any] | None = None,
 ):
     baseline_active = baseline_eval.active_atoms
     baseline_unsat = baseline_eval.unsat_core
@@ -224,6 +242,7 @@ def _record_proof(
         optimized_unsat_core=optimized_unsat,
         provenance_chain=provenance_chain,
         evidence_pack=evidence_pack,
+        overlays=overlays,
         tariff_manifest_hash=context_meta.get("manifest_hash"),
     )
 
@@ -291,15 +310,24 @@ def suggest_tariff_optimizations(
     declared_value = request.declared_value_per_unit or 100.0
     seed = request.seed or 2025  # reserved for future stochastic flows
 
+    overlay_context = {
+        "origin_country": request.origin_country,
+        "import_country": request.import_country,
+        "hts_code": normalized_facts.get("hts_code"),
+    }
     baseline_candidates = generate_baseline_candidates(normalized_facts, atoms, duty_rates, max_candidates=5)
-    baseline_eval = _evaluate_scenario(atoms, normalized_facts, duty_rates)
-    baseline_rate = baseline_candidates[0].duty_rate if baseline_candidates else baseline_eval.duty_rate
+    baseline_eval = _evaluate_scenario(
+        atoms, normalized_facts, duty_rates, overlay_context=overlay_context
+    )
+    baseline_rate_raw = baseline_candidates[0].duty_rate if baseline_candidates else baseline_eval.duty_rate
+    baseline_rate = baseline_eval.effective_duty_rate
     baseline_confidence = baseline_candidates[0].confidence if baseline_candidates else 0.3
 
     suggestion_items: List[TariffSuggestionItemModel] = []
     why_not_optimized: List[str] = normalization_notes[:]
     proof_id: str | None = None
     proof_payload_hash: str | None = None
+    stop_overlays = [ov for ov in baseline_eval.overlays if ov.stop_optimization]
 
     if missing_inputs:
         return TariffSuggestResponseModel(
@@ -319,25 +347,6 @@ def suggest_tariff_optimizations(
             proof_payload_hash=None,
         )
 
-    if not baseline_eval.sat:
-        return TariffSuggestResponseModel(
-            status="INSUFFICIENT_RULE_COVERAGE",
-            sku_id=request.sku_id,
-            description=request.description,
-            law_context=law_context,
-            baseline_scenario=normalized_facts,
-            generated_candidates_count=0,
-            suggestions=[],
-            tariff_manifest_hash=context_meta["manifest_hash"],
-            fact_evidence=fact_evidence if request.include_fact_evidence else None,
-            product_spec=spec if request.include_fact_evidence else None,
-            baseline_candidates=baseline_candidates,
-            why_not_optimized=why_not_optimized,
-            proof_id=None,
-            proof_payload_hash=None,
-        )
-
-    levers = applicable_levers(spec=spec, facts=normalized_facts)
     evidence_pack = {
         "product_spec": spec.model_dump(),
         "compiled_facts": compiled_pack,
@@ -358,15 +367,77 @@ def suggest_tariff_optimizations(
     if sku_metadata:
         evidence_pack["sku_metadata"] = sku_metadata
 
+    if not baseline_eval.sat:
+        return TariffSuggestResponseModel(
+            status="INSUFFICIENT_RULE_COVERAGE",
+            sku_id=request.sku_id,
+            description=request.description,
+            law_context=law_context,
+            baseline_scenario=normalized_facts,
+            generated_candidates_count=0,
+            suggestions=[],
+            tariff_manifest_hash=context_meta["manifest_hash"],
+            fact_evidence=fact_evidence if request.include_fact_evidence else None,
+            product_spec=spec if request.include_fact_evidence else None,
+            baseline_candidates=baseline_candidates,
+            why_not_optimized=why_not_optimized,
+            proof_id=None,
+            proof_payload_hash=None,
+        )
+
+    if stop_overlays:
+        review_reasons = [
+            f"{ov.overlay_name}: {ov.reason}" for ov in sorted(stop_overlays, key=lambda item: item.overlay_name)
+        ]
+        baseline_proof = _record_proof(
+            law_context=law_context,
+            context_meta=context_meta,
+            baseline_facts=normalized_facts,
+            optimized_facts=normalized_facts,
+            baseline_eval=baseline_eval,
+            optimized_eval=baseline_eval,
+            lever=None,
+            evidence_pack=evidence_pack,
+            overlays={"baseline": [ov.model_dump() for ov in baseline_eval.overlays], "optimized": []},
+        )
+        return TariffSuggestResponseModel(
+            status="REQUIRES_REVIEW",
+            sku_id=request.sku_id,
+            description=request.description,
+            law_context=law_context,
+            baseline_scenario=normalized_facts,
+            generated_candidates_count=0,
+            suggestions=[],
+            tariff_manifest_hash=context_meta["manifest_hash"],
+            fact_evidence=fact_evidence if request.include_fact_evidence else None,
+            product_spec=spec if request.include_fact_evidence else None,
+            baseline_candidates=baseline_candidates,
+            why_not_optimized=review_reasons + why_not_optimized,
+            proof_id=baseline_proof.proof_id,
+            proof_payload_hash=baseline_proof.proof_payload_hash,
+        )
+
+    levers = applicable_levers(spec=spec, facts=normalized_facts)
+
     for lever in levers:
         mutated = deepcopy(normalized_facts)
         mutated.update(lever.mutation)
         mutated_normalized, _ = normalize_compiled_facts(mutated)
 
-        optimized_eval = _evaluate_scenario(atoms, mutated_normalized, duty_rates)
-        optimized_rate = optimized_eval.duty_rate
+        optimized_eval = _evaluate_scenario(
+            atoms, mutated_normalized, duty_rates, overlay_context=overlay_context
+        )
+        optimized_rate = optimized_eval.effective_duty_rate
         optimized_duty_atoms = optimized_eval.duty_atoms
         if not optimized_eval.sat or optimized_rate is None:
+            continue
+        if optimized_eval.duty_rate is None and not optimized_eval.overlays:
+            continue
+        if any(ov.stop_optimization for ov in optimized_eval.overlays):
+            why_not_optimized.append(
+                "overlay gating optimization: "
+                + "; ".join(f"{ov.overlay_name}: {ov.reason}" for ov in optimized_eval.overlays if ov.stop_optimization)
+            )
             continue
 
         optimized_candidates = generate_baseline_candidates(mutated_normalized, atoms, duty_rates, max_candidates=1)
@@ -419,6 +490,10 @@ def suggest_tariff_optimizations(
             optimized_eval=optimized_eval,
             lever=lever,
             evidence_pack=evidence_pack,
+            overlays={
+                "baseline": [ov.model_dump() for ov in baseline_eval.overlays],
+                "optimized": [ov.model_dump() for ov in optimized_eval.overlays],
+            },
         )
 
         provenance_chain: List[Dict[str, Any]] = []
@@ -440,8 +515,10 @@ def suggest_tariff_optimizations(
                 lever_feasibility=lever.feasibility,
                 feasibility=feasibility_profile,
                 evidence_requirements=list(lever.evidence_requirements),
-                baseline_duty_rate=baseline_rate or optimized_rate,
-                optimized_duty_rate=optimized_rate,
+                baseline_duty_rate=baseline_rate_raw or baseline_eval.duty_rate or 0.0,
+                optimized_duty_rate=optimized_eval.duty_rate if optimized_eval.duty_rate is not None else optimized_rate,
+                baseline_effective_duty_rate=baseline_rate,
+                optimized_effective_duty_rate=optimized_rate,
                 savings_per_unit_rate=savings_rate,
                 savings_per_unit_value=savings_value,
                 annual_savings_value=annual_value,
@@ -452,6 +529,7 @@ def suggest_tariff_optimizations(
                 active_codes_baseline=sorted({atom.source_id for atom in baseline_duty_atoms}),
                 active_codes_optimized=sorted({atom.source_id for atom in optimized_duty_atoms}),
                 provenance_chain=provenance_chain,
+                overlays={"baseline": baseline_eval.overlays, "optimized": optimized_eval.overlays},
                 law_context=law_context,
                 proof_id=proof_handle.proof_id,
                 proof_payload_hash=proof_handle.proof_payload_hash,
@@ -481,6 +559,10 @@ def suggest_tariff_optimizations(
             optimized_eval=baseline_eval,
             lever=None,
             evidence_pack=evidence_pack,
+            overlays={
+                "baseline": [ov.model_dump() for ov in baseline_eval.overlays],
+                "optimized": [ov.model_dump() for ov in baseline_eval.overlays],
+            },
         )
         proof_id = baseline_proof.proof_id
         proof_payload_hash = baseline_proof.proof_payload_hash

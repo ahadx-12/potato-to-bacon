@@ -8,6 +8,7 @@ from potatobacon.law.arbitrage_hunter import ArbitrageHunter
 from potatobacon.law.solver_z3 import PolicyAtom, analyze_scenario, check_scenario
 from potatobacon.proofs.engine import record_tariff_proof
 from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_for_context
+from potatobacon.tariff.overlays import effective_duty_rate, evaluate_overlays
 
 from .atom_utils import atom_provenance
 from .atoms_hts import DUTY_RATES
@@ -136,17 +137,34 @@ def run_tariff_hack(
     duty_rates = context_meta.get("duty_rates") or DUTY_RATES
     baseline = TariffScenario(name="baseline", facts=deepcopy(base_facts))
     baseline_result = compute_duty_result(atoms, baseline, duty_rates=duty_rates)
-    baseline_rate = baseline_result.duty_rate if baseline_result.duty_rate is not None else 0.0
+    baseline_overlays = evaluate_overlays(
+        facts=baseline.facts,
+        active_codes=[atom.source_id for atom in baseline_result.active_atoms],
+        origin_country=base_facts.get("origin_country"),
+        import_country=base_facts.get("import_country"),
+        hts_code=base_facts.get("hts_code"),
+    )
+    baseline_rate_raw = baseline_result.duty_rate if baseline_result.duty_rate is not None else 0.0
+    baseline_effective = effective_duty_rate(baseline_rate_raw, baseline_overlays)
 
     if mutations:
         optimized = apply_mutations(baseline, mutations)
     else:
         optimized = TariffScenario(name="baseline", facts=deepcopy(base_facts))
     optimized_result = compute_duty_result(atoms, optimized, duty_rates=duty_rates)
-    optimized_rate = optimized_result.duty_rate if optimized_result.duty_rate is not None else baseline_rate
+    optimized_overlays = evaluate_overlays(
+        facts=optimized.facts,
+        active_codes=[atom.source_id for atom in optimized_result.active_atoms],
+        origin_country=optimized.facts.get("origin_country_raw") or base_facts.get("origin_country"),
+        import_country=optimized.facts.get("import_country"),
+        hts_code=optimized.facts.get("hts_code"),
+    )
+    optimized_rate_raw = optimized_result.duty_rate if optimized_result.duty_rate is not None else baseline_rate_raw
+    optimized_effective = effective_duty_rate(optimized_rate_raw, optimized_overlays)
 
-    status = "OPTIMIZED" if optimized_rate < baseline_rate else "BASELINE"
-    savings = baseline_rate - optimized_rate
+    stop_optimization_flag = any(ov.stop_optimization for ov in baseline_overlays + optimized_overlays)
+    status = "REQUIRES_REVIEW" if stop_optimization_flag else ("OPTIMIZED" if optimized_effective < baseline_effective else "BASELINE")
+    savings = baseline_effective - optimized_effective
 
     sat_baseline, active_atoms_baseline, unsat_core_baseline = analyze_scenario(
         baseline.facts, atoms
@@ -178,6 +196,11 @@ def run_tariff_hack(
         "tariff_manifest_hash": context_meta["manifest_hash"],
         "baseline_duty_status": baseline_result.status,
         "optimized_duty_status": optimized_result.status,
+        "baseline_overlays": len(baseline_overlays),
+        "optimized_overlays": len(optimized_overlays),
+        "overlay_stop_optimization": stop_optimization_flag,
+        "baseline_effective_duty_rate": baseline_effective,
+        "optimized_effective_duty_rate": optimized_effective,
     }
 
     proof_handle = record_tariff_proof(
@@ -188,8 +211,8 @@ def run_tariff_hack(
         optimized_active=active_atoms_optimized,
         baseline_sat=sat_baseline,
         optimized_sat=sat_optimized,
-        baseline_duty_rate=baseline_rate,
-        optimized_duty_rate=optimized_rate,
+        baseline_duty_rate=baseline_rate_raw,
+        optimized_duty_rate=optimized_rate_raw,
         baseline_duty_status=baseline_result.status,
         optimized_duty_status=optimized_result.status,
         baseline_scenario=baseline.facts,
@@ -198,6 +221,10 @@ def run_tariff_hack(
         optimized_unsat_core=unsat_core_optimized,
         provenance_chain=provenance_chain,
         evidence_pack=evidence_pack,
+        overlays={
+            "baseline": [item.model_dump() for item in baseline_overlays],
+            "optimized": [item.model_dump() for item in optimized_overlays],
+        },
         tariff_manifest_hash=context_meta["manifest_hash"],
     )
 
@@ -206,14 +233,20 @@ def run_tariff_hack(
         proof_payload_hash=proof_handle.proof_payload_hash,
         law_context=context,
         status=status,
-        baseline_duty_rate=baseline_rate,
-        optimized_duty_rate=optimized_rate,
+        baseline_duty_rate=baseline_rate_raw,
+        optimized_duty_rate=optimized_rate_raw,
+        baseline_effective_duty_rate=baseline_effective,
+        optimized_effective_duty_rate=optimized_effective,
         savings_per_unit=savings,
         baseline_scenario=baseline.facts,
         optimized_scenario=optimized.facts,
         active_codes_baseline=sorted([atom.source_id for atom in duty_atoms_baseline]),
         active_codes_optimized=sorted([atom.source_id for atom in duty_atoms_optimized]),
         provenance_chain=provenance_chain,
+        overlays={
+            "baseline": baseline_overlays,
+            "optimized": optimized_overlays,
+        },
         tariff_manifest_hash=context_meta["manifest_hash"],
         metrics=metrics,
     )
