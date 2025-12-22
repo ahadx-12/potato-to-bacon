@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from potatobacon.proofs.engine import record_tariff_proof
 from potatobacon.tariff.atoms_hts import DUTY_RATES
 from potatobacon.tariff.bom_ingest import bom_to_text, parse_bom_csv
 from potatobacon.tariff.candidate_search import generate_baseline_candidates
 from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_for_context
-from potatobacon.tariff.levers import applicable_levers
+from potatobacon.tariff.levers import applicable_levers, lever_library
 from potatobacon.tariff.models import BaselineCandidateModel, FactEvidenceModel, TariffSuggestionItemModel
 from potatobacon.tariff.mutation_generator import baseline_facts_from_profile, infer_product_profile
 from potatobacon.tariff.normalizer import normalize_compiled_facts, validate_minimum_inputs
@@ -102,6 +102,30 @@ def _evidence_pack(
     if sku_metadata:
         pack["sku_metadata"] = sku_metadata
     return pack
+
+
+def _lever_requirement_gaps(spec: Any, facts: Mapping[str, object]) -> dict[str, list[str]]:
+    """Return missing fact requirements keyed by fact needed to activate a lever."""
+
+    category = getattr(spec, "product_category", None)
+    category_value = category.value if category else "other"
+    fact_to_levers: dict[str, set[str]] = {}
+    for lever in lever_library():
+        if "all" not in lever.category_scope and category_value not in lever.category_scope:
+            continue
+        conflicting = False
+        missing_keys: list[str] = []
+        for key, expected in lever.required_facts.items():
+            if key in facts and expected is not None and bool(facts[key]) != bool(expected):
+                conflicting = True
+                break
+            if facts.get(key) is None:
+                missing_keys.append(key)
+        if conflicting or not missing_keys:
+            continue
+        for key in missing_keys:
+            fact_to_levers.setdefault(key, set()).add(lever.lever_id)
+    return {key: sorted(values) for key, values in fact_to_levers.items()}
 
 
 def _baseline_candidates(
@@ -250,31 +274,34 @@ def build_sku_dossier_v2(
         fact_overrides=overrides_payload,
     )
 
+    lever_requirements = _lever_requirement_gaps(product_spec, normalized_facts)
     questions = generate_missing_fact_questions(
         law_context=law_context_id,
         atoms=atoms,
         compiled_facts=normalized_facts,
         candidates=baseline_candidates,
+        lever_requirements=lever_requirements,
     )
-    active_ids = {atom.source_id for atom in baseline_duty_atoms}
-    blocking_missing = sorted(
-        {
-            item.fact_key
-            for item in questions.questions
-            if item.candidate_rules_affected
-            and any(rule.split(":")[0] in active_ids for rule in item.candidate_rules_affected)
-        }
-    )
-    has_blocking_questions = bool(questions.missing_facts)
-    blocking_for_status = blocking_missing or questions.missing_facts
+    blocking_reasons: list[str] = []
+    for item in questions.questions:
+        if not item.blocks_optimization:
+            continue
+        impacted: list[str] = []
+        if item.candidate_rules_affected:
+            impacted.append(f"atoms {', '.join(item.candidate_rules_affected)}")
+        if item.lever_ids_affected:
+            impacted.append(f"levers {', '.join(item.lever_ids_affected)}")
+        impacted_text = " and ".join(impacted) if impacted else "optimization reasoning"
+        blocking_reasons.append(f"blocks optimization because {item.fact_key} is required by {impacted_text}")
+    has_blocking_questions = any(question.blocks_optimization for question in questions.questions)
     data_quality = {
-        "fact_overrides_applied": len(overrides_payload),
-        "attached_evidence_references": len(attached_evidence_ids),
         "missing_facts_remaining": len(questions.missing_facts),
+        "evidence_attached_count": len(attached_evidence_ids),
+        "overrides_applied_count": len(overrides_payload),
     }
 
     status: str = "OK_BASELINE_ONLY"
-    why_not_optimized: list[str] = normalization_notes[:]
+    why_not_optimized: list[str] = blocking_reasons + normalization_notes[:]
     suggestion_items: list[TariffSuggestionItemModel] = []
     proof_id: str | None = None
     proof_payload_hash: str | None = None
@@ -286,7 +313,9 @@ def build_sku_dossier_v2(
         status = "INSUFFICIENT_RULE_COVERAGE"
     elif has_blocking_questions and optimize:
         status = "OK_BASELINE_ONLY"
-        why_not_optimized = blocking_for_status + why_not_optimized
+        if not blocking_reasons:
+            blocking_reasons.append("blocks optimization because baseline candidates require missing facts")
+        why_not_optimized = blocking_reasons + normalization_notes[:]
     elif optimize:
         levers = applicable_levers(spec=product_spec, facts=normalized_facts)
         for lever in levers:

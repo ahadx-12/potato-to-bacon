@@ -44,4 +44,5 @@ def test_tariff_sku_dossier_v2_questions(system_client: TestClient):
     assert body["status"] == "OK_BASELINE_ONLY"
     assert body["questions"]["questions"]
     question = body["questions"]["questions"][0]
-    assert question["why_it_matters"]
+    assert question["why_needed"]
+    assert question["accepted_evidence_types"]
