@@ -150,6 +150,7 @@ def record_tariff_proof(
     evidence_pack: Dict[str, Any] | None = None,
     store: ProofStore | None = None,
     tariff_manifest_hash: str | None = None,
+    overlays: Dict[str, Any] | None = None,
 ) -> ProofHandle:
     """Persist a tariff proof and return a reference handle."""
 
@@ -185,6 +186,36 @@ def record_tariff_proof(
 
     if ordered_evidence_pack:
         proof_material["evidence_pack"] = ordered_evidence_pack
+
+    if overlays:
+        ordered_overlays: Dict[str, Any] = {}
+        for key, items in sorted(overlays.items()):
+            if isinstance(items, list):
+                normalized_items: List[Dict[str, Any]] = []
+                for item in items:
+                    if isinstance(item, dict):
+                        normalized_items.append(deepcopy(item))
+                    else:
+                        normalized_items.append(
+                            {
+                                "overlay_name": getattr(item, "overlay_name", ""),
+                                "applies": getattr(item, "applies", False),
+                                "additional_rate": getattr(item, "additional_rate", 0),
+                                "reason": getattr(item, "reason", ""),
+                                "requires_review": getattr(item, "requires_review", False),
+                                "stop_optimization": getattr(item, "stop_optimization", False),
+                            }
+                        )
+                normalized_items.sort(
+                    key=lambda entry: (
+                        entry.get("overlay_name", ""),
+                        entry.get("additional_rate", 0),
+                    )
+                )
+                ordered_overlays[key] = normalized_items
+            else:
+                ordered_overlays[key] = deepcopy(items)
+        proof_material["overlays"] = ordered_overlays
 
     if provenance_chain is not None:
         proof_material["provenance_chain"] = _sorted_provenance(provenance_chain)

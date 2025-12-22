@@ -7,10 +7,11 @@ from potatobacon.law.solver_z3 import PolicyAtom, analyze_scenario
 from potatobacon.proofs.engine import record_tariff_proof
 from potatobacon.tariff.atom_utils import atom_provenance
 from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_for_context
+from potatobacon.tariff.overlays import effective_duty_rate, evaluate_overlays
 
 from .atoms_hts import DUTY_RATES
 from .engine import apply_mutations, compute_duty_result
-from .models import NetSavings, TariffFeasibility, TariffScenario
+from .models import NetSavings, TariffFeasibility, TariffOverlayResultModel, TariffScenario
 from .normalizer import normalize_compiled_facts
 
 
@@ -18,6 +19,8 @@ from .normalizer import normalize_compiled_facts
 class OptimizationResult:
     baseline_rate: float
     optimized_rate: float
+    baseline_effective_rate: float
+    optimized_effective_rate: float
     best_mutation: Optional[Dict[str, Any]]
     baseline_scenario: TariffScenario
     optimized_scenario: TariffScenario
@@ -28,6 +31,7 @@ class OptimizationResult:
     proof_id: str
     proof_payload_hash: str
     provenance_chain: List[Dict[str, Any]]
+    overlays: Dict[str, List[TariffOverlayResultModel]]
     status: str
 
 
@@ -41,6 +45,8 @@ class _ScenarioEvaluation:
     unsat_core: List[PolicyAtom]
     provenance: List[Dict[str, Any]]
     duty_status: str
+    overlays: List[TariffOverlayResultModel]
+    effective_duty_rate: float
 
 
 def compute_net_savings_projection(
@@ -77,7 +83,12 @@ def _build_provenance(duty_atoms: List[PolicyAtom], scenario_label: str) -> List
 
 
 def _evaluate_scenario(
-    atoms: List[PolicyAtom], scenario: TariffScenario, scenario_label: str, duty_rates: Dict[str, float]
+    atoms: List[PolicyAtom],
+    scenario: TariffScenario,
+    scenario_label: str,
+    duty_rates: Dict[str, float],
+    *,
+    overlay_context: Mapping[str, Any] | None = None,
 ) -> _ScenarioEvaluation:
     is_sat, active_atoms, unsat_core = analyze_scenario(scenario.facts, atoms)
     duty_result = compute_duty_result(
@@ -88,6 +99,15 @@ def _evaluate_scenario(
     if is_sat and duty_atoms and duty_rate is None:
         duty_rate = float(duty_rates[duty_atoms[-1].source_id])
     provenance = _build_provenance(duty_atoms, scenario_label)
+    overlay_ctx = overlay_context or {}
+    overlays = evaluate_overlays(
+        facts=scenario.facts,
+        active_codes=[atom.source_id for atom in duty_atoms],
+        origin_country=overlay_ctx.get("origin_country"),
+        import_country=overlay_ctx.get("import_country"),
+        hts_code=overlay_ctx.get("hts_code"),
+    )
+    effective_rate = effective_duty_rate(duty_rate, overlays)
     return _ScenarioEvaluation(
         scenario=scenario,
         is_sat=is_sat,
@@ -97,6 +117,8 @@ def _evaluate_scenario(
         unsat_core=unsat_core,
         provenance=provenance,
         duty_status=duty_result.status,
+        overlays=overlays,
+        effective_duty_rate=effective_rate,
     )
 
 
@@ -105,6 +127,9 @@ def optimize_tariff(
     candidate_mutations: Dict[str, List[Any]],
     law_context: Optional[str] = None,
     seed: int = 2025,
+    origin_country: Optional[str] = None,
+    import_country: Optional[str] = None,
+    hts_code: Optional[str] = None,
 ) -> OptimizationResult:
     resolved_context = law_context or DEFAULT_CONTEXT_ID
     atoms, context_meta = load_atoms_for_context(resolved_context)
@@ -112,10 +137,17 @@ def optimize_tariff(
     duty_rates = context_meta.get("duty_rates") or DUTY_RATES
 
     normalized_base, _ = normalize_compiled_facts(base_facts)
+    overlay_context = {
+        "origin_country": base_facts.get("origin_country") or origin_country,
+        "import_country": base_facts.get("import_country") or import_country,
+        "hts_code": base_facts.get("hts_code") or hts_code,
+    }
     baseline_scenario = TariffScenario(name="baseline", facts=normalized_base)
-    baseline_eval = _evaluate_scenario(atoms, baseline_scenario, "baseline", duty_rates)
+    baseline_eval = _evaluate_scenario(
+        atoms, baseline_scenario, "baseline", duty_rates, overlay_context=overlay_context
+    )
 
-    best_rate = baseline_eval.duty_rate
+    best_effective_rate = baseline_eval.effective_duty_rate
     best_mutation: Optional[Dict[str, Any]] = None
     best_eval = baseline_eval
 
@@ -124,26 +156,37 @@ def optimize_tariff(
             mutated_scenario = apply_mutations(baseline_scenario, {key: value})
             normalized_mutated, _ = normalize_compiled_facts(mutated_scenario.facts)
             mutated_scenario = TariffScenario(name=mutated_scenario.name, facts=normalized_mutated)
-            evaluation = _evaluate_scenario(atoms, mutated_scenario, "optimized", duty_rates)
-            if evaluation.duty_rate is None:
+            evaluation = _evaluate_scenario(
+                atoms, mutated_scenario, "optimized", duty_rates, overlay_context=overlay_context
+            )
+            if evaluation.duty_rate is None and not evaluation.overlays:
                 continue
-            if best_rate is None or evaluation.duty_rate < best_rate:
-                best_rate = evaluation.duty_rate
+            if best_effective_rate is None or evaluation.effective_duty_rate < best_effective_rate:
+                best_effective_rate = evaluation.effective_duty_rate
                 best_mutation = {key: value}
                 best_eval = evaluation
 
     status: str
-    optimized_rate: float
-    baseline_rate: float
+    optimized_rate_raw: float
+    baseline_rate_raw: float
+    optimized_effective: float
+    baseline_effective: float
+    stop_overlay = any(ov.stop_optimization for ov in baseline_eval.overlays + best_eval.overlays)
 
-    if best_rate is None:
-        status = "INFEASIBLE"
-        optimized_rate = 0.0
-        baseline_rate = 0.0 if baseline_eval.duty_rate is None else baseline_eval.duty_rate
+    if best_eval.duty_rate is None:
+        status = "REQUIRES_REVIEW" if stop_overlay else "INFEASIBLE"
+        optimized_rate_raw = 0.0
+        baseline_rate_raw = 0.0 if baseline_eval.duty_rate is None else baseline_eval.duty_rate
+        optimized_effective = best_eval.effective_duty_rate
+        baseline_effective = baseline_eval.effective_duty_rate
     else:
-        optimized_rate = best_rate
-        baseline_rate = baseline_eval.duty_rate if baseline_eval.duty_rate is not None else optimized_rate
-        status = "OPTIMIZED" if best_mutation else "BASELINE"
+        optimized_rate_raw = best_eval.duty_rate if best_eval.duty_rate is not None else 0.0
+        baseline_rate_raw = (
+            baseline_eval.duty_rate if baseline_eval.duty_rate is not None else optimized_rate_raw
+        )
+        optimized_effective = best_eval.effective_duty_rate
+        baseline_effective = baseline_eval.effective_duty_rate
+        status = "REQUIRES_REVIEW" if stop_overlay else ("OPTIMIZED" if best_mutation else "BASELINE")
 
     provenance_chain: List[Dict[str, Any]] = []
     provenance_chain.extend(baseline_eval.provenance)
@@ -175,12 +218,18 @@ def optimize_tariff(
         baseline_unsat_core=baseline_eval.unsat_core,
         optimized_unsat_core=best_eval.unsat_core,
         provenance_chain=provenance_chain,
+        overlays={
+            "baseline": [item.model_dump() for item in baseline_eval.overlays],
+            "optimized": [item.model_dump() for item in best_eval.overlays],
+        },
         tariff_manifest_hash=context_meta["manifest_hash"],
     )
 
     return OptimizationResult(
-        baseline_rate=baseline_rate,
-        optimized_rate=optimized_rate,
+        baseline_rate=baseline_rate_raw,
+        optimized_rate=optimized_rate_raw,
+        baseline_effective_rate=baseline_effective,
+        optimized_effective_rate=optimized_effective,
         best_mutation=best_mutation,
         baseline_scenario=baseline_scenario,
         optimized_scenario=best_eval.scenario,
@@ -191,5 +240,6 @@ def optimize_tariff(
         proof_id=proof_handle.proof_id,
         proof_payload_hash=proof_handle.proof_payload_hash,
         provenance_chain=provenance_chain,
+        overlays={"baseline": baseline_eval.overlays, "optimized": best_eval.overlays},
         status=status,
     )

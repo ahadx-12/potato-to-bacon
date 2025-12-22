@@ -50,6 +50,32 @@ def _fact_table_lines(compiled_facts: Dict[str, Any], fact_overrides: Dict[str, 
     return lines or ["- no compiled facts available"]
 
 
+def _overlay_lines(overlays: Dict[str, Any] | None) -> List[str]:
+    if not overlays:
+        return ["- no overlays applied"]
+    lines: List[str] = []
+    for phase in ("baseline", "optimized"):
+        phase_items = overlays.get(phase) or []
+        lines.append(f"{phase.capitalize()} overlays:")
+        if not phase_items:
+            lines.append("  - none")
+            continue
+        for item in phase_items:
+            label = item.get("overlay_name") if isinstance(item, dict) else getattr(item, "overlay_name", "")
+            rate = item.get("additional_rate") if isinstance(item, dict) else getattr(item, "additional_rate", 0)
+            reason = item.get("reason") if isinstance(item, dict) else getattr(item, "reason", "")
+            requires_review = item.get("requires_review") if isinstance(item, dict) else getattr(item, "requires_review", False)
+            stop_flag = item.get("stop_optimization") if isinstance(item, dict) else getattr(item, "stop_optimization", False)
+            flags = []
+            if requires_review:
+                flags.append("review")
+            if stop_flag:
+                flags.append("stop")
+            suffix = f" [{', '.join(flags)}]" if flags else ""
+            lines.append(f"  - {label}: +{rate}% ({reason}){suffix}")
+    return lines or ["- no overlays applied"]
+
+
 def generate_audit_pack_pdf(proof_id: str) -> bytes:
     store = get_default_store()
     proof = store.get_proof(proof_id)
@@ -113,6 +139,10 @@ def generate_audit_pack_pdf(proof_id: str) -> bytes:
     else:
         duty_lines.append("Conditional pathways: none")
     _draw_lines(c, duty_lines, start_y=680)
+
+    overlay_section = ["Overlays:"]
+    overlay_section.extend(_overlay_lines(proof.get("overlays")))
+    _draw_lines(c, overlay_section, start_y=620)
 
     fact_lines = ["Facts:"]
     fact_lines.extend(_fact_table_lines(normalized_facts, compiled_facts.get("overrides")))

@@ -1,0 +1,11 @@
+[
+  {
+    "overlay_name": "Section 301 PRC List 1",
+    "hts_prefixes": ["6404", "HTS_6404"],
+    "origin_countries": ["CN"],
+    "additional_rate": 25.0,
+    "reason": "Section 301 duties for PRC-origin goods",
+    "requires_review": true,
+    "stop_optimization": true
+  }
+]

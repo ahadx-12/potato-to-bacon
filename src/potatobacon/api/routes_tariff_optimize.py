@@ -29,12 +29,14 @@ def optimize_tariff_endpoint(
             candidate_mutations=request.candidate_mutations,
             law_context=request.law_context,
             seed=request.seed or 2025,
+            origin_country=request.origin_country,
+            import_country=request.import_country,
         )
     except KeyError as exc:
         attempted = exc.args[0] if exc.args else request.law_context
         raise unknown_law_context_error(attempted) from exc
 
-    rate_delta = result.baseline_rate - result.optimized_rate
+    rate_delta = result.baseline_effective_rate - result.optimized_effective_rate
     declared_value = request.declared_value_per_unit or 100.0
     savings_per_unit_value = rate_delta / 100.0 * declared_value
 
@@ -43,8 +45,8 @@ def optimize_tariff_endpoint(
         annual_savings_value = savings_per_unit_value * request.annual_volume
     feasibility = TariffFeasibility()
     net_savings = compute_net_savings_projection(
-        baseline_rate=result.baseline_rate,
-        optimized_rate=result.optimized_rate,
+        baseline_rate=result.baseline_effective_rate,
+        optimized_rate=result.optimized_effective_rate,
         declared_value_per_unit=declared_value,
         annual_volume=request.annual_volume,
         feasibility=feasibility,
@@ -59,6 +61,8 @@ def optimize_tariff_endpoint(
         status=result.status,
         baseline_duty_rate=result.baseline_rate,
         optimized_duty_rate=result.optimized_rate,
+        baseline_effective_duty_rate=result.baseline_effective_rate,
+        optimized_effective_duty_rate=result.optimized_effective_rate,
         savings_per_unit=rate_delta,
         best_mutation=result.best_mutation,
         baseline_scenario=result.baseline_scenario.facts,
@@ -70,6 +74,7 @@ def optimize_tariff_endpoint(
         proof_id=result.proof_id,
         proof_payload_hash=result.proof_payload_hash,
         provenance_chain=result.provenance_chain,
+        overlays=result.overlays,
         declared_value_per_unit=declared_value,
         savings_per_unit_rate=rate_delta,
         savings_per_unit_value=savings_per_unit_value,
