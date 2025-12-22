@@ -19,6 +19,7 @@ ALLOWED_CONTENT_TYPES = {
     "image/jpeg",
     "text/csv",
     "application/json",
+    "text/plain",
 }
 
 
@@ -42,6 +43,10 @@ class EvidenceRecord(BaseModel):
     byte_length: int
     sha256: str
     uploaded_at: str
+    evidence_kind: str | None = Field(
+        default=None,
+        description="Optional hint about the evidence type (bom_csv, spec_sheet, cert)",
+    )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -91,7 +96,14 @@ class EvidenceStore:
         if normalized not in ALLOWED_CONTENT_TYPES:
             raise ValueError(f"Unsupported content type: {content_type}")
 
-    def save(self, content: bytes, *, filename: str, content_type: str) -> EvidenceRecord:
+    def save(
+        self,
+        content: bytes,
+        *,
+        filename: str,
+        content_type: str,
+        evidence_kind: str | None = None,
+    ) -> EvidenceRecord:
         """Persist an evidence blob and return deterministic metadata."""
 
         self._validate_type(content_type)
@@ -105,6 +117,7 @@ class EvidenceStore:
             byte_length=byte_length,
             sha256=digest,
             uploaded_at=now,
+            evidence_kind=evidence_kind,
         )
         blob_path = self.data_dir / digest
 

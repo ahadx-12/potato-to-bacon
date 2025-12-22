@@ -92,6 +92,37 @@ class StructuredBOMModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ProductGraphComponent(BaseModel):
+    """Component node within a product graph."""
+
+    name: str
+    material: Optional[str] = None
+    value_share: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    origin_country: Optional[str] = None
+    function: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ProductOperation(BaseModel):
+    """Manufacturing or assembly operation mapped to a country."""
+
+    step: str
+    country: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ProductGraph(BaseModel):
+    """Lightweight product graph assembled from evidence sources."""
+
+    components: List[ProductGraphComponent] = Field(default_factory=list)
+    ops: List[ProductOperation] = Field(default_factory=list)
+    attributes: Dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 @dataclass(slots=True)
 class TariffScenario:
     """Scenario facts for tariff analysis."""

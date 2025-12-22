@@ -11,7 +11,9 @@ from potatobacon.tariff.candidate_search import generate_baseline_candidates
 from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_for_context
 from potatobacon.tariff.fact_requirements import FactRequirementRegistry
 from potatobacon.tariff.levers import applicable_levers, lever_library
-from potatobacon.tariff.models import BaselineCandidateModel, FactEvidenceModel, TariffSuggestionItemModel
+from potatobacon.tariff.evidence_extractor import extract_evidence
+from potatobacon.tariff.evidence_store import get_default_evidence_store
+from potatobacon.tariff.models import BaselineCandidateModel, FactEvidenceModel, ProductGraph, TariffSuggestionItemModel
 from potatobacon.tariff.mutation_generator import baseline_facts_from_profile, infer_product_profile
 from potatobacon.tariff.normalizer import normalize_compiled_facts, validate_minimum_inputs
 from potatobacon.tariff.parser import compile_facts_with_evidence, extract_product_spec
@@ -84,6 +86,7 @@ def _evidence_pack(
     compiled_facts: Dict[str, Any],
     fact_evidence: Any,
     extraction_evidence: Any,
+    product_graph: ProductGraph | None,
     sku_metadata: Dict[str, Any],
     analysis_session_id: str | None = None,
     attached_evidence_ids: list[str] | None = None,
@@ -95,6 +98,8 @@ def _evidence_pack(
         "fact_evidence": fact_evidence,
         "extraction_evidence": extraction_evidence,
     }
+    if product_graph:
+        pack["product_graph"] = product_graph.model_dump()
     if fact_overrides:
         pack["fact_overrides"] = fact_overrides
     if analysis_session_id or attached_evidence_ids:
@@ -272,6 +277,36 @@ def build_sku_dossier_v2(
     bom_text = bom_to_text(bom_structured) if bom_structured else None
     description = record.description or ""
 
+    product_graph: ProductGraph | None = None
+    extracted_facts: Dict[str, Any] = {}
+    if attached_evidence_ids:
+        evidence_store = get_default_evidence_store()
+        for evidence_id in attached_evidence_ids:
+            record_meta = evidence_store.get(evidence_id)
+            if not record_meta:
+                continue
+            blob_path = evidence_store.data_dir / evidence_id
+            if not blob_path.exists():
+                continue
+            blob = blob_path.read_bytes()
+            extraction = extract_evidence(
+                blob,
+                content_type=record_meta.content_type,
+                evidence_kind=record_meta.evidence_kind,
+                filename=record_meta.original_filename,
+            )
+            if extraction.product_graph:
+                if product_graph is None:
+                    product_graph = ProductGraph()
+                product_graph.components.extend(extraction.product_graph.components)
+                product_graph.ops.extend(extraction.product_graph.ops)
+                product_graph.attributes.update(extraction.product_graph.attributes)
+            for key, value in extraction.extracted_facts.items():
+                extracted_facts[key] = value
+        if product_graph:
+            product_graph.components = sorted(product_graph.components, key=lambda comp: comp.name.lower())
+            product_graph.ops = sorted(product_graph.ops, key=lambda op: op.step.lower())
+
     profile = infer_product_profile(description, bom_text)
     product_spec, extraction_evidence = extract_product_spec(
         description,
@@ -288,6 +323,20 @@ def build_sku_dossier_v2(
         bom_structured=bom_structured,
         include_fact_evidence=True,
     )
+    if extracted_facts:
+        compiled_facts_raw = {**compiled_facts_raw, **extracted_facts}
+        fact_evidence = list(fact_evidence or [])
+        for fact_key, value in sorted(extracted_facts.items()):
+            fact_evidence.append(
+                FactEvidenceModel(
+                    fact_key=fact_key,
+                    value=value,
+                    confidence=0.7,
+                    evidence=[],
+                    derived_from=[f"evidence:{eid}" for eid in attached_evidence_ids],
+                    risk_reason="Fact inferred from uploaded evidence",
+                )
+            )
     baseline_facts = baseline_facts_from_profile(profile)
     merged_facts = _merge_facts(baseline_facts, compiled_facts_raw)
     merged_facts, overrides_payload, override_evidence = _apply_fact_overrides(merged_facts, override_models)
@@ -381,6 +430,7 @@ def build_sku_dossier_v2(
         compiled_facts=compiled_pack,
         fact_evidence=[item.model_dump() for item in fact_evidence] if fact_evidence else [],
         extraction_evidence=[item.model_dump() for item in extraction_evidence] if extraction_evidence else [],
+        product_graph=product_graph,
         sku_metadata=build_sku_metadata_snapshot(
             sku_id=record.sku_id,
             description=description,
@@ -571,6 +621,7 @@ def build_sku_dossier_v2(
         questions=questions,
         product_spec=product_spec.model_dump(),
         compiled_facts=compiled_pack,
+        product_graph=product_graph.model_dump() if product_graph else None,
         fact_evidence=fact_evidence if evidence_requested else None,
         evidence_requested=evidence_requested,
         analysis_session_id=session_id,
