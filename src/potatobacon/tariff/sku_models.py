@@ -139,6 +139,7 @@ class TariffSkuDossierV2Model(BaseModel):
     questions: MissingFactsPackageModel = Field(default_factory=MissingFactsPackageModel)
     product_spec: Optional[Dict[str, Any]] = None
     compiled_facts: Optional[Dict[str, Any]] = None
+    product_graph: Optional[Dict[str, Any]] = None
     fact_evidence: Optional[List[FactEvidenceModel]] = None
     evidence_requested: bool = False
     analysis_session_id: Optional[str] = None
