@@ -12,7 +12,7 @@ from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_f
 from potatobacon.tariff.atoms_hts import DUTY_RATES
 from potatobacon.tariff.engine import TariffScenario, _build_provenance, compute_duty_result
 from potatobacon.tariff.fact_requirements import FactRequirementRegistry
-from potatobacon.tariff.levers import LeverModel, applicable_levers
+from potatobacon.tariff.levers import LeverModel, applicable_levers, generate_candidate_levers
 from potatobacon.tariff.mutation_generator import baseline_facts_from_profile, infer_product_profile
 from potatobacon.tariff.models import (
     BaselineCandidateModel,
@@ -664,7 +664,22 @@ def suggest_tariff_optimizations(
             proof_payload_hash=baseline_proof.proof_payload_hash,
         )
 
-    levers = applicable_levers(spec=spec, facts=normalized_facts)
+    dynamic_levers: list[LeverModel] = []
+    if baseline_eval.duty_atoms:
+        dynamic_levers = generate_candidate_levers(
+            baseline_atom=baseline_eval.duty_atoms[0],
+            atoms=atoms,
+            duty_rates=duty_rates,
+            facts=normalized_facts,
+            baseline_rate=baseline_rate,
+        )
+
+    lever_index: dict[str, LeverModel] = {
+        lever.lever_id: lever for lever in applicable_levers(spec=spec, facts=normalized_facts)
+    }
+    for lever in dynamic_levers:
+        lever_index.setdefault(lever.lever_id, lever)
+    levers = sorted(lever_index.values(), key=lambda lever: lever.lever_id)
 
     for lever in levers:
         mutated = deepcopy(normalized_facts)

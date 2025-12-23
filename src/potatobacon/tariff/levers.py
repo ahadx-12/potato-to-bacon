@@ -9,8 +9,10 @@ open-ended heuristics.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, List, Mapping, Sequence
+from typing import Callable, Dict, Iterable, List, Mapping, Sequence
 
+from potatobacon.law.solver_z3 import PolicyAtom
+from potatobacon.tariff.fact_requirements import FactRequirementRegistry
 from potatobacon.tariff.product_schema import ProductCategory, ProductSpecModel
 
 Constraint = Callable[[Mapping[str, object]], bool]
@@ -267,3 +269,191 @@ def applicable_levers(*, spec: ProductSpecModel, facts: Mapping[str, object]) ->
             candidates.append(lever)
     candidates.sort(key=lambda lever: lever.lever_id)
     return candidates
+
+
+def _guard_expectations(atom: PolicyAtom) -> Dict[str, bool]:
+    expectations: Dict[str, bool] = {}
+    for literal in atom.guard:
+        negated = literal.startswith("¬")
+        fact_key = literal[1:] if negated else literal
+        expectations[fact_key] = not negated
+    return expectations
+
+
+def diff_candidate_requirements(
+    baseline_candidate: PolicyAtom,
+    target_candidate: PolicyAtom,
+    *,
+    requirement_registry: FactRequirementRegistry | None = None,
+) -> List[str]:
+    """Return fact keys where the target candidate requires a different state."""
+
+    registry = requirement_registry or FactRequirementRegistry()
+    baseline_reqs = _guard_expectations(baseline_candidate)
+    target_reqs = _guard_expectations(target_candidate)
+
+    diffs: list[str] = []
+    for key, expected in target_reqs.items():
+        baseline_expected = baseline_reqs.get(key)
+        if baseline_expected is None or baseline_expected != expected:
+            registry.describe(key)  # normalize/validate via registry
+            diffs.append(key)
+
+    deduped: list[str] = []
+    for key in sorted(diffs):
+        if key not in deduped:
+            deduped.append(key)
+    return deduped
+
+
+def _dimension_for_key(fact_key: str) -> str | None:
+    if fact_key.startswith("material_"):
+        return "material"
+    if fact_key.startswith("surface_contact_") or fact_key.startswith("felt_covering_"):
+        return "composition"
+    if fact_key.startswith("fiber_") or fact_key.startswith("upper_material_") or fact_key.startswith(
+        "outer_sole_material_"
+    ):
+        return "composition"
+    if "assembly" in fact_key or fact_key.startswith("product_type_assembly"):
+        return "assembly"
+    return None
+
+
+def _dimension_for_diff(diff_keys: Iterable[str]) -> str | None:
+    dimension: str | None = None
+    for key in diff_keys:
+        key_dimension = _dimension_for_key(key)
+        if key_dimension is None:
+            return None
+        if dimension is None:
+            dimension = key_dimension
+        elif dimension != key_dimension:
+            return None
+    return dimension
+
+
+def _mutation_from_diff(
+    *,
+    diff_keys: Sequence[str],
+    target_guard: Mapping[str, bool],
+    baseline_guard: Mapping[str, bool],
+    facts: Mapping[str, object],
+) -> Dict[str, object]:
+    mutation: Dict[str, object] = {}
+    dimensions: Dict[str, set[str]] = {}
+
+    for key in diff_keys:
+        dimension = _dimension_for_key(key)
+        if dimension:
+            dimensions.setdefault(dimension, set()).add(key)
+
+        if key in target_guard:
+            mutation[key] = target_guard[key]
+
+    for base_key, base_expected in baseline_guard.items():
+        dimension = _dimension_for_key(base_key)
+        if dimension and dimension in dimensions and base_expected and base_key not in mutation:
+            mutation[base_key] = False
+
+    for fact_key, value in facts.items():
+        if not isinstance(value, bool):
+            continue
+        dimension = _dimension_for_key(fact_key)
+        if dimension and dimension in dimensions and value and fact_key not in mutation:
+            mutation[fact_key] = False
+
+    return mutation
+
+
+def _evidence_for_keys(keys: Iterable[str], requirement_registry: FactRequirementRegistry) -> List[str]:
+    evidence: set[str] = set()
+    for key in keys:
+        requirement = requirement_registry.describe(key)
+        evidence.update(requirement.evidence_types)
+    return sorted(evidence)
+
+
+def _feasibility_defaults() -> Mapping[str, object]:
+    return {
+        "one_time_cost": 750.0,
+        "recurring_cost_per_unit": 0.0,
+        "implementation_time_days": 21,
+        "requires_recertification": False,
+        "supply_chain_risk": "MED",
+    }
+
+
+def _rationale_from_diff(dimension: str, target_candidate: PolicyAtom, diff_keys: Sequence[str]) -> str:
+    target_label = getattr(target_candidate, "section", None) or target_candidate.source_id
+    fact_list = ", ".join(diff_keys)
+    if dimension == "material":
+        return f"Shift material stack ({fact_list}) to qualify for lower-duty lane {target_label}."
+    if dimension == "composition":
+        return f"Adjust composition threshold ({fact_list}) to activate textile-dominant classification {target_label}."
+    if dimension == "assembly":
+        return f"Alter assembly configuration ({fact_list}) to align with {target_label} requirements."
+    return f"Adjust {fact_list} to unlock lower-duty candidate {target_label}."
+
+
+def generate_candidate_levers(
+    *,
+    baseline_atom: PolicyAtom,
+    atoms: Sequence[PolicyAtom],
+    duty_rates: Mapping[str, float],
+    facts: Mapping[str, object],
+    requirement_registry: FactRequirementRegistry | None = None,
+    baseline_rate: float | None = None,
+) -> List[LeverModel]:
+    """Generate physical levers by contrasting cheaper candidates against the baseline."""
+
+    registry = requirement_registry or FactRequirementRegistry()
+    base_guard = _guard_expectations(baseline_atom)
+    base_rate = baseline_rate if baseline_rate is not None else duty_rates.get(baseline_atom.source_id)
+    if base_rate is None:
+        return []
+
+    generated: list[LeverModel] = []
+    seen: set[str] = set()
+    for candidate in atoms:
+        if candidate.source_id == baseline_atom.source_id:
+            continue
+        candidate_rate = duty_rates.get(candidate.source_id)
+        if candidate_rate is None or candidate_rate >= base_rate:
+            continue
+
+        diff_keys = diff_candidate_requirements(baseline_atom, candidate, requirement_registry=registry)
+        dimension = _dimension_for_diff(diff_keys)
+        if not diff_keys or dimension is None:
+            continue
+
+        mutation = _mutation_from_diff(
+            diff_keys=diff_keys,
+            target_guard=_guard_expectations(candidate),
+            baseline_guard=base_guard,
+            facts=facts,
+        )
+        if not mutation:
+            continue
+
+        lever_id = f"DYNAMIC_{dimension.upper()}::{candidate.source_id}"
+        if lever_id in seen:
+            continue
+
+        generated.append(
+            LeverModel(
+                lever_id=lever_id,
+                category_scope=["all"],
+                required_facts={},
+                mutation=mutation,
+                rationale=_rationale_from_diff(dimension, candidate, diff_keys),
+                feasibility="MED",
+                evidence_requirements=_evidence_for_keys(diff_keys, registry),
+                feasibility_profile=_feasibility_defaults(),
+                risk_floor=25,
+            )
+        )
+        seen.add(lever_id)
+
+    generated.sort(key=lambda lever: lever.lever_id)
+    return generated

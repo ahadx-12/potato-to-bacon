@@ -10,7 +10,7 @@ from potatobacon.tariff.bom_ingest import bom_to_text, parse_bom_csv
 from potatobacon.tariff.candidate_search import generate_baseline_candidates
 from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_for_context
 from potatobacon.tariff.fact_requirements import FactRequirementRegistry
-from potatobacon.tariff.levers import applicable_levers, lever_library
+from potatobacon.tariff.levers import LeverModel, applicable_levers, generate_candidate_levers, lever_library
 from potatobacon.tariff.evidence_extractor import extract_evidence
 from potatobacon.tariff.evidence_store import get_default_evidence_store
 from potatobacon.tariff.models import BaselineCandidateModel, FactEvidenceModel, ProductGraph, TariffSuggestionItemModel
@@ -507,7 +507,21 @@ def build_sku_dossier_v2(
             f"{ov.overlay_name}: {ov.reason}" for ov in sorted(stop_overlays, key=lambda item: item.overlay_name)
         ] + normalization_notes[:]
     elif optimize:
-        levers = applicable_levers(spec=product_spec, facts=normalized_facts)
+        dynamic_levers: list[LeverModel] = []
+        if baseline_eval.duty_atoms:
+            dynamic_levers = generate_candidate_levers(
+                baseline_atom=baseline_eval.duty_atoms[0],
+                atoms=atoms,
+                duty_rates=duty_rates,
+                facts=normalized_facts,
+                baseline_rate=baseline_duty,
+            )
+        lever_index: dict[str, LeverModel] = {
+            lever.lever_id: lever for lever in applicable_levers(spec=product_spec, facts=normalized_facts)
+        }
+        for lever in dynamic_levers:
+            lever_index.setdefault(lever.lever_id, lever)
+        levers = sorted(lever_index.values(), key=lambda lever: lever.lever_id)
         if not has_blocking_questions:
             for lever in levers:
                 mutated = deepcopy(normalized_facts)
