@@ -672,6 +672,13 @@ def suggest_tariff_optimizations(
             duty_rates=duty_rates,
             facts=normalized_facts,
             baseline_rate=baseline_rate,
+            fact_evidence=fact_evidence,
+            declared_value_per_unit=declared_value,
+            annual_volume=request.annual_volume,
+            min_net_savings=request.min_net_savings,
+            max_payback_months=request.max_payback_months,
+            risk_tolerance=request.risk_tolerance,
+            stop_optimization=any(ov.stop_optimization for ov in baseline_eval.overlays),
         )
 
     lever_index: dict[str, LeverModel] = {
@@ -770,6 +777,16 @@ def suggest_tariff_optimizations(
             )
         )
 
+        documentation_fields = {}
+        if lever.lever_type == "DOCUMENTATION":
+            why_needed = list(lever.why_needed) + list(lever.measurement_hints)
+            documentation_fields = {
+                "lever_category": DOCUMENTATION_LEVER_ID,
+                "accepted_evidence_templates": list(lever.evidence_requirements),
+                "fact_gaps": list(lever.fact_gaps),
+                "why_needed": sorted(set(why_needed)),
+            }
+
         suggestion_items.append(
             TariffSuggestionItemModel(
                 human_summary=lever.rationale,
@@ -799,6 +816,7 @@ def suggest_tariff_optimizations(
                 defensibility_grade=adjusted_grade,
                 risk_reasons=risk.risk_reasons,
                 tariff_manifest_hash=context_meta["manifest_hash"],
+                **documentation_fields,
             )
         )
 

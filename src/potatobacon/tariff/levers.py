@@ -9,10 +9,13 @@ open-ended heuristics.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
+import re
 from typing import Callable, Dict, Iterable, List, Mapping, Sequence
 
 from potatobacon.law.solver_z3 import PolicyAtom
 from potatobacon.tariff.fact_requirements import FactRequirementRegistry
+from potatobacon.tariff.models import FactEvidenceModel, NetSavings, TariffFeasibility
 from potatobacon.tariff.product_schema import ProductCategory, ProductSpecModel
 
 Constraint = Callable[[Mapping[str, object]], bool]
@@ -32,6 +35,10 @@ class LeverModel:
     feasibility_profile: Mapping[str, object] | None = field(default=None)
     risk_floor: int = 0
     constraints: Sequence[Constraint] = field(default_factory=list)
+    lever_type: str = "PHYSICAL"
+    fact_gaps: Sequence[str] = field(default_factory=list)
+    why_needed: Sequence[str] = field(default_factory=list)
+    measurement_hints: Sequence[str] = field(default_factory=list)
 
     def applies_to(self, *, category: str, facts: Mapping[str, object]) -> bool:
         if "all" not in self.category_scope and category not in self.category_scope:
@@ -51,6 +58,45 @@ class LeverModel:
             if not constraint(facts):
                 return False
         return True
+
+
+@dataclass(frozen=True)
+class DynamicLeverPolicy:
+    """Deterministic policy for guard-diff lever emission."""
+
+    ALLOWED_FACT_DIMENSIONS: Sequence[str] = (
+        r"^material_",
+        r"^surface_contact_.*_gt_50$",
+        r"^composition_.*_gt_50$",
+        r"^coating_",
+    )
+    DISALLOWED_DIMENSIONS: Sequence[str] = (
+        r"classification",
+        r"origin",
+        r"label",
+        r"ad/?cvd",
+        r"anti[-_]?dump",
+        r"countervailing",
+        r"avoidance",
+        r"circumvent",
+        r"rewrite",
+    )
+    min_fact_confidence: float = 0.6
+    min_net_savings: float = 0.0
+    max_payback_months: float | None = None
+    acceptable_risk_grades: Sequence[str] = ("A", "B")
+
+    def allows_fact_key(self, fact_key: str) -> bool:
+        if any(re.search(pattern, fact_key, re.IGNORECASE) for pattern in self.DISALLOWED_DIMENSIONS):
+            return False
+        return any(re.search(pattern, fact_key) for pattern in self.ALLOWED_FACT_DIMENSIONS)
+
+    def lever_sort_key(self, lever: LeverModel, *, net_savings: NetSavings | None = None) -> tuple:
+        savings = net_savings.net_annual_savings if net_savings and net_savings.net_annual_savings is not None else 0.0
+        payback = net_savings.payback_months if net_savings and net_savings.payback_months is not None else math.inf
+        mutation_key = tuple(sorted((key, str(value)) for key, value in lever.mutation.items()))
+        evidence_key = tuple(sorted(lever.evidence_requirements))
+        return (-savings, payback, lever.lever_id, mutation_key, evidence_key)
 
 
 def _has_material_evidence(facts: Mapping[str, object]) -> bool:
@@ -306,24 +352,24 @@ def diff_candidate_requirements(
     return deduped
 
 
-def _dimension_for_key(fact_key: str) -> str | None:
+def _dimension_for_key(fact_key: str, policy: DynamicLeverPolicy) -> str | None:
+    if not policy.allows_fact_key(fact_key):
+        return None
     if fact_key.startswith("material_"):
         return "material"
-    if fact_key.startswith("surface_contact_") or fact_key.startswith("felt_covering_"):
+    if fact_key.startswith("surface_contact_"):
+        return "surface_contact"
+    if fact_key.startswith("composition_"):
         return "composition"
-    if fact_key.startswith("fiber_") or fact_key.startswith("upper_material_") or fact_key.startswith(
-        "outer_sole_material_"
-    ):
-        return "composition"
-    if "assembly" in fact_key or fact_key.startswith("product_type_assembly"):
-        return "assembly"
+    if fact_key.startswith("coating_"):
+        return "coating"
     return None
 
 
-def _dimension_for_diff(diff_keys: Iterable[str]) -> str | None:
+def _dimension_for_diff(diff_keys: Iterable[str], policy: DynamicLeverPolicy) -> str | None:
     dimension: str | None = None
     for key in diff_keys:
-        key_dimension = _dimension_for_key(key)
+        key_dimension = _dimension_for_key(key, policy)
         if key_dimension is None:
             return None
         if dimension is None:
@@ -339,27 +385,30 @@ def _mutation_from_diff(
     target_guard: Mapping[str, bool],
     baseline_guard: Mapping[str, bool],
     facts: Mapping[str, object],
+    policy: DynamicLeverPolicy,
 ) -> Dict[str, object]:
     mutation: Dict[str, object] = {}
     dimensions: Dict[str, set[str]] = {}
 
     for key in diff_keys:
-        dimension = _dimension_for_key(key)
+        dimension = _dimension_for_key(key, policy)
         if dimension:
             dimensions.setdefault(dimension, set()).add(key)
 
         if key in target_guard:
             mutation[key] = target_guard[key]
 
-    for base_key, base_expected in baseline_guard.items():
-        dimension = _dimension_for_key(base_key)
+    for base_key in sorted(baseline_guard.keys()):
+        base_expected = baseline_guard[base_key]
+        dimension = _dimension_for_key(base_key, policy)
         if dimension and dimension in dimensions and base_expected and base_key not in mutation:
             mutation[base_key] = False
 
-    for fact_key, value in facts.items():
+    for fact_key in sorted(facts.keys()):
+        value = facts[fact_key]
         if not isinstance(value, bool):
             continue
-        dimension = _dimension_for_key(fact_key)
+        dimension = _dimension_for_key(fact_key, policy)
         if dimension and dimension in dimensions and value and fact_key not in mutation:
             mutation[fact_key] = False
 
@@ -368,7 +417,7 @@ def _mutation_from_diff(
 
 def _evidence_for_keys(keys: Iterable[str], requirement_registry: FactRequirementRegistry) -> List[str]:
     evidence: set[str] = set()
-    for key in keys:
+    for key in sorted(keys):
         requirement = requirement_registry.describe(key)
         evidence.update(requirement.evidence_types)
     return sorted(evidence)
@@ -382,6 +431,100 @@ def _feasibility_defaults() -> Mapping[str, object]:
         "requires_recertification": False,
         "supply_chain_risk": "MED",
     }
+
+
+def _documentation_feasibility_defaults() -> Mapping[str, object]:
+    return {
+        "one_time_cost": 250.0,
+        "recurring_cost_per_unit": 0.0,
+        "implementation_time_days": 5,
+        "requires_recertification": False,
+        "supply_chain_risk": "LOW",
+    }
+
+
+def _defensibility_grade(score: int) -> str:
+    if score < 30:
+        return "A"
+    if score < 60:
+        return "B"
+    return "C"
+
+
+def _grade_rank(grade: str) -> int:
+    return {"A": 0, "B": 1, "C": 2}.get(grade.upper(), 3)
+
+
+def _fact_confidence_map(
+    fact_evidence: Sequence[FactEvidenceModel | Mapping[str, object]] | None,
+) -> Dict[str, float]:
+    if not fact_evidence:
+        return {}
+    confidence_map: Dict[str, float] = {}
+    for item in fact_evidence:
+        if isinstance(item, FactEvidenceModel):
+            fact_key = item.fact_key
+            confidence = item.confidence
+        else:
+            fact_key = str(item.get("fact_key", ""))
+            confidence = float(item.get("confidence", 0.0)) if item.get("confidence") is not None else 0.0
+        if not fact_key:
+            continue
+        confidence_map[fact_key] = max(confidence_map.get(fact_key, 0.0), confidence)
+    return confidence_map
+
+
+def _missing_fact_keys(
+    diff_keys: Sequence[str],
+    facts: Mapping[str, object],
+    confidence_map: Mapping[str, float],
+    *,
+    min_confidence: float,
+    overrides: Mapping[str, object] | None = None,
+) -> List[str]:
+    override_keys = set(overrides or {})
+    missing: list[str] = []
+    for key in diff_keys:
+        if key in override_keys:
+            continue
+        if key not in facts or facts.get(key) is None:
+            missing.append(key)
+            continue
+        if not isinstance(facts.get(key), bool):
+            missing.append(key)
+            continue
+        confidence = confidence_map.get(key)
+        if confidence is not None and confidence < min_confidence:
+            missing.append(key)
+    return sorted(missing)
+
+
+def _compute_net_savings(
+    *,
+    baseline_rate: float,
+    optimized_rate: float,
+    declared_value_per_unit: float | None,
+    annual_volume: int | None,
+    feasibility: TariffFeasibility,
+) -> NetSavings:
+    if declared_value_per_unit is None or annual_volume is None:
+        return NetSavings()
+    gross = (baseline_rate - optimized_rate) / 100.0 * declared_value_per_unit * annual_volume
+    implementation_cost = feasibility.one_time_cost + feasibility.recurring_cost_per_unit * annual_volume
+    first_year_adjustment = max(0.0, (365 - feasibility.implementation_time_days) / 365)
+    first_year_savings = gross * first_year_adjustment
+    net = first_year_savings - implementation_cost
+    payback_months = None
+    if gross > 0:
+        monthly = gross / 12.0
+        if monthly > 0:
+            payback_months = implementation_cost / monthly
+    return NetSavings(
+        gross_duty_savings=gross,
+        first_year_savings=first_year_savings,
+        net_annual_savings=net,
+        payback_months=payback_months,
+    )
 
 
 def _rationale_from_diff(dimension: str, target_candidate: PolicyAtom, diff_keys: Sequence[str]) -> str:
@@ -404,17 +547,35 @@ def generate_candidate_levers(
     facts: Mapping[str, object],
     requirement_registry: FactRequirementRegistry | None = None,
     baseline_rate: float | None = None,
+    fact_evidence: Sequence[FactEvidenceModel | Mapping[str, object]] | None = None,
+    fact_overrides: Mapping[str, object] | None = None,
+    declared_value_per_unit: float | None = None,
+    annual_volume: int | None = None,
+    policy: DynamicLeverPolicy | None = None,
+    min_net_savings: float | None = None,
+    max_payback_months: float | None = None,
+    risk_tolerance: str | None = None,
+    stop_optimization: bool = False,
 ) -> List[LeverModel]:
     """Generate physical levers by contrasting cheaper candidates against the baseline."""
 
     registry = requirement_registry or FactRequirementRegistry()
+    policy = policy or DynamicLeverPolicy()
     base_guard = _guard_expectations(baseline_atom)
     base_rate = baseline_rate if baseline_rate is not None else duty_rates.get(baseline_atom.source_id)
     if base_rate is None:
         return []
 
-    generated: list[LeverModel] = []
+    generated: list[tuple[LeverModel, NetSavings | None]] = []
     seen: set[str] = set()
+    confidence_map = _fact_confidence_map(fact_evidence)
+    min_net_threshold = policy.min_net_savings if min_net_savings is None else min_net_savings
+    max_payback = policy.max_payback_months if max_payback_months is None else max_payback_months
+    acceptable_grades = {grade.upper() for grade in policy.acceptable_risk_grades}
+    if risk_tolerance:
+        acceptable_grades = {
+            grade for grade in ("A", "B", "C") if _grade_rank(grade) <= _grade_rank(risk_tolerance)
+        }
     for candidate in atoms:
         if candidate.source_id == baseline_atom.source_id:
             continue
@@ -423,15 +584,79 @@ def generate_candidate_levers(
             continue
 
         diff_keys = diff_candidate_requirements(baseline_atom, candidate, requirement_registry=registry)
-        dimension = _dimension_for_diff(diff_keys)
+        dimension = _dimension_for_diff(diff_keys, policy)
         if not diff_keys or dimension is None:
+            continue
+
+        missing_keys = _missing_fact_keys(
+            diff_keys,
+            facts,
+            confidence_map,
+            min_confidence=policy.min_fact_confidence,
+            overrides=fact_overrides,
+        )
+        target_guard = _guard_expectations(candidate)
+
+        if missing_keys:
+            evidence_templates = _evidence_for_keys(missing_keys, registry)
+            if not evidence_templates:
+                continue
+            lever_id = f"DYNAMIC_DOC::{candidate.source_id}"
+            if lever_id in seen:
+                continue
+            why_needed: list[str] = []
+            measurement_hints: list[str] = []
+            for key in missing_keys:
+                requirement = registry.describe(key)
+                why_needed.append(requirement.render_question())
+                if requirement.measurement_hint:
+                    measurement_hints.append(f"Measurement hint: {requirement.measurement_hint}")
+            rationale = (
+                f"Substantiate missing facts ({', '.join(missing_keys)}) to access {candidate.source_id}. "
+                "This does not change the product; it changes substantiation."
+            )
+            mutation = _mutation_from_diff(
+                diff_keys=diff_keys,
+                target_guard=target_guard,
+                baseline_guard=base_guard,
+                facts=facts,
+                policy=policy,
+            )
+            generated.append(
+                (
+                    LeverModel(
+                        lever_id=lever_id,
+                        category_scope=["all"],
+                        required_facts={},
+                        mutation=mutation,
+                        rationale=rationale,
+                        feasibility="LOW",
+                        evidence_requirements=evidence_templates,
+                        feasibility_profile=_documentation_feasibility_defaults(),
+                        risk_floor=10,
+                        lever_type="DOCUMENTATION",
+                        fact_gaps=missing_keys,
+                        why_needed=sorted(set(why_needed)),
+                        measurement_hints=sorted(set(measurement_hints)),
+                    ),
+                    None,
+                )
+            )
+            seen.add(lever_id)
+            continue
+
+        if stop_optimization:
+            continue
+        evidence_templates = _evidence_for_keys(diff_keys, registry)
+        if not evidence_templates:
             continue
 
         mutation = _mutation_from_diff(
             diff_keys=diff_keys,
-            target_guard=_guard_expectations(candidate),
+            target_guard=target_guard,
             baseline_guard=base_guard,
             facts=facts,
+            policy=policy,
         )
         if not mutation:
             continue
@@ -440,20 +665,44 @@ def generate_candidate_levers(
         if lever_id in seen:
             continue
 
+        feasibility_profile = _feasibility_defaults()
+        feasibility = TariffFeasibility(**feasibility_profile)
+        net_savings = _compute_net_savings(
+            baseline_rate=base_rate,
+            optimized_rate=candidate_rate,
+            declared_value_per_unit=declared_value_per_unit,
+            annual_volume=annual_volume,
+            feasibility=feasibility,
+        )
+        if min_net_threshold > 0:
+            if net_savings.net_annual_savings is None or net_savings.net_annual_savings <= min_net_threshold:
+                continue
+        if max_payback is not None:
+            if net_savings.payback_months is None or net_savings.payback_months > max_payback:
+                continue
+
+        risk_floor = 25
+        risk_grade = _defensibility_grade(risk_floor)
+        if risk_grade.upper() not in acceptable_grades:
+            continue
+
         generated.append(
-            LeverModel(
-                lever_id=lever_id,
-                category_scope=["all"],
-                required_facts={},
-                mutation=mutation,
-                rationale=_rationale_from_diff(dimension, candidate, diff_keys),
-                feasibility="MED",
-                evidence_requirements=_evidence_for_keys(diff_keys, registry),
-                feasibility_profile=_feasibility_defaults(),
-                risk_floor=25,
+            (
+                LeverModel(
+                    lever_id=lever_id,
+                    category_scope=["all"],
+                    required_facts={},
+                    mutation=mutation,
+                    rationale=_rationale_from_diff(dimension, candidate, diff_keys),
+                    feasibility="MED",
+                    evidence_requirements=evidence_templates,
+                    feasibility_profile=feasibility_profile,
+                    risk_floor=risk_floor,
+                ),
+                net_savings,
             )
         )
         seen.add(lever_id)
 
-    generated.sort(key=lambda lever: lever.lever_id)
-    return generated
+    generated.sort(key=lambda item: policy.lever_sort_key(item[0], net_savings=item[1]))
+    return [lever for lever, _ in generated]

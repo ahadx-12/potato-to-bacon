@@ -10,8 +10,8 @@ Physics-first translator (DSL → validated schema → guards → canonical form
 ## Quickstart
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-pytest -q
+pip install -e ".[tests]"
+python scripts/run_tests.py
 ```
 
 ## Units API
@@ -43,8 +43,8 @@ The repository now ships with the first three CALE milestones as a Python packag
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-pytest -q
+pip install -e ".[tests]"
+python scripts/run_tests.py
 ```
 
 ### Example
