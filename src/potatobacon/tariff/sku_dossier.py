@@ -515,6 +515,11 @@ def build_sku_dossier_v2(
                 duty_rates=duty_rates,
                 facts=normalized_facts,
                 baseline_rate=baseline_duty,
+                fact_evidence=fact_evidence,
+                fact_overrides=overrides_payload or None,
+                declared_value_per_unit=record.declared_value_per_unit or 100.0,
+                annual_volume=record.annual_volume,
+                stop_optimization=bool(stop_overlays),
             )
         lever_index: dict[str, LeverModel] = {
             lever.lever_id: lever for lever in applicable_levers(spec=product_spec, facts=normalized_facts)
@@ -568,6 +573,16 @@ def build_sku_dossier_v2(
                     evidence_pack=evidence_pack,
                 )
 
+                documentation_fields = {}
+                if lever.lever_type == "DOCUMENTATION":
+                    why_needed = list(lever.why_needed) + list(lever.measurement_hints)
+                    documentation_fields = {
+                        "lever_category": DOCUMENTATION_LEVER_ID,
+                        "accepted_evidence_templates": list(lever.evidence_requirements),
+                        "fact_gaps": list(lever.fact_gaps),
+                        "why_needed": sorted(set(why_needed)),
+                    }
+
                 suggestion_items.append(
                     TariffSuggestionItemModel(
                         human_summary=lever.rationale,
@@ -591,6 +606,7 @@ def build_sku_dossier_v2(
                         defensibility_grade=adjusted_grade,
                         risk_reasons=risk.risk_reasons,
                         tariff_manifest_hash=context_meta["manifest_hash"],
+                        **documentation_fields,
                     )
                 )
 
