@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Tuple
 
 from .product_schema import ProductCategory, ProductSpecModel
+from .fact_schema_registry import FactSchemaRegistry
+from .sku_models import SKURecordModel
 
 
 @dataclass
@@ -426,3 +428,67 @@ def compile_facts(
         facts.setdefault("material_metal", False)
 
     return facts, evidence
+
+
+@dataclass(frozen=True)
+class CompiledFacts:
+    facts: Dict[str, Any]
+    provenance: Dict[str, Any]
+
+
+class FactCompiler:
+    def __init__(self, registry: FactSchemaRegistry | None = None) -> None:
+        self.registry = registry or FactSchemaRegistry()
+
+    def _evidence_facts(self, sku: SKURecordModel, session: Any) -> Dict[str, Any]:
+        evidence_sources: List[Dict[str, Any]] = []
+        if isinstance(getattr(session, "evidence_facts", None), dict):
+            evidence_sources.append(session.evidence_facts)
+        if isinstance(getattr(session, "extracted_facts", None), dict):
+            evidence_sources.append(session.extracted_facts)
+        metadata = getattr(sku, "metadata", None) or {}
+        if isinstance(metadata, dict) and isinstance(metadata.get("evidence_facts"), dict):
+            evidence_sources.append(metadata["evidence_facts"])
+        merged: Dict[str, Any] = {}
+        for source in evidence_sources:
+            for key, value in source.items():
+                merged.setdefault(key, value)
+        return merged
+
+    def _sku_field_mapping(self, sku: SKURecordModel) -> Dict[str, Any]:
+        return {
+            "origin_country": sku.origin_country,
+            "export_country": sku.export_country,
+            "import_country": sku.import_country,
+            "declared_value_per_unit": sku.declared_value_per_unit,
+            "annual_volume": sku.annual_volume,
+            "current_hts": sku.current_hts,
+            "inferred_category": sku.inferred_category,
+        }
+
+    def compile(self, sku: SKURecordModel, session: Any) -> CompiledFacts:
+        schema = self.registry.get_all_facts_for_sku(sku)
+        overrides = getattr(session, "fact_overrides", None) or {}
+        evidence_facts = self._evidence_facts(sku, session)
+        sku_fields = self._sku_field_mapping(sku)
+
+        facts: Dict[str, Any] = {}
+        provenance: Dict[str, Any] = {}
+
+        for key in sorted(schema.keys()):
+            if key in overrides:
+                override_val = overrides[key]
+                value = getattr(override_val, "value", override_val)
+                facts[key] = value
+                provenance[key] = {"source": "override"}
+            elif key in evidence_facts:
+                facts[key] = evidence_facts[key]
+                provenance[key] = {"source": "evidence"}
+            elif key in sku_fields:
+                facts[key] = sku_fields[key]
+                provenance[key] = {"source": "sku"}
+            else:
+                facts[key] = None
+                provenance[key] = {"source": "default"}
+
+        return CompiledFacts(facts=facts, provenance=provenance)

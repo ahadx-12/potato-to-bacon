@@ -21,6 +21,9 @@ class SKURecordModel(BaseModel):
     import_country: Optional[str] = None
     declared_value_per_unit: Optional[float] = None
     annual_volume: Optional[int] = None
+    inferred_category: Optional[str] = None
+    category_confidence: Optional[float] = None
+    current_hts: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
     updated_at: Optional[str] = None
     created_at: Optional[str] = None
@@ -50,6 +53,10 @@ class SKURecordModel(BaseModel):
         if isinstance(self.bom_json, StructuredBOMModel):
             payload["bom_json"] = self.bom_json.model_dump()
         return payload
+
+
+class SKU(SKURecordModel):
+    """Convenience alias for SKU records used in detection/analysis flows."""
 
 
 class QuestionItemModel(BaseModel):

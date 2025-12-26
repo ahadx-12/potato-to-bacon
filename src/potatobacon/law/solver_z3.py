@@ -9,7 +9,7 @@ outcomes that can be composed by downstream search/metrics components.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import threading
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Sequence, Tuple
 
@@ -53,6 +53,15 @@ class PolicyAtom:
     rule_type: str = "STATUTE"
     atom_id: str | None = None
     metadata: Mapping[str, Any] | None = None
+    hts_code: str | None = None
+    description: str | None = None
+    base_duty_rate: str | None = None
+    special_rates: Mapping[str, str] = field(default_factory=dict)
+    unit_of_quantity: str | None = None
+    chapter: str | None = None
+    heading: str | None = None
+    legal_notes: List[str] = field(default_factory=list)
+    citation: Mapping[str, Any] | None = None
     z3_guard: BoolRef | None = None
     z3_outcome: BoolRef | None = None
 

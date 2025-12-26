@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
 from potatobacon.proofs.canonical import canonical_json
+from potatobacon.tariff.category_detector import CategoryDetector
 from potatobacon.tariff.sku_models import SKURecordModel
 
 
@@ -51,10 +52,19 @@ class SKUStore:
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
             existing = self._records.get(sku_id)
-            base_payload = payload.serializable_dict() if isinstance(payload, SKURecordModel) else dict(payload)
-            base_payload["sku_id"] = sku_id
+            incoming_payload = payload.serializable_dict() if isinstance(payload, SKURecordModel) else dict(payload)
+            merged_payload = existing.serializable_dict() if existing else {}
+            merged_payload.update(incoming_payload)
+            description_changed = existing is None or merged_payload.get("description") != existing.description
+            hts_changed = existing is None or merged_payload.get("current_hts") != existing.current_hts
             created_at = existing.created_at if existing else now
-            record = SKURecordModel(**{**base_payload, "created_at": created_at, "updated_at": now})
+            if description_changed or hts_changed:
+                detector = CategoryDetector()
+                candidate = SKURecordModel(**{**merged_payload, "sku_id": sku_id, "created_at": created_at, "updated_at": now})
+                result = detector.detect(candidate)
+                merged_payload["inferred_category"] = result.primary.name
+                merged_payload["category_confidence"] = result.confidence
+            record = SKURecordModel(**{**merged_payload, "sku_id": sku_id, "created_at": created_at, "updated_at": now})
             self._records[sku_id] = record
             self._persist()
         return record
