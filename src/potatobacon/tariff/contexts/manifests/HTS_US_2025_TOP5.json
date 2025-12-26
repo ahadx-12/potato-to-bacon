@@ -1,0 +1,19 @@
+{
+  "context_id": "HTS_US_2025_TOP5",
+  "domain": "tariff",
+  "jurisdiction": "US",
+  "effective_from": "2025-01-01",
+  "effective_to": null,
+  "description": "HTSUS 2025 top 5 chapters (fixtures) for offline ingestion.",
+  "loader": {
+    "type": "python",
+    "callable": "potatobacon.tariff.hts_ingest.full_ingest:load_policy_atoms"
+  },
+  "sources": [
+    "data/hts_extract/full_chapters/ch39.jsonl",
+    "data/hts_extract/full_chapters/ch84.jsonl",
+    "data/hts_extract/full_chapters/ch87.jsonl",
+    "data/hts_extract/full_chapters/ch90.jsonl",
+    "data/hts_extract/full_chapters/ch94.jsonl"
+  ]
+}
