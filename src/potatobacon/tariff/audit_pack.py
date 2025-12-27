@@ -14,6 +14,8 @@ from potatobacon.tariff.fact_requirements import FactRequirementRegistry
 from potatobacon.tariff.normalizer import normalize_compiled_facts
 from potatobacon.tariff.sku_dossier import _conditional_pathways, _select_baseline_assignment
 from potatobacon.tariff.suggest import _evaluate_scenario
+from potatobacon.tariff.models import ProductGraph
+from potatobacon.tariff.origin_engine import compute_rvc
 
 
 def _draw_lines(c: canvas.Canvas, lines: List[str], *, start_y: int = 760, step: int = 14) -> None:
@@ -76,6 +78,26 @@ def _overlay_lines(overlays: Dict[str, Any] | None) -> List[str]:
     return lines or ["- no overlays applied"]
 
 
+def _value_added_lines(product_graph: ProductGraph | None, sku_metadata: Dict[str, Any]) -> List[str]:
+    if not product_graph:
+        return ["- Value-Added Worksheet unavailable (no product graph)"]
+    adjusted_value = sku_metadata.get("declared_value_per_unit")
+    rvc_result = compute_rvc(
+        product_graph,
+        adjusted_value,
+        declared_origin_country=sku_metadata.get("origin_country"),
+    )
+    if not rvc_result:
+        return ["- Value-Added Worksheet incomplete (missing adjusted value or component values)"]
+    return [
+        f"- Adjusted value (V_adj): {rvc_result.adjusted_value}",
+        f"- Originating materials value: {rvc_result.originating_value}",
+        f"- Non-originating materials value: {rvc_result.non_originating_value}",
+        f"- Build-down RVC: {rvc_result.build_down}%",
+        f"- Build-up RVC: {rvc_result.build_up}%",
+    ]
+
+
 def generate_audit_pack_pdf(proof_id: str) -> bytes:
     store = get_default_store()
     proof = store.get_proof(proof_id)
@@ -109,6 +131,8 @@ def generate_audit_pack_pdf(proof_id: str) -> bytes:
     manifest_hash = proof.get("tariff_manifest_hash") or context_meta.get("manifest_hash")
     payload_hash = proof.get("proof_payload_hash")
     sku_metadata = evidence_pack.get("sku_metadata") or {}
+    product_graph_payload = evidence_pack.get("product_graph")
+    product_graph = ProductGraph(**product_graph_payload) if isinstance(product_graph_payload, dict) else None
     description_hash = sku_metadata.get("description_hash", "n/a")
 
     c.setFont("Helvetica-Bold", 14)
@@ -148,17 +172,21 @@ def generate_audit_pack_pdf(proof_id: str) -> bytes:
     fact_lines.extend(_fact_table_lines(normalized_facts, compiled_facts.get("overrides")))
     _draw_lines(c, fact_lines, start_y=560)
 
+    value_added_lines = ["Value-Added Worksheet:"]
+    value_added_lines.extend(_value_added_lines(product_graph, sku_metadata))
+    _draw_lines(c, value_added_lines, start_y=470)
+
     provenance_chain = proof.get("provenance_chain") or []
     provenance_lines = ["Provenance:"]
     provenance_lines.extend(_provenance_lines(provenance_chain))
-    _draw_lines(c, provenance_lines, start_y=420)
+    _draw_lines(c, provenance_lines, start_y=350)
 
     warning_lines = ["Warnings:"]
     if proof.get("baseline", {}).get("duty_status") != "OK" or proof.get("optimized", {}).get("duty_status") != "OK":
         warning_lines.append("- Review duty status flags before execution")
     else:
         warning_lines.append("- none")
-    _draw_lines(c, warning_lines, start_y=260)
+    _draw_lines(c, warning_lines, start_y=210)
 
     c.showPage()
     c.save()

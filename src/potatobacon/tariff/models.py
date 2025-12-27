@@ -97,8 +97,11 @@ class ProductGraphComponent(BaseModel):
 
     name: str
     material: Optional[str] = None
+    hts_code: Optional[str] = None
     value_share: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    component_value: Optional[float] = Field(default=None, ge=0.0)
     origin_country: Optional[str] = None
+    is_originating_material: Optional[bool] = None
     function: Optional[str] = None
 
     model_config = ConfigDict(extra="forbid")

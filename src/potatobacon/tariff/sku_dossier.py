@@ -37,6 +37,7 @@ from potatobacon.tariff.sku_store import SKUStore, get_default_sku_store
 from potatobacon.tariff.suggest import (
     DOCUMENTATION_LEVER_ID,
     _apply_precedent_signals,
+    _apply_origin_precision_risk,
     _compute_savings,
     _defensibility_grade,
     _documentation_levers,
@@ -46,6 +47,7 @@ from potatobacon.tariff.suggest import (
     _record_proof,
     _sort_key,
 )
+from potatobacon.tariff.origin_engine import OriginAnalysisResult, evaluate_origin_analysis
 
 
 def _citation_reference_id(context_id: str, atom: Any) -> str:
@@ -75,6 +77,8 @@ def _build_opportunity_ledger(
     declared_value_per_unit: float,
     context_id: str,
     stop_overlays: list[Any],
+    origin_analysis: OriginAnalysisResult | None = None,
+    tariff_manifest_hash: str | None = None,
 ) -> OpportunityLedgerModel:
     entries: list[OpportunityLedgerEntryModel] = []
     gri_citation = None
@@ -117,6 +121,17 @@ def _build_opportunity_ledger(
             )
         )
 
+    entries.extend(
+        _origin_opportunity_entries(
+            origin_analysis=origin_analysis,
+            baseline_duty=baseline_duty,
+            annual_volume=annual_volume,
+            declared_value_per_unit=declared_value_per_unit,
+            tariff_manifest_hash=tariff_manifest_hash,
+            stop_overlays=stop_overlays,
+        )
+    )
+
     entries.sort(
         key=lambda entry: (
             -(entry.annual_duty_delta or 0.0),
@@ -126,6 +141,87 @@ def _build_opportunity_ledger(
     return OpportunityLedgerModel(entries=entries)
 
 
+def _origin_opportunity_entries(
+    *,
+    origin_analysis: OriginAnalysisResult | None,
+    baseline_duty: float | None,
+    annual_volume: int | None,
+    declared_value_per_unit: float,
+    tariff_manifest_hash: str | None,
+    stop_overlays: list[Any],
+) -> list[OpportunityLedgerEntryModel]:
+    entries: list[OpportunityLedgerEntryModel] = []
+    if baseline_duty is None:
+        baseline_duty = 0.0
+
+    legal_basis = []
+    if tariff_manifest_hash:
+        legal_basis.append(f"{tariff_manifest_hash}::USMCA::Chapter4")
+
+    missing_facts = origin_analysis.missing_facts if origin_analysis else [
+        "manufacturing_step_logs",
+        "labor_cost_summary",
+        "sub_supplier_cert_origin",
+    ]
+    optimized_rate = 0.0
+    _, _, annual_delta = _compute_savings(
+        baseline_rate=baseline_duty,
+        optimized_rate=optimized_rate,
+        declared_value_per_unit=declared_value_per_unit,
+        annual_volume=annual_volume,
+    )
+
+    def _base_status() -> OpportunityLaneStatus:
+        if stop_overlays:
+            return OpportunityLaneStatus.REQUIRES_REVIEW
+        if missing_facts:
+            return OpportunityLaneStatus.BLOCKED_MISSING_ORIGIN_FACTS
+        return OpportunityLaneStatus.AVAILABLE_NOW
+
+    status = _base_status()
+    if origin_analysis and origin_analysis.requires_review:
+        status = OpportunityLaneStatus.REQUIRES_REVIEW
+
+    substantial_status = status
+    if origin_analysis and not origin_analysis.substantial_transformation:
+        substantial_status = OpportunityLaneStatus.BLOCKED_MISSING_ORIGIN_FACTS
+
+    entries.append(
+        OpportunityLedgerEntryModel(
+            lane_id="Substantial Transformation Detected",
+            status=substantial_status,
+            baseline_duty_rate=baseline_duty,
+            optimized_duty_rate=optimized_rate,
+            annual_duty_delta=annual_delta,
+            missing_facts=missing_facts,
+            legal_basis=legal_basis,
+        )
+    )
+
+    fta_status = status
+    if origin_analysis and origin_analysis.rvc:
+        rvc_value = origin_analysis.rvc.build_down
+        if rvc_value is not None and rvc_value < origin_analysis.rvc_threshold:
+            fta_status = OpportunityLaneStatus.INELIGIBLE_INSUFFICIENT_RVC
+    if origin_analysis and not origin_analysis.rvc:
+        fta_status = OpportunityLaneStatus.BLOCKED_MISSING_ORIGIN_FACTS
+    if origin_analysis and origin_analysis.requires_review:
+        fta_status = OpportunityLaneStatus.REQUIRES_REVIEW
+
+    entries.append(
+        OpportunityLedgerEntryModel(
+            lane_id="USMCA Qualification",
+            status=fta_status,
+            baseline_duty_rate=baseline_duty,
+            optimized_duty_rate=optimized_rate,
+            annual_duty_delta=annual_delta,
+            missing_facts=missing_facts,
+            legal_basis=legal_basis,
+        )
+    )
+    return entries
+
+
 def _build_intake_bundle(
     *,
     conditional_pathways: list[ConditionalPathwayModel],
@@ -133,6 +229,7 @@ def _build_intake_bundle(
     baseline_duty: float | None,
     annual_volume: int | None,
     declared_value_per_unit: float,
+    origin_fact_gaps: list[str] | None = None,
 ) -> IntakeBundleModel:
     fact_savings: dict[str, float | None] = {}
     for pathway in conditional_pathways:
@@ -155,11 +252,15 @@ def _build_intake_bundle(
             if previous is None or value > previous:
                 fact_savings[fact_key] = value
 
+    for fact_key in origin_fact_gaps or []:
+        fact_savings.setdefault(fact_key, None)
+
     aggregator = BundleAggregator()
     return aggregator.build(
         conditional_pathways=conditional_pathways,
         suggestions=suggestions,
         fact_savings=fact_savings,
+        origin_fact_gaps=origin_fact_gaps or [],
     )
 
 
@@ -211,6 +312,7 @@ def _evidence_pack(
     extraction_evidence: Any,
     product_graph: ProductGraph | None,
     sku_metadata: Dict[str, Any],
+    origin_analysis: OriginAnalysisResult | None = None,
     analysis_session_id: str | None = None,
     attached_evidence_ids: list[str] | None = None,
     fact_overrides: Dict[str, Any] | None = None,
@@ -223,6 +325,8 @@ def _evidence_pack(
     }
     if product_graph:
         pack["product_graph"] = product_graph.model_dump()
+    if origin_analysis:
+        pack["origin_analysis"] = origin_analysis.facts_payload()
     if fact_overrides:
         pack["fact_overrides"] = fact_overrides
     if analysis_session_id or attached_evidence_ids:
@@ -505,6 +609,26 @@ def build_sku_dossier_v2(
         fact_evidence = list(fact_evidence or [])
         fact_evidence.append(doc_evidence)
 
+    origin_analysis: OriginAnalysisResult | None = None
+    origin_fact_gaps: list[str] = []
+    if product_graph:
+        origin_analysis = evaluate_origin_analysis(
+            product_graph=product_graph,
+            final_hts=merged_facts.get("hts_code") or record.current_hts,
+            adjusted_value=record.declared_value_per_unit,
+            declared_origin_country=record.origin_country,
+        )
+        merged_facts.update(origin_analysis.facts_payload())
+        origin_fact_gaps = list(origin_analysis.missing_facts)
+
+    origin_rvc_value = None
+    origin_rvc_threshold = None
+    origin_rvc_margin = None
+    if origin_analysis and origin_analysis.rvc:
+        origin_rvc_value = float(origin_analysis.rvc.build_down or origin_analysis.rvc.build_up or 0.0)
+        origin_rvc_threshold = float(origin_analysis.rvc_threshold)
+        origin_rvc_margin = float(origin_analysis.rvc_margin)
+
     normalized_facts, normalization_notes = normalize_compiled_facts(merged_facts)
     missing_inputs = validate_minimum_inputs(product_spec.model_dump(), normalized_facts)
     compiled_pack = {
@@ -574,6 +698,7 @@ def build_sku_dossier_v2(
             annual_volume=record.annual_volume,
             metadata=record.metadata,
         ),
+        origin_analysis=origin_analysis,
         analysis_session_id=session_id,
         attached_evidence_ids=attached_evidence_ids,
         fact_overrides=overrides_payload,
@@ -682,6 +807,12 @@ def build_sku_dossier_v2(
                 )
                 adjusted_risk_score = max(risk.risk_score, lever.risk_floor)
                 adjusted_grade = _defensibility_grade(adjusted_risk_score)
+                adjusted_grade = _apply_origin_precision_risk(
+                    adjusted_grade,
+                    origin_rvc_value,
+                    threshold=origin_rvc_threshold or 60.0,
+                    margin=origin_rvc_margin or 2.0,
+                )
 
                 proof_handle = _record_proof(
                     law_context=law_context_id,
@@ -749,6 +880,23 @@ def build_sku_dossier_v2(
         )
         suggestion_items.extend(documentation_levers)
 
+        if origin_rvc_value is not None:
+            updated_suggestions: list[TariffSuggestionItemModel] = []
+            for item in suggestion_items:
+                if item.defensibility_grade:
+                    item = item.model_copy(
+                        update={
+                            "defensibility_grade": _apply_origin_precision_risk(
+                                item.defensibility_grade,
+                                origin_rvc_value,
+                                threshold=origin_rvc_threshold or 60.0,
+                                margin=origin_rvc_margin or 2.0,
+                            )
+                        }
+                    )
+                updated_suggestions.append(item)
+            suggestion_items = updated_suggestions
+
         atoms_by_id = {atom.source_id: atom for atom in atoms}
         suggestion_items = [_apply_precedent_signals(item, atoms_by_id) for item in suggestion_items]
 
@@ -797,6 +945,7 @@ def build_sku_dossier_v2(
         baseline_duty=baseline_duty,
         annual_volume=record.annual_volume,
         declared_value_per_unit=record.declared_value_per_unit or 100.0,
+        origin_fact_gaps=origin_fact_gaps,
     )
     opportunity_ledger = _build_opportunity_ledger(
         baseline_candidates=baseline_candidates,
@@ -806,6 +955,8 @@ def build_sku_dossier_v2(
         declared_value_per_unit=record.declared_value_per_unit or 100.0,
         context_id=law_context_id,
         stop_overlays=stop_overlays,
+        origin_analysis=origin_analysis,
+        tariff_manifest_hash=context_meta["manifest_hash"],
     )
 
     return TariffSkuDossierV2Model(

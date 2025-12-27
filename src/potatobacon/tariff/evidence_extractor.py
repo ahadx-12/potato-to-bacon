@@ -71,6 +71,19 @@ def _normalize_origin(raw_origin: Optional[str]) -> Optional[str]:
     return str(raw_origin).strip().upper()
 
 
+def _parse_bool(raw_value: Optional[str]) -> Optional[bool]:
+    if raw_value is None:
+        return None
+    if isinstance(raw_value, bool):
+        return raw_value
+    value = str(raw_value).strip().lower()
+    if value in {"yes", "true", "1", "y", "originating"}:
+        return True
+    if value in {"no", "false", "0", "n", "non-originating"}:
+        return False
+    return None
+
+
 def _bom_csv_to_product_graph(csv_text: str) -> Tuple[ProductGraph, Dict[str, Any]]:
     reader = csv.DictReader(StringIO(csv_text))
     if not reader.fieldnames:
@@ -81,11 +94,27 @@ def _bom_csv_to_product_graph(csv_text: str) -> Tuple[ProductGraph, Dict[str, An
     value_fields = {"unit_cost", "value", "value_share"}
     material_fields = {"material", "material_name"}
     origin_fields = {"origin", "origin_country", "country_of_origin"}
+    hts_fields = {"hts", "hts_code", "tariff_code", "hs_code", "hs"}
+    originating_fields = {"is_originating_material", "originating_material", "originating"}
     function_fields = {"function", "role"}
     name_fields = {"part_name", "component", "name", "description", "part_id"}
-    recognized = value_fields | material_fields | origin_fields | function_fields | name_fields | {"quantity"}
+    operation_fields = {"operation", "process", "manufacturing_step", "step"}
+    operation_country_fields = {"operation_country", "process_country", "country_of_operation"}
+    recognized = (
+        value_fields
+        | material_fields
+        | origin_fields
+        | hts_fields
+        | originating_fields
+        | function_fields
+        | name_fields
+        | operation_fields
+        | operation_country_fields
+        | {"quantity"}
+    )
 
     components: List[ProductGraphComponent] = []
+    operations: List[ProductOperation] = []
     total_value = 0.0
     staged_rows: List[Dict[str, str | None]] = []
 
@@ -103,7 +132,12 @@ def _bom_csv_to_product_graph(csv_text: str) -> Tuple[ProductGraph, Dict[str, An
         name = _component_name(row, idx)
         material = row.get("material") or row.get("material_name")
         origin = _normalize_origin(row.get("origin") or row.get("origin_country") or row.get("country_of_origin"))
+        hts_code = row.get("hts") or row.get("hts_code") or row.get("tariff_code") or row.get("hs_code") or row.get("hs")
+        originating_flag = _parse_bool(
+            row.get("is_originating_material") or row.get("originating_material") or row.get("originating")
+        )
         function = row.get("function") or row.get("role")
+        component_value = _row_value(row)
         value_raw = row.get("value_share")
         share: float | None = None
         if value_raw:
@@ -113,17 +147,29 @@ def _bom_csv_to_product_graph(csv_text: str) -> Tuple[ProductGraph, Dict[str, An
             except ValueError:
                 share = None
         if share is None:
-            component_value = _row_value(row)
             share = (component_value / total_value) if total_value > 0 else None
 
         comp = ProductGraphComponent(
             name=name,
             material=material,
+            hts_code=hts_code,
             value_share=share,
+            component_value=component_value,
             origin_country=origin,
+            is_originating_material=originating_flag,
             function=function,
         )
         components.append(comp)
+
+        operation = row.get("operation") or row.get("process") or row.get("manufacturing_step") or row.get("step")
+        operation_country = row.get("operation_country") or row.get("process_country") or row.get("country_of_operation")
+        if operation:
+            operations.append(
+                ProductOperation(
+                    step=str(operation).strip(),
+                    country=_normalize_origin(operation_country),
+                )
+            )
 
         if material:
             fact_key = f"material_{material.strip().lower()}"
@@ -139,9 +185,10 @@ def _bom_csv_to_product_graph(csv_text: str) -> Tuple[ProductGraph, Dict[str, An
             extracted_facts["electronics_insulated_conductors"] = True
 
     components.sort(key=lambda comp: comp.name.lower())
+    operations = sorted({op.step.lower(): op for op in operations}.values(), key=lambda op: op.step.lower())
     product_graph = ProductGraph(
         components=components,
-        ops=[],
+        ops=operations,
         attributes={"headers": normalized_headers},
     )
     if extracted_facts.get("electronics_insulated_conductors"):
