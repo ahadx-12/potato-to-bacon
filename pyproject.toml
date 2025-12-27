@@ -54,7 +54,8 @@ tests = [
   "pytest",
   "hypothesis",
   "pytest-cov>=4.1",
-  "reportlab>=4.2"
+  "reportlab>=4.2",
+  "openpyxl>=3.1"
 ]
 dev = [
   "pytest>=7.4",
@@ -71,7 +72,8 @@ spacy = [
 ]
 evidence = [
   "pillow>=10.0",
-  "pytesseract>=0.3"
+  "pytesseract>=0.3",
+  "openpyxl>=3.1"
 ]
 
 [tool.ruff]
