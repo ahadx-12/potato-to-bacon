@@ -379,6 +379,7 @@ class TariffSuggestionItemModel(BaseModel):
     risk_score: Optional[int] = None
     defensibility_grade: Optional[str] = None
     risk_reasons: Optional[List[str]] = None
+    precedent_context: Optional[Dict[str, Any]] = None
     tariff_manifest_hash: Optional[str] = None
 
     model_config = ConfigDict(extra="forbid")

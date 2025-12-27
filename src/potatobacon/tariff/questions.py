@@ -1,11 +1,18 @@
 from __future__ import annotations
 
-from typing import Iterable, List, Mapping, Sequence
+from typing import Dict, Iterable, List, Mapping, Sequence
 
 from potatobacon.law.solver_z3 import PolicyAtom
 from potatobacon.tariff.fact_requirements import FactRequirementRegistry
 from potatobacon.tariff.models import BaselineCandidateModel
-from potatobacon.tariff.sku_models import MissingFactsPackageModel, QuestionItemModel
+from potatobacon.tariff.sku_models import (
+    ConditionalPathwayModel,
+    IntakeBundleItemModel,
+    IntakeBundleModel,
+    MissingFactsPackageModel,
+    QuestionItemModel,
+)
+from potatobacon.tariff.models import TariffSuggestionItemModel
 
 
 def _fact_from_literal(literal: str) -> str:
@@ -91,3 +98,70 @@ def generate_missing_fact_questions(
         )
 
     return MissingFactsPackageModel(missing_facts=missing_keys, questions=questions)
+
+
+class BundleAggregator:
+    """Aggregate missing facts into evidence-first intake bundles."""
+
+    _LABELS = {
+        "bom_csv": "BOM CSV",
+        "bom_csv_origin_column": "BOM CSV",
+        "bom_csv_section_highlight": "BOM CSV",
+        "spec_sheet": "Technical Spec",
+        "spec_sheet_pdf": "Technical Spec",
+        "connector_spec_sheet": "Technical Spec",
+        "safety_datasheet_pdf": "Technical Spec",
+        "material_certificate_pdf": "Material Composition Proof",
+        "lab_certificate_pdf": "Lab Certificate",
+        "composition_test": "Lab Certificate",
+        "customs_ruling_pdf": "Customs Ruling",
+    }
+
+    def __init__(self, requirement_registry: FactRequirementRegistry | None = None) -> None:
+        self._registry = requirement_registry or FactRequirementRegistry()
+
+    def _label_for(self, evidence_type: str) -> str:
+        if evidence_type in self._LABELS:
+            return self._LABELS[evidence_type]
+        return evidence_type.replace("_", " ").title()
+
+    def build(
+        self,
+        *,
+        conditional_pathways: Sequence[ConditionalPathwayModel],
+        suggestions: Sequence[TariffSuggestionItemModel],
+        fact_savings: Mapping[str, float | None],
+    ) -> IntakeBundleModel:
+        evidence_to_facts: Dict[str, set[str]] = {}
+
+        for pathway in conditional_pathways:
+            for fact_key in pathway.missing_facts:
+                requirement = self._registry.describe(fact_key)
+                for evidence_type in requirement.evidence_types:
+                    evidence_to_facts.setdefault(evidence_type, set()).add(fact_key)
+
+        for suggestion in suggestions:
+            for fact_key in suggestion.fact_gaps:
+                requirement = self._registry.describe(fact_key)
+                for evidence_type in requirement.evidence_types:
+                    evidence_to_facts.setdefault(evidence_type, set()).add(fact_key)
+
+        items: List[IntakeBundleItemModel] = []
+        for evidence_type in sorted(evidence_to_facts.keys()):
+            fact_keys = sorted(evidence_to_facts[evidence_type])
+            potential = [
+                value
+                for fact_key in fact_keys
+                for value in [fact_savings.get(fact_key)]
+                if value is not None
+            ]
+            items.append(
+                IntakeBundleItemModel(
+                    request_label=self._label_for(evidence_type),
+                    evidence_types=[evidence_type],
+                    fact_keys=fact_keys,
+                    potential_savings_unlocked=max(potential) if potential else None,
+                )
+            )
+
+        return IntakeBundleModel(items=items)

@@ -8,11 +8,13 @@ from typing import Any, Dict, Iterable, List, Tuple
 
 from potatobacon.law.solver_z3 import PolicyAtom
 from potatobacon.tariff.atom_utils import duty_rate_index
+from potatobacon.tariff.gri_atoms import build_gri_atoms, gri_text_hash
 
 CONTEXTS_DIR = Path(__file__).resolve().parent / "contexts"
 MANIFESTS_DIR = CONTEXTS_DIR / "manifests"
 RULES_DIR = CONTEXTS_DIR / "rules"
 DEFAULT_CONTEXT_ID = "HTS_US_2025_SLICE"
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 _atoms_cache: Dict[str, Tuple[List[PolicyAtom], Dict[str, Any]]] = {}
 
@@ -21,6 +23,60 @@ def _normalized_metadata(metadata: Any) -> Any:
     if metadata is None:
         return None
     return json.loads(json.dumps(metadata, sort_keys=True, separators=(",", ":")))
+
+
+def _hash_bytes(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _hash_file(path: Path) -> str:
+    return _hash_bytes(path.read_bytes())
+
+
+def _resolve_source_path(source: str) -> Path:
+    path = Path(source)
+    if path.is_absolute():
+        return path
+    candidate = CONTEXTS_DIR / path
+    if candidate.exists():
+        return candidate
+    return REPO_ROOT / path
+
+
+def _section_notes_hash(manifest: Dict[str, Any]) -> str | None:
+    sources = manifest.get("sources") or []
+    note_sources = [src for src in sources if "note" in str(src).lower()]
+    if note_sources:
+        hashes = []
+        for src in sorted(note_sources):
+            path = _resolve_source_path(str(src))
+            if path.exists():
+                hashes.append(_hash_file(path))
+        if hashes:
+            return _hash_bytes("".join(hashes).encode("utf-8"))
+
+    loader = manifest.get("loader") or {}
+    if loader.get("type") == "json_rules":
+        rules_file = loader.get("rules_file")
+        if rules_file:
+            rules_path = _resolve_source_path(str(rules_file))
+            if rules_path.exists():
+                return _hash_file(rules_path)
+    return None
+
+
+def _apply_reference_id(
+    *,
+    revision_id: str,
+    citation: Dict[str, Any],
+    fallback_note_id: str,
+) -> Dict[str, Any]:
+    chapter = citation.get("chapter") or "00"
+    note_id = citation.get("note_id") or fallback_note_id
+    reference_id = f"{revision_id}::{chapter}::{note_id}"
+    citation["revision_id"] = revision_id
+    citation["reference_id"] = reference_id
+    return citation
 
 
 def list_context_manifests(domain: str = "tariff") -> List[Dict[str, Any]]:
@@ -157,6 +213,7 @@ def load_atoms_for_context(context_id: str) -> Tuple[List[PolicyAtom], Dict[str,
         return list(cached_atoms), dict(cached_meta)
 
     manifest = get_context_manifest(context_id)
+    revision_id = manifest.get("revision_id", manifest.get("context_id", context_id))
     loader_spec = manifest.get("loader", {})
     loader_type = loader_spec.get("type")
 
@@ -169,8 +226,26 @@ def load_atoms_for_context(context_id: str) -> Tuple[List[PolicyAtom], Dict[str,
 
     _validate_atoms(atoms)
 
+    gri_atoms = build_gri_atoms(revision_id=revision_id)
+    atoms = list(gri_atoms) + list(atoms)
+
+    for atom in atoms:
+        metadata = getattr(atom, "metadata", None)
+        if not isinstance(metadata, dict):
+            continue
+        citation = metadata.get("citation")
+        if isinstance(citation, dict):
+            metadata["citation"] = _apply_reference_id(
+                revision_id=revision_id,
+                citation=dict(citation),
+                fallback_note_id=atom.source_id,
+            )
+            atom.metadata = metadata
+
     manifest_hash = compute_context_hash(manifest, atoms)
     duty_rates = duty_rate_index(atoms)
+    section_notes_hash = manifest.get("section_notes_hash") or _section_notes_hash(manifest)
+    gri_hash = manifest.get("gri_text_hash") or gri_text_hash()
     metadata = {
         "context_id": manifest.get("context_id", context_id),
         "domain": manifest.get("domain", "tariff"),
@@ -178,6 +253,9 @@ def load_atoms_for_context(context_id: str) -> Tuple[List[PolicyAtom], Dict[str,
         "effective_from": manifest.get("effective_from"),
         "effective_to": manifest.get("effective_to"),
         "description": manifest.get("description"),
+        "section_notes_hash": section_notes_hash,
+        "gri_text_hash": gri_hash,
+        "revision_id": revision_id,
         "manifest_hash": manifest_hash,
         "atoms_count": len(atoms),
         "duty_rates": duty_rates,

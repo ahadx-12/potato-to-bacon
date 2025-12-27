@@ -9,5 +9,10 @@
     "type": "json_rules",
     "rules_file": "rules/ORIGIN_US_DEMO_2025_rules.json"
   },
-  "sources": ["origin/demo"]
+  "sources": [
+    "origin/demo"
+  ],
+  "revision_id": "ORIGIN_US_DEMO_2025",
+  "section_notes_hash": "0f8d1608a510ab65ac32f4504003cc94ed0c6365eb8ccc1b2cb58dfba80d8d40",
+  "gri_text_hash": "6b8b7d02003e51fe1dbe3afdfba440ef8fb1b641b5cf77387daca627beb2f220"
 }

@@ -12,5 +12,8 @@
   "sources": [
     "data/hts_extract/hts_lines_sample.jsonl",
     "data/hts_extract/notes_sample.json"
-  ]
+  ],
+  "revision_id": "HTS_US_2025_SLICE",
+  "section_notes_hash": "f404699b7ab3f0c3240b38475da2692409db574daffb663883b31ab75f6ea93d",
+  "gri_text_hash": "6b8b7d02003e51fe1dbe3afdfba440ef8fb1b641b5cf77387daca627beb2f220"
 }

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+from functools import lru_cache
+from hashlib import sha256
+from pathlib import Path
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Sequence
 
 from potatobacon.proofs.engine import record_tariff_proof
+from potatobacon.cale.engine import CALEEngine
 from potatobacon.tariff.bom_ingest import bom_to_text, parse_bom_csv
 from potatobacon.tariff.candidate_search import generate_baseline_candidates
 from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_for_context
@@ -29,6 +33,10 @@ from potatobacon.tariff.normalizer import normalize_compiled_facts, validate_min
 from potatobacon.tariff.parser import compile_facts_with_evidence, extract_product_spec
 from potatobacon.tariff.risk import assess_tariff_risk
 from potatobacon.law.solver_z3 import PolicyAtom, analyze_scenario
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+RULINGS_DIR = REPO_ROOT / "data" / "rulings"
 
 
 def _compute_savings(
@@ -91,9 +99,151 @@ def _defensibility_grade(score: int) -> str:
     return "C"
 
 
+def _degrade_grade(grade: str | None) -> str:
+    if not grade:
+        return "C"
+    normalized = grade.upper()
+    if normalized == "A":
+        return "B"
+    if normalized == "B":
+        return "C"
+    return normalized
+
+
 def _duty_atoms(active_atoms: Sequence[PolicyAtom], duty_rates: Mapping[str, float] | None = None) -> List[PolicyAtom]:
     rates = duty_rates or DUTY_RATES
     return [atom for atom in active_atoms if atom.source_id in rates]
+
+
+def _normalize_hts_code(raw: str | None) -> str:
+    if not raw:
+        return ""
+    return raw.replace(".", "").replace(" ", "").strip().upper()
+
+
+def _snapshot_hash(path: Path) -> str:
+    return sha256(path.read_bytes()).hexdigest()
+
+
+@lru_cache(maxsize=1)
+def _load_ruling_snapshots() -> tuple[list[dict[str, Any]], list[str]]:
+    rulings: list[dict[str, Any]] = []
+    hashes: list[str] = []
+    if not RULINGS_DIR.exists():
+        return rulings, hashes
+    for path in sorted(RULINGS_DIR.glob("*.jsonl")):
+        hashes.append(_snapshot_hash(path))
+        with path.open("r", encoding="utf-8") as handle:
+            for raw in handle:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    payload = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                rulings.append(payload)
+    return rulings, hashes
+
+
+def _rulings_for_hts(hts_code: str) -> list[dict[str, Any]]:
+    normalized = _normalize_hts_code(hts_code)
+    if not normalized:
+        return []
+    rulings, _ = _load_ruling_snapshots()
+    matched: list[dict[str, Any]] = []
+    for ruling in rulings:
+        candidate = _normalize_hts_code(str(ruling.get("hts_code", "")))
+        if not candidate:
+            continue
+        if normalized.startswith(candidate) or candidate.startswith(normalized):
+            matched.append(ruling)
+    return matched
+
+
+def _precedent_context_for_hts(
+    hts_code: str,
+) -> tuple[dict[str, Any] | None, bool, list[str]]:
+    rulings = _rulings_for_hts(hts_code)
+    if not rulings:
+        return None, False, []
+
+    engine = CALEEngine()
+    conflicts: list[dict[str, Any]] = []
+    ccs_scores: list[float] = []
+    conflicting_ids: list[str] = []
+    for idx, left in enumerate(rulings):
+        for right in rulings[idx + 1 :]:
+            left_id = str(left.get("ruling_id") or left.get("id") or f"RULING_{idx}")
+            right_id = str(right.get("ruling_id") or right.get("id") or f"RULING_{idx + 1}")
+            left_rule = engine._ensure_rule(left, fallback_id=left_id)
+            right_rule = engine._ensure_rule(right, fallback_id=right_id)
+            analysis, components, metadata = engine._prepare_analysis(left_rule, right_rule)
+            ccs_pragmatic = float(analysis.CCS_pragmatic)
+            ccs_scores.append(ccs_pragmatic)
+            if analysis.CI > 0.45 and ccs_pragmatic < 0.5:
+                conflicts.append(
+                    {
+                        "ruling_ids": [left_id, right_id],
+                        "ccs_pragmatic": ccs_pragmatic,
+                        "conflict_intensity": float(analysis.CI),
+                        "authority_balance": float(analysis.H),
+                        "precedent_matches": metadata.get("precedent_matches", []),
+                    }
+                )
+                conflicting_ids.extend([left_id, right_id])
+
+    _, hashes = _load_ruling_snapshots()
+    avg_ccs = sum(ccs_scores) / len(ccs_scores) if ccs_scores else 0.0
+    authority_favors = avg_ccs >= 0.5
+    context = {
+        "hts_code": hts_code,
+        "snapshot_hashes": hashes,
+        "matched_rulings": [
+            {
+                "ruling_id": str(ruling.get("ruling_id") or ruling.get("id")),
+                "title": ruling.get("title"),
+                "hts_code": ruling.get("hts_code"),
+                "year": ruling.get("enactment_year") or ruling.get("year"),
+            }
+            for ruling in rulings
+        ],
+        "conflicts": conflicts,
+        "ccs_pragmatic_avg": avg_ccs,
+        "authority_favors": authority_favors,
+    }
+    return context, bool(conflicts), sorted(set(conflicting_ids))
+
+
+def _apply_precedent_signals(
+    item: TariffSuggestionItemModel,
+    atoms: Mapping[str, PolicyAtom],
+) -> TariffSuggestionItemModel:
+    hts_code = ""
+    preferred_codes = []
+    if item.target_candidate:
+        preferred_codes.append(item.target_candidate)
+    preferred_codes.extend(item.active_codes_optimized or item.active_codes_baseline)
+    for code in preferred_codes:
+        atom = atoms.get(code)
+        metadata = getattr(atom, "metadata", {}) if atom else {}
+        hts_code = str(metadata.get("hts_code") or "") if metadata else ""
+        if hts_code:
+            break
+
+    context, has_conflict, conflicting_ids = _precedent_context_for_hts(hts_code)
+    if context is None:
+        return item
+
+    payload = item.model_dump()
+    payload["precedent_context"] = context
+    if has_conflict:
+        payload["defensibility_grade"] = _degrade_grade(payload.get("defensibility_grade"))
+        reasons = list(payload.get("risk_reasons") or [])
+        if conflicting_ids:
+            reasons.append(f"Conflicting rulings: {', '.join(sorted(conflicting_ids))}")
+        payload["risk_reasons"] = sorted(set(reasons))
+    return TariffSuggestionItemModel(**payload)
 
 
 @dataclass
@@ -837,6 +987,9 @@ def suggest_tariff_optimizations(
         overlay_context=overlay_context,
     )
     suggestion_items.extend(documentation_levers)
+
+    atoms_by_id = {atom.source_id: atom for atom in atoms}
+    suggestion_items = [_apply_precedent_signals(item, atoms_by_id) for item in suggestion_items]
 
     suggestion_items = [item for item in suggestion_items if _passes_constraints(item, request)]
 

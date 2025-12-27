@@ -15,5 +15,8 @@
     "data/hts_extract/full_chapters/ch87.jsonl",
     "data/hts_extract/full_chapters/ch90.jsonl",
     "data/hts_extract/full_chapters/ch94.jsonl"
-  ]
+  ],
+  "revision_id": "HTS_US_2025_TOP5",
+  "section_notes_hash": null,
+  "gri_text_hash": "6b8b7d02003e51fe1dbe3afdfba440ef8fb1b641b5cf77387daca627beb2f220"
 }

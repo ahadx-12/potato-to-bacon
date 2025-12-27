@@ -18,12 +18,16 @@ from potatobacon.tariff.mutation_generator import baseline_facts_from_profile, i
 from potatobacon.tariff.normalizer import normalize_compiled_facts, validate_minimum_inputs
 from potatobacon.tariff.parser import compile_facts_with_evidence, extract_product_spec
 from potatobacon.tariff.product_schema import ProductCategory
-from potatobacon.tariff.questions import generate_missing_fact_questions
+from potatobacon.tariff.questions import BundleAggregator, generate_missing_fact_questions
 from potatobacon.tariff.risk import assess_tariff_risk
 from potatobacon.tariff.sku_models import (
     BaselineAssignmentModel,
     ConditionalPathwayModel,
     FactOverrideModel,
+    IntakeBundleModel,
+    OpportunityLedgerEntryModel,
+    OpportunityLedgerModel,
+    OpportunityLaneStatus,
     SKUDossierBaselineModel,
     SKUDossierOptimizedModel,
     TariffSkuDossierV2Model,
@@ -32,14 +36,131 @@ from potatobacon.tariff.sku_models import (
 from potatobacon.tariff.sku_store import SKUStore, get_default_sku_store
 from potatobacon.tariff.suggest import (
     DOCUMENTATION_LEVER_ID,
+    _apply_precedent_signals,
     _compute_savings,
     _defensibility_grade,
     _documentation_levers,
     _duty_atoms,
     _evaluate_scenario,
+    _precedent_context_for_hts,
     _record_proof,
     _sort_key,
 )
+
+
+def _citation_reference_id(context_id: str, atom: Any) -> str:
+    metadata = getattr(atom, "metadata", {}) or {}
+    citation = metadata.get("citation") or {}
+    reference_id = citation.get("reference_id")
+    if reference_id:
+        return str(reference_id)
+    chapter = citation.get("chapter") or "00"
+    note_id = citation.get("note_id") or atom.source_id
+    return f"{context_id}::{chapter}::{note_id}"
+
+
+def _legal_basis_for_atom(context_id: str, atom: Any, gri_citation: str | None) -> list[str]:
+    basis = [_citation_reference_id(context_id, atom)]
+    if gri_citation:
+        basis.append(gri_citation)
+    return sorted(set(basis))
+
+
+def _build_opportunity_ledger(
+    *,
+    baseline_candidates: list[BaselineCandidateModel],
+    atoms_by_id: dict[str, Any],
+    baseline_duty: float | None,
+    annual_volume: int | None,
+    declared_value_per_unit: float,
+    context_id: str,
+    stop_overlays: list[Any],
+) -> OpportunityLedgerModel:
+    entries: list[OpportunityLedgerEntryModel] = []
+    gri_citation = None
+    gri_atom = atoms_by_id.get("GRI_1")
+    if gri_atom:
+        gri_citation = _citation_reference_id(context_id, gri_atom)
+
+    for candidate in baseline_candidates:
+        optimized_rate = candidate.duty_rate
+        annual_delta = None
+        if baseline_duty is not None and annual_volume is not None:
+            annual_delta = (baseline_duty - optimized_rate) / 100.0 * declared_value_per_unit * annual_volume
+        status = OpportunityLaneStatus.AVAILABLE_NOW
+        if stop_overlays:
+            status = OpportunityLaneStatus.REQUIRES_REVIEW
+        elif candidate.missing_facts:
+            status = OpportunityLaneStatus.BLOCKED_MISSING_FACTS
+        else:
+            atom = atoms_by_id.get(candidate.candidate_id)
+            hts_code = None
+            if atom:
+                metadata = getattr(atom, "metadata", {}) or {}
+                hts_code = metadata.get("hts_code")
+            if hts_code:
+                _, has_conflict, _ = _precedent_context_for_hts(str(hts_code))
+                if has_conflict:
+                    status = OpportunityLaneStatus.HTS_CONFLICT
+
+        atom = atoms_by_id.get(candidate.candidate_id)
+        legal_basis = _legal_basis_for_atom(context_id, atom, gri_citation) if atom else []
+        entries.append(
+            OpportunityLedgerEntryModel(
+                lane_id=candidate.candidate_id,
+                status=status,
+                baseline_duty_rate=baseline_duty,
+                optimized_duty_rate=optimized_rate,
+                annual_duty_delta=annual_delta,
+                missing_facts=list(candidate.missing_facts),
+                legal_basis=legal_basis,
+            )
+        )
+
+    entries.sort(
+        key=lambda entry: (
+            -(entry.annual_duty_delta or 0.0),
+            entry.lane_id,
+        )
+    )
+    return OpportunityLedgerModel(entries=entries)
+
+
+def _build_intake_bundle(
+    *,
+    conditional_pathways: list[ConditionalPathwayModel],
+    suggestions: list[TariffSuggestionItemModel],
+    baseline_duty: float | None,
+    annual_volume: int | None,
+    declared_value_per_unit: float,
+) -> IntakeBundleModel:
+    fact_savings: dict[str, float | None] = {}
+    for pathway in conditional_pathways:
+        savings_rate, savings_value, annual_value = _compute_savings(
+            baseline_rate=baseline_duty,
+            optimized_rate=pathway.duty_rate,
+            declared_value_per_unit=declared_value_per_unit,
+            annual_volume=annual_volume,
+        )
+        value = annual_value if annual_value is not None else savings_value
+        for fact_key in pathway.missing_facts:
+            previous = fact_savings.get(fact_key)
+            if previous is None or value > previous:
+                fact_savings[fact_key] = value
+
+    for suggestion in suggestions:
+        value = suggestion.annual_savings_value if suggestion.annual_savings_value is not None else suggestion.savings_per_unit_value
+        for fact_key in suggestion.fact_gaps:
+            previous = fact_savings.get(fact_key)
+            if previous is None or value > previous:
+                fact_savings[fact_key] = value
+
+    aggregator = BundleAggregator()
+    return aggregator.build(
+        conditional_pathways=conditional_pathways,
+        suggestions=suggestions,
+        fact_savings=fact_savings,
+    )
 
 
 def _merge_facts(baseline: Dict[str, Any], compiled: Dict[str, Any]) -> Dict[str, Any]:
@@ -628,6 +749,9 @@ def build_sku_dossier_v2(
         )
         suggestion_items.extend(documentation_levers)
 
+        atoms_by_id = {atom.source_id: atom for atom in atoms}
+        suggestion_items = [_apply_precedent_signals(item, atoms_by_id) for item in suggestion_items]
+
         indexed_items = list(enumerate(suggestion_items))
         indexed_items.sort(key=lambda pair: _sort_key(pair[1], record.annual_volume, pair[0]))
         suggestion_items = [item for _, item in indexed_items]
@@ -666,6 +790,23 @@ def build_sku_dossier_v2(
 
     best_optimization = suggestion_items[0] if suggestion_items else None
     optimized_section = SKUDossierOptimizedModel(suggestion=best_optimization) if best_optimization else None
+    atoms_by_id = {atom.source_id: atom for atom in atoms}
+    intake_bundle = _build_intake_bundle(
+        conditional_pathways=conditional_pathways,
+        suggestions=suggestion_items,
+        baseline_duty=baseline_duty,
+        annual_volume=record.annual_volume,
+        declared_value_per_unit=record.declared_value_per_unit or 100.0,
+    )
+    opportunity_ledger = _build_opportunity_ledger(
+        baseline_candidates=baseline_candidates,
+        atoms_by_id=atoms_by_id,
+        baseline_duty=baseline_duty,
+        annual_volume=record.annual_volume,
+        declared_value_per_unit=record.declared_value_per_unit or 100.0,
+        context_id=law_context_id,
+        stop_overlays=stop_overlays,
+    )
 
     return TariffSkuDossierV2Model(
         status=status,
@@ -679,6 +820,8 @@ def build_sku_dossier_v2(
         baseline_assigned=baseline_assignment,
         conditional_pathways=conditional_pathways,
         questions=questions,
+        intake_bundle=intake_bundle,
+        opportunity_ledger=opportunity_ledger,
         product_spec=product_spec.model_dump(),
         compiled_facts=compiled_pack,
         product_graph=product_graph.model_dump() if product_graph else None,

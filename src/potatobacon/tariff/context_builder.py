@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, List
 
 from potatobacon.law.solver_z3 import PolicyAtom
 from potatobacon.tariff.context_registry import _atom_to_dict, _rule_obj_to_atom
+from potatobacon.tariff.gri_atoms import gri_text_hash
 
 
 def _parse_args() -> argparse.Namespace:
@@ -58,6 +60,7 @@ def main() -> None:
     with rules_out_path.open("w", encoding="utf-8") as handle:
         json.dump(rule_payload, handle, indent=2)
 
+    section_notes_hash = hashlib.sha256(rules_out_path.read_bytes()).hexdigest()
     manifest = {
         "context_id": args.context_id,
         "domain": "tariff",
@@ -65,6 +68,8 @@ def main() -> None:
         "effective_from": args.effective_from,
         "effective_to": args.effective_to,
         "description": args.description,
+        "section_notes_hash": section_notes_hash,
+        "gri_text_hash": gri_text_hash(),
         "loader": {
             "type": "json_rules",
             "rules_file": f"rules/{rules_out_path.name}",
