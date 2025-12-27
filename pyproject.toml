@@ -53,7 +53,8 @@ graph = [
 tests = [
   "pytest",
   "hypothesis",
-  "pytest-cov>=4.1"
+  "pytest-cov>=4.1",
+  "reportlab>=4.2"
 ]
 dev = [
   "pytest>=7.4",
@@ -67,6 +68,10 @@ dev = [
 ]
 spacy = [
   "spacy>=3,<4"
+]
+evidence = [
+  "pillow>=10.0",
+  "pytesseract>=0.3"
 ]
 
 [tool.ruff]
