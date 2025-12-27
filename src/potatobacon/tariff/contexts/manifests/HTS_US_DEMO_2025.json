@@ -9,5 +9,10 @@
     "type": "python",
     "callable": "potatobacon.tariff.atoms_hts:tariff_policy_atoms"
   },
-  "sources": ["HTS demo atoms" ]
+  "sources": [
+    "HTS demo atoms"
+  ],
+  "revision_id": "HTS_US_DEMO_2025",
+  "section_notes_hash": null,
+  "gri_text_hash": "6b8b7d02003e51fe1dbe3afdfba440ef8fb1b641b5cf77387daca627beb2f220"
 }

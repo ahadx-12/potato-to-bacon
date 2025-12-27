@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import Enum
 from hashlib import sha256
 from typing import Any, Dict, List, Literal, Optional
 
@@ -84,6 +85,54 @@ class MissingFactsPackageModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class IntakeBundleItemModel(BaseModel):
+    """Grouped evidence request that unblocks multiple fact gaps."""
+
+    request_label: str
+    evidence_types: List[str] = Field(default_factory=list)
+    fact_keys: List[str] = Field(default_factory=list)
+    potential_savings_unlocked: Optional[float] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class IntakeBundleModel(BaseModel):
+    """Evidence-first intake bundle grouped by evidence type."""
+
+    items: List[IntakeBundleItemModel] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class OpportunityLaneStatus(str, Enum):
+    AVAILABLE_NOW = "AVAILABLE_NOW"
+    BLOCKED_MISSING_FACTS = "BLOCKED_MISSING_FACTS"
+    REQUIRES_REVIEW = "REQUIRES_REVIEW"
+    HTS_CONFLICT = "HTS_CONFLICT"
+
+
+class OpportunityLedgerEntryModel(BaseModel):
+    """Opportunity lane representing a candidate tariff path."""
+
+    lane_id: str
+    status: OpportunityLaneStatus
+    baseline_duty_rate: Optional[float] = None
+    optimized_duty_rate: Optional[float] = None
+    annual_duty_delta: Optional[float] = None
+    missing_facts: List[str] = Field(default_factory=list)
+    legal_basis: List[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class OpportunityLedgerModel(BaseModel):
+    """Deterministic ledger of opportunity lanes sorted by ROI."""
+
+    entries: List[OpportunityLedgerEntryModel] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class SKUDossierBaselineModel(BaseModel):
     """Baseline classification outputs for a SKU dossier."""
 
@@ -144,6 +193,8 @@ class TariffSkuDossierV2Model(BaseModel):
     baseline_assigned: Optional[BaselineAssignmentModel] = None
     conditional_pathways: List[ConditionalPathwayModel] = Field(default_factory=list)
     questions: MissingFactsPackageModel = Field(default_factory=MissingFactsPackageModel)
+    intake_bundle: IntakeBundleModel = Field(default_factory=IntakeBundleModel)
+    opportunity_ledger: OpportunityLedgerModel = Field(default_factory=OpportunityLedgerModel)
     product_spec: Optional[Dict[str, Any]] = None
     compiled_facts: Optional[Dict[str, Any]] = None
     product_graph: Optional[Dict[str, Any]] = None
