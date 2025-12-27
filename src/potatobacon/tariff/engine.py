@@ -9,6 +9,7 @@ from potatobacon.law.solver_z3 import PolicyAtom, analyze_scenario, check_scenar
 from potatobacon.proofs.engine import record_tariff_proof
 from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_for_context
 from potatobacon.tariff.overlays import effective_duty_rate, evaluate_overlays
+from potatobacon.tariff.origin_engine import build_origin_policy_atoms
 
 from .atom_utils import atom_provenance
 from .atoms_hts import DUTY_RATES
@@ -31,7 +32,9 @@ def _active_duty_atoms(
 ) -> Tuple[bool, List[PolicyAtom]]:
     """Return active duty-bearing atoms for a scenario."""
 
-    is_sat, active_atoms = check_scenario(scenario.facts, list(atoms))
+    origin_atoms = build_origin_policy_atoms()
+    combined_atoms = list(origin_atoms) + list(atoms)
+    is_sat, active_atoms = check_scenario(scenario.facts, combined_atoms)
     duty_atoms = [atom for atom in active_atoms if atom.source_id in duty_rates]
     return is_sat, duty_atoms
 
@@ -167,10 +170,10 @@ def run_tariff_hack(
     savings = baseline_effective - optimized_effective
 
     sat_baseline, active_atoms_baseline, unsat_core_baseline = analyze_scenario(
-        baseline.facts, atoms
+        baseline.facts, list(build_origin_policy_atoms()) + list(atoms)
     )
     sat_optimized, active_atoms_optimized, unsat_core_optimized = analyze_scenario(
-        optimized.facts, atoms
+        optimized.facts, list(build_origin_policy_atoms()) + list(atoms)
     )
     duty_atoms_baseline = [atom for atom in active_atoms_baseline if atom.source_id in duty_rates]
     duty_atoms_optimized = [atom for atom in active_atoms_optimized if atom.source_id in duty_rates]

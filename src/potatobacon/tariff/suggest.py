@@ -110,6 +110,20 @@ def _degrade_grade(grade: str | None) -> str:
     return normalized
 
 
+def _apply_origin_precision_risk(
+    grade: str,
+    rvc_value: float | None,
+    *,
+    threshold: float = 60.0,
+    margin: float = 2.0,
+) -> str:
+    if rvc_value is None:
+        return grade
+    if threshold <= rvc_value <= (threshold + margin):
+        return "C"
+    return grade
+
+
 def _duty_atoms(active_atoms: Sequence[PolicyAtom], duty_rates: Mapping[str, float] | None = None) -> List[PolicyAtom]:
     rates = duty_rates or DUTY_RATES
     return [atom for atom in active_atoms if atom.source_id in rates]

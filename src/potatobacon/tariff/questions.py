@@ -115,6 +115,9 @@ class BundleAggregator:
         "lab_certificate_pdf": "Lab Certificate",
         "composition_test": "Lab Certificate",
         "customs_ruling_pdf": "Customs Ruling",
+        "manufacturing_step_logs": "Manufacturing Step Logs",
+        "labor_cost_summary": "Labor Cost Summary",
+        "sub_supplier_cert_origin": "Sub-supplier Origin Certificates",
     }
 
     def __init__(self, requirement_registry: FactRequirementRegistry | None = None) -> None:
@@ -131,6 +134,7 @@ class BundleAggregator:
         conditional_pathways: Sequence[ConditionalPathwayModel],
         suggestions: Sequence[TariffSuggestionItemModel],
         fact_savings: Mapping[str, float | None],
+        origin_fact_gaps: Sequence[str] = (),
     ) -> IntakeBundleModel:
         evidence_to_facts: Dict[str, set[str]] = {}
 
@@ -145,6 +149,11 @@ class BundleAggregator:
                 requirement = self._registry.describe(fact_key)
                 for evidence_type in requirement.evidence_types:
                     evidence_to_facts.setdefault(evidence_type, set()).add(fact_key)
+
+        for fact_key in origin_fact_gaps:
+            requirement = self._registry.describe(fact_key)
+            for evidence_type in requirement.evidence_types:
+                evidence_to_facts.setdefault(evidence_type, set()).add(fact_key)
 
         items: List[IntakeBundleItemModel] = []
         for evidence_type in sorted(evidence_to_facts.keys()):
