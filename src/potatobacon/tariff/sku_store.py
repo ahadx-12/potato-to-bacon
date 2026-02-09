@@ -97,6 +97,7 @@ class SKUStore:
 
 
 _DEFAULT_STORE: Optional[SKUStore] = None
+_TENANT_STORES: Dict[str, SKUStore] = {}
 
 
 def get_default_sku_store(path: Path | None = None) -> SKUStore:
@@ -107,3 +108,19 @@ def get_default_sku_store(path: Path | None = None) -> SKUStore:
     if _DEFAULT_STORE is None or _DEFAULT_STORE.path != target:
         _DEFAULT_STORE = SKUStore(target)
     return _DEFAULT_STORE
+
+
+def get_tenant_sku_store(tenant_id: str) -> SKUStore:
+    """Return a tenant-scoped SKU store.
+
+    Each tenant gets its own JSONL file under ``data/tenants/{tenant_id}/skus.jsonl``.
+    Falls back to the default store for the 'default' tenant.
+    """
+    if tenant_id == "default":
+        return get_default_sku_store()
+
+    if tenant_id not in _TENANT_STORES:
+        base = Path(os.getenv("PTB_DATA_ROOT", "."))
+        tenant_path = base / "data" / "tenants" / tenant_id / "skus.jsonl"
+        _TENANT_STORES[tenant_id] = SKUStore(tenant_path)
+    return _TENANT_STORES[tenant_id]
