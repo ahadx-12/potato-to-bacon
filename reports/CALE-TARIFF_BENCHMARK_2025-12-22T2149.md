@@ -1,9 +1,0 @@
-# CALE-TARIFF Benchmark
-
-- Generated: 2025-12-22 21:49
-- Baseline assigned rate: 1.000
-- Top-3 hit rate: 1.000
-- Optimized rate: 0.000
-- Evidence density: 0.000
-- Average runtime: 0.5839s
-- Payload hashes: 89247233aa98603e2e83cc366d874723318908faeca691872766e74265511085, 4373f0d38c397a9d72c112fcacf6edb5f523935f98bea6c625361df21d63e528, 82bf685a73e573acdf24ada6f085aa6ce6796419f9ae4004e45e872ff4193c2e, 340615b6935e4c2397d795818800529eb4bdec98e490cae70a3b1d9fb4e1835b
