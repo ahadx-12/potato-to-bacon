@@ -11,7 +11,8 @@ def test_default_tariff_context_loads_atoms():
     default_context = get_default_tariff_context()
     atoms_for_context = get_tariff_atoms_for_context(default_context)
     assert atoms_for_context
-    assert len(atoms_for_context) == len(tariff_policy_atoms())
+    # Context-loaded atoms include GRI atoms on top of base HTS atoms
+    assert len(atoms_for_context) >= len(tariff_policy_atoms())
 
 
 def test_unknown_context_raises_error():

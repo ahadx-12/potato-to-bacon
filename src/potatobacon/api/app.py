@@ -47,6 +47,8 @@ from potatobacon.api.routes_tariff_sessions import router as tariff_sessions_rou
 from potatobacon.api.routes_tariff_evidence import router as tariff_evidence_router
 from potatobacon.api.routes_proofs import router as proofs_router, tariff_proofs_router
 from potatobacon.api.routes_law_contexts import router as law_contexts_router
+from potatobacon.api.routes_teaas import router as teaas_router
+from potatobacon.api.routes_auth import router as auth_router
 from potatobacon.api.security import ENGINE_VERSION, require_api_key
 from potatobacon.cale.bootstrap import CALEServices, build_services
 from potatobacon.cale.engine import CALEEngine
@@ -119,6 +121,8 @@ app.include_router(tariff_evidence_router)
 app.include_router(proofs_router)
 app.include_router(tariff_proofs_router)
 app.include_router(law_contexts_router)
+app.include_router(teaas_router)
+app.include_router(auth_router)
 
 persistence_store = get_store()
 
