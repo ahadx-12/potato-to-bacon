@@ -9,14 +9,12 @@ COPY pyproject.toml .
 # Copy the source + web files
 COPY src/ ./src/
 COPY web/ ./web/
+COPY data/ ./data/
 
 # Verify that web files exist (debug)
-RUN ls -R /app/web || (echo "❌ web directory missing!" && exit 1)
+RUN ls -R /app/web || echo "Warning: web directory not found, UI will not be served."
 
-# Install CPU-only PyTorch
-RUN pip install torch==2.3.0 --index-url https://download.pytorch.org/whl/cpu
-
-# Install package in editable mode
+# Install package (no PyTorch needed for TEaaS)
 RUN pip install --no-cache-dir .
 
 # Expose dynamic port for Railway

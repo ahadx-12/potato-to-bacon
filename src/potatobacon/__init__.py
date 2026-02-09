@@ -1,11 +1,9 @@
-"""potato.to.bacon - physics-first equation tooling."""
+"""CALE Tariff - Tariff Engineering-as-a-Service."""
 
-from . import core
 from .cale import constants, parser, symbolic, types
 from .version import __version__
 
 __all__ = [
-    "core",
     "constants",
     "parser",
     "symbolic",
