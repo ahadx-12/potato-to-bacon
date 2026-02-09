@@ -25,6 +25,7 @@ from potatobacon.api.security import require_api_key
 from potatobacon.api.tenants import Tenant, get_registry, resolve_tenant_from_request
 from potatobacon.law.solver_z3 import analyze_scenario
 from potatobacon.proofs.engine import record_tariff_proof
+from potatobacon.proofs.proof_chain import ProofChain
 from potatobacon.tariff.atom_utils import atom_provenance
 from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_for_context
 from potatobacon.tariff.engine import apply_mutations, compute_duty_result
@@ -122,6 +123,7 @@ class TEaaSAnalyzeResponse(BaseModel):
     # Proof
     proof_id: Optional[str] = None
     proof_payload_hash: Optional[str] = None
+    proof_chain: Optional[Dict[str, Any]] = None
 
     # Provenance
     provenance_chain: List[Dict[str, Any]] = Field(default_factory=list)
@@ -390,6 +392,27 @@ def teaas_analyze(
         optimized_codes = baseline_codes
         status = "BASELINE" if baseline_result.status == "OK" else "NO_DUTY_RULE"
 
+    # Build proof chain (per-step hashing)
+    chain = ProofChain()
+    chain.add_step("bom_input", input_data=req.model_dump(), output_data=req.model_dump())
+    chain.add_step("fact_compilation", input_data=product_spec.model_dump(), output_data=facts)
+    chain.add_step("z3_baseline", input_data=facts, output_data={
+        "status": baseline_result.status,
+        "duty_rate": baseline_rate,
+        "active_codes": baseline_codes,
+    })
+    chain.add_step("mutation_discovery", input_data={"baseline_rate": baseline_rate}, output_data={
+        "mutations_tested": len(mutation_results),
+        "best_savings": best.effective_savings if best else 0,
+    })
+    chain.add_step("classification", input_data={
+        "optimized_rate": optimized_rate,
+        "optimized_codes": optimized_codes,
+    }, output_data={
+        "status": status,
+        "effective_rate": optimized_effective,
+    })
+
     # Build provenance
     sat_b, active_b, unsat_b = analyze_scenario(baseline.facts, combined_atoms)
     sat_o, active_o, unsat_o = analyze_scenario(optimized_scenario.facts, combined_atoms)
@@ -400,6 +423,11 @@ def teaas_analyze(
     for atom in active_o:
         if atom.source_id in duty_rates:
             provenance.append(atom_provenance(atom, "optimized"))
+
+    chain.add_step("dossier", input_data={"provenance_count": len(provenance)}, output_data={
+        "baseline_effective": baseline_effective,
+        "optimized_effective": optimized_effective,
+    })
 
     # Record proof (with tenant_id)
     proof_handle = record_tariff_proof(
@@ -458,6 +486,7 @@ def teaas_analyze(
         annual_savings_value=annual_savings_value,
         proof_id=proof_handle.proof_id,
         proof_payload_hash=proof_handle.proof_payload_hash,
+        proof_chain=chain.to_dict(),
         provenance_chain=provenance,
         errors=errors if errors else [],
     )
