@@ -104,14 +104,64 @@ def compute_duty_rate(
 
 
 def apply_mutations(base_scenario: TariffScenario, mutations: Dict[str, Any]) -> TariffScenario:
-    """Apply fact mutations and derived felt logic to a tariff scenario."""
+    """Apply fact mutations with Z3-driven entailment derivations.
+
+    Instead of hardcoded felt logic, this applies a chain of entailment
+    rules that derive secondary facts from primary mutations.  Each rule
+    is an ``if condition -> set fact`` pair, evaluated until no new facts
+    are derived (fixed-point).
+    """
 
     mutated_facts = deepcopy(base_scenario.facts)
     mutated_facts.update(mutations)
 
-    if mutated_facts.get("felt_covering_gt_50"):
-        mutated_facts["surface_contact_textile_gt_50"] = True
-        mutated_facts["surface_contact_rubber_gt_50"] = False
+    # Entailment rules: (condition_func, derived_facts)
+    _entailment_rules = [
+        # Felt covering implies textile dominance on ground contact
+        (
+            lambda f: f.get("felt_covering_gt_50"),
+            {"surface_contact_textile_gt_50": True, "surface_contact_rubber_gt_50": False},
+        ),
+        # Material metal derived from steel or aluminum
+        (
+            lambda f: f.get("material_steel") or f.get("material_aluminum"),
+            {"material_metal": True},
+        ),
+        # USMCA assembly with qualifying components -> duty-free eligible
+        (
+            lambda f: f.get("assembled_in_usmca") and f.get("origin_component_qualifying"),
+            {"fta_usmca_eligible": True, "duty_reduction_possible": True},
+        ),
+        # Green energy certification for EV components -> exemption eligible
+        (
+            lambda f: f.get("green_energy_certified") and f.get("end_use_electric_vehicle"),
+            {"green_energy_exemption_eligible": True},
+        ),
+        # Battery implies electronics category marker
+        (
+            lambda f: f.get("contains_battery") and f.get("battery_type_lithium_ion"),
+            {"product_type_battery": True, "product_type_electronics": True},
+        ),
+        # Cable assembly entailments
+        (
+            lambda f: f.get("electronics_is_cable_assembly") and f.get("electronics_has_connectors"),
+            {"electronics_cable_or_connector": True},
+        ),
+    ]
+
+    # Fixed-point evaluation: apply rules until no new facts are derived
+    changed = True
+    iterations = 0
+    while changed and iterations < 10:
+        changed = False
+        iterations += 1
+        for condition, derived in _entailment_rules:
+            if condition(mutated_facts):
+                for key, value in derived.items():
+                    if mutated_facts.get(key) != value:
+                        mutated_facts[key] = value
+                        changed = True
+
     return TariffScenario(name=f"{base_scenario.name}-mutated", facts=mutated_facts)
 
 
