@@ -1,0 +1,8 @@
+part_id,description,material,weight_kg,value_usd,origin_country,hts_code,quantity
+P001,Galvanized steel hex bolt M10x50,Steel,0.045,0.85,CN,7318.15.20,1000
+P002,Stainless steel flat washer M10,Steel,0.012,0.35,CN,7318.22.00,2000
+P003,Nylon lock nut M10,Plastic,0.008,0.25,TW,,500
+P004,Aluminum mounting bracket,Aluminum,0.250,3.50,CN,7616.99.50,200
+P005,Rubber gasket seal 50mm,Rubber,0.015,0.45,MX,,800
+P006,Copper bus bar 100A,Copper,0.180,4.75,US,,150
+P007,Polyester woven fabric panel,Textile,0.320,2.10,IN,,100

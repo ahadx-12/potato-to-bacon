@@ -1,0 +1,38 @@
+[
+  {
+    "part_number": "J-001",
+    "name": "Steel mounting bolt M8x30",
+    "materials": "Carbon Steel",
+    "unit_cost": 0.65,
+    "coo": "CN",
+    "hs_code": "7318.15.20"
+  },
+  {
+    "part_number": "J-002",
+    "name": "Aluminum heat sink 60x40mm",
+    "materials": "Aluminum 6061",
+    "unit_cost": 5.25,
+    "coo": "TW"
+  },
+  {
+    "part_number": "J-003",
+    "name": "Silicone thermal pad",
+    "materials": "Silicone rubber",
+    "unit_cost": 1.10,
+    "coo": "CN"
+  },
+  {
+    "part_number": "J-004",
+    "name": "Nylon cable tie 200mm",
+    "materials": "Nylon 66",
+    "unit_cost": 0.15,
+    "coo": "CN"
+  },
+  {
+    "part_number": "J-005",
+    "name": "Copper wire harness assembly",
+    "materials": "Copper/PVC",
+    "unit_cost": 8.50,
+    "coo": "MX"
+  }
+]
