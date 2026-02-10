@@ -30,6 +30,7 @@ from potatobacon.tariff.atom_utils import atom_provenance
 from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_for_context
 from potatobacon.tariff.engine import apply_mutations, compute_duty_result
 from potatobacon.tariff.fact_compiler import compile_facts
+from potatobacon.tariff.fact_vocabulary import expand_facts
 from potatobacon.tariff.models import TariffScenario
 from potatobacon.tariff.mutation_engine import MutationEngine
 from potatobacon.tariff.mutation_generator import (
@@ -274,6 +275,10 @@ def teaas_analyze(
     # Build product spec and compile facts
     product_spec = _build_product_spec(req)
     facts, evidence = compile_facts(product_spec)
+
+    # Vocabulary bridge: expand facts with synonym/entailment/chapter tokens
+    # so they can match guard tokens on USITC-sourced atoms
+    facts = expand_facts(facts)
 
     # Baseline classification
     baseline = TariffScenario(name="baseline", facts=deepcopy(facts))

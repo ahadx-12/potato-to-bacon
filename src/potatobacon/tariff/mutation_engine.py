@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from potatobacon.law.solver_z3 import PolicyAtom, check_scenario
 from potatobacon.tariff.atom_utils import duty_rate_index
+from potatobacon.tariff.fact_mapper import compute_fact_gap
+from potatobacon.tariff.fact_vocabulary import expand_facts
 from potatobacon.tariff.models import TariffScenario
 from potatobacon.tariff.mutation_generator import MutationCandidate
 
@@ -146,8 +148,8 @@ class MutationEngine:
             if not patch or len(patch) > max_patch_size:
                 continue
 
-            # Verify via Z3
-            mutated_facts = {**deepcopy(baseline.facts), **patch}
+            # Verify via Z3 (expand facts through vocabulary bridge first)
+            mutated_facts = expand_facts({**deepcopy(baseline.facts), **patch})
             is_sat, active = check_scenario(mutated_facts, self.atoms)
             if not is_sat:
                 continue
@@ -221,18 +223,13 @@ class MutationEngine:
         current_facts: Dict[str, Any],
         target_atom: PolicyAtom,
     ) -> Dict[str, Any]:
-        """Compute the minimal fact changes needed to satisfy the target atom's guard."""
-        patch: Dict[str, Any] = {}
-        for token in target_atom.guard:
-            if token.startswith("¬"):
-                fact_key = token[1:]
-                if current_facts.get(fact_key, False):
-                    patch[fact_key] = False
-            else:
-                fact_key = token
-                if not current_facts.get(fact_key, False):
-                    patch[fact_key] = True
-        return patch
+        """Compute the minimal fact changes needed to satisfy the target atom's guard.
+
+        Uses the vocabulary bridge to consider synonym and entailment
+        equivalences, so that e.g. ``is_fastener`` satisfies a guard
+        requiring ``product_type_fastener``.
+        """
+        return compute_fact_gap(current_facts, target_atom.guard)
 
     def _best_rate_from_active(
         self, active_atoms: List[PolicyAtom]
