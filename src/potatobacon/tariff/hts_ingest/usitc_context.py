@@ -137,3 +137,14 @@ def load_usitc_context(
         len(record_list),
     )
     return atoms, metadata
+
+
+def load_usitc_atoms() -> list[PolicyAtom]:
+    """Load USITC atoms only (no metadata).
+
+    This is the callable used by the context registry's Python loader.
+    It returns a flat list of PolicyAtoms, compatible with
+    ``_load_python_atoms`` in ``context_registry.py``.
+    """
+    atoms, _meta = load_usitc_context()
+    return atoms

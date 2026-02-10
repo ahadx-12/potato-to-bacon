@@ -27,6 +27,7 @@ from potatobacon.law.solver_z3 import analyze_scenario
 from potatobacon.proofs.engine import record_tariff_proof
 from potatobacon.proofs.proof_chain import ProofChain
 from potatobacon.tariff.atom_utils import atom_provenance
+from potatobacon.tariff.chapter_filter import filter_atoms_by_chapter
 from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_for_context
 from potatobacon.tariff.engine import apply_mutations, compute_duty_result
 from potatobacon.tariff.fact_compiler import compile_facts
@@ -254,19 +255,46 @@ def teaas_analyze(
     errors: List[str] = []
     resolved_context = req.law_context or DEFAULT_CONTEXT_ID
 
-    # Load atoms
-    try:
-        atoms, context_meta = load_atoms_for_context(resolved_context)
-    except (KeyError, ValueError) as exc:
-        return TEaaSAnalyzeResponse(
-            status="ERROR",
-            tenant_id=tenant.tenant_id,
-            description=req.description,
-            law_context=resolved_context,
-            tariff_manifest_hash="",
-            compiled_facts={},
-            errors=[f"Failed to load context: {exc}"],
-        )
+    # Load atoms — try HTS_US_LIVE first (real USITC data), fall back
+    # to the caller's requested context (default: HTS_US_2025_SLICE).
+    atoms: List[Any] = []
+    context_meta: Dict[str, Any] = {}
+    used_live_context = False
+
+    if not req.law_context:
+        # No explicit context requested — try live USITC data first
+        try:
+            atoms, context_meta = load_atoms_for_context("HTS_US_LIVE")
+            used_live_context = True
+            logger.info(
+                "Using HTS_US_LIVE context (%d atoms)",
+                len(atoms),
+            )
+        except (KeyError, ValueError, FileNotFoundError) as exc:
+            logger.info(
+                "HTS_US_LIVE not available (%s), falling back to %s",
+                exc,
+                DEFAULT_CONTEXT_ID,
+            )
+
+    if not atoms:
+        try:
+            atoms, context_meta = load_atoms_for_context(resolved_context)
+            logger.info(
+                "Using %s context (%d atoms)",
+                resolved_context,
+                len(atoms),
+            )
+        except (KeyError, ValueError) as exc:
+            return TEaaSAnalyzeResponse(
+                status="ERROR",
+                tenant_id=tenant.tenant_id,
+                description=req.description,
+                law_context=resolved_context,
+                tariff_manifest_hash="",
+                compiled_facts={},
+                errors=[f"Failed to load context: {exc}"],
+            )
 
     context_id = context_meta["context_id"]
     manifest_hash = context_meta["manifest_hash"]
@@ -280,12 +308,18 @@ def teaas_analyze(
     # so they can match guard tokens on USITC-sourced atoms
     facts = expand_facts(facts)
 
+    # Chapter pre-filter: reduce atom set to only chapters matching
+    # the BOM's inferred chapters for Z3 performance
+    filtered_atoms = filter_atoms_by_chapter(
+        atoms, facts, context_id=context_id
+    )
+
     # Baseline classification
     baseline = TariffScenario(name="baseline", facts=deepcopy(facts))
     origin_atoms = build_origin_policy_atoms()
-    combined_atoms = list(origin_atoms) + list(atoms)
+    combined_atoms = list(origin_atoms) + list(filtered_atoms)
 
-    baseline_result = compute_duty_result(atoms, baseline, duty_rates=duty_rates)
+    baseline_result = compute_duty_result(filtered_atoms, baseline, duty_rates=duty_rates)
     baseline_rate = baseline_result.duty_rate if baseline_result.duty_rate is not None else 0.0
 
     baseline_overlays = evaluate_overlays(
@@ -306,7 +340,7 @@ def teaas_analyze(
             errors.append("Baseline scenario is logically inconsistent")
 
     # Discover mutations via the Z3-driven engine
-    mutation_engine = MutationEngine(atoms, duty_rates=duty_rates)
+    mutation_engine = MutationEngine(filtered_atoms, duty_rates=duty_rates)
     derived_mutations = mutation_engine.discover_mutations(
         baseline, baseline_rate, max_candidates=req.max_mutations
     )
@@ -326,7 +360,7 @@ def teaas_analyze(
             name=f"mutation-{mid}",
             facts={**deepcopy(facts), **dm.fact_patch},
         )
-        mut_result = compute_duty_result(atoms, mutated, duty_rates=duty_rates)
+        mut_result = compute_duty_result(filtered_atoms, mutated, duty_rates=duty_rates)
         mut_rate = mut_result.duty_rate if mut_result.duty_rate is not None else baseline_rate
         mut_overlays = evaluate_overlays(
             facts=mutated.facts,
@@ -354,7 +388,7 @@ def teaas_analyze(
             continue
         mid += 1
         mutated = apply_mutations(baseline, patch)
-        mut_result = compute_duty_result(atoms, mutated, duty_rates=duty_rates)
+        mut_result = compute_duty_result(filtered_atoms, mutated, duty_rates=duty_rates)
         mut_rate = mut_result.duty_rate if mut_result.duty_rate is not None else baseline_rate
         mut_overlays = evaluate_overlays(
             facts=mutated.facts,
@@ -387,7 +421,7 @@ def teaas_analyze(
             name="optimized",
             facts={**deepcopy(facts), **best.fact_patch},
         )
-        opt_result = compute_duty_result(atoms, optimized_scenario, duty_rates=duty_rates)
+        opt_result = compute_duty_result(filtered_atoms, optimized_scenario, duty_rates=duty_rates)
         optimized_codes = sorted([a.source_id for a in opt_result.active_atoms])
         status = "OPTIMIZED"
     else:
@@ -405,6 +439,9 @@ def teaas_analyze(
         "status": baseline_result.status,
         "duty_rate": baseline_rate,
         "active_codes": baseline_codes,
+        "context_used": context_id,
+        "atoms_total": len(atoms),
+        "atoms_after_chapter_filter": len(filtered_atoms),
     })
     chain.add_step("mutation_discovery", input_data={"baseline_rate": baseline_rate}, output_data={
         "mutations_tested": len(mutation_results),
