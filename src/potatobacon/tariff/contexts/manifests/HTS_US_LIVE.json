@@ -1,0 +1,16 @@
+{
+  "context_id": "HTS_US_LIVE",
+  "domain": "tariff",
+  "jurisdiction": "US",
+  "effective_from": "2025-01-01",
+  "effective_to": null,
+  "description": "USITC HTS Live — full dataset from the USITC versioned store. Bootstrapped via scripts/bootstrap_usitc.py.",
+  "loader": {
+    "type": "python",
+    "callable": "potatobacon.tariff.hts_ingest.usitc_context:load_usitc_atoms"
+  },
+  "sources": [
+    "data/hts_extract/usitc/"
+  ],
+  "revision_id": "HTS_US_LIVE"
+}
