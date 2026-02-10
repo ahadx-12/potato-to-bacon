@@ -7,6 +7,11 @@ from typing import Any, Dict, Iterable, List, Tuple
 
 from .product_schema import ProductCategory, ProductSpecModel
 from .fact_schema_registry import FactSchemaRegistry
+from .fact_vocabulary import (
+    CATEGORY_TO_CHAPTERS,
+    MATERIAL_CHAPTER_TOKENS,
+    expand_facts,
+)
 from .sku_models import SKURecordModel
 
 
@@ -426,6 +431,53 @@ def compile_facts(
         facts.setdefault("material_metal", True)
     else:
         facts.setdefault("material_metal", False)
+
+    # --- Vocabulary bridge: emit chapter/category and synonym tokens ---
+    # Add chapter/category tokens based on product category
+    for ch_token in CATEGORY_TO_CHAPTERS.get(product.product_category, []):
+        facts[ch_token] = True
+        _add_evidence(
+            evidence,
+            fact_key=ch_token,
+            value=True,
+            derived_from_fields=["product_category"],
+            calculation=f"vocabulary bridge: {product.product_category.value} -> {ch_token}",
+        )
+
+    # Add material-derived chapter tokens
+    for mat_key, ch_tokens in MATERIAL_CHAPTER_TOKENS.items():
+        if facts.get(mat_key) is True:
+            for ch_tok in ch_tokens:
+                if ch_tok not in facts:
+                    facts[ch_tok] = True
+                    _add_evidence(
+                        evidence,
+                        fact_key=ch_tok,
+                        value=True,
+                        derived_from_fields=["materials"],
+                        calculation=f"vocabulary bridge: {mat_key} -> {ch_tok}",
+                    )
+
+    # Emit synonym tokens for guard compatibility
+    if product.product_category == ProductCategory.FASTENER:
+        facts["product_type_fastener"] = True
+        _add_evidence(
+            evidence,
+            fact_key="product_type_fastener",
+            value=True,
+            derived_from_fields=["product_category"],
+            calculation="vocabulary bridge: is_fastener synonym",
+        )
+
+    if product.product_category == ProductCategory.APPAREL_TEXTILE:
+        facts["product_type_apparel"] = True
+        _add_evidence(
+            evidence,
+            fact_key="product_type_apparel",
+            value=True,
+            derived_from_fields=["product_category"],
+            calculation="vocabulary bridge: apparel_textile synonym",
+        )
 
     return facts, evidence
 

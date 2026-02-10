@@ -252,4 +252,29 @@ def generate_guard_tokens(
         tokens.update(_extract_keywords(parent_desc, _PRODUCT_TYPE_KEYWORDS))
         tokens.update(_extract_keywords(parent_desc, _CONSTRUCTION_KEYWORDS))
 
+    # 4. Vocabulary bridge: emit fact-compiler-compatible synonym tokens
+    #    so that atoms generated from USITC data can be matched by
+    #    facts compiled from BOMs.
+    bridge_tokens: set[str] = set()
+    if "product_type_fastener" in tokens:
+        bridge_tokens.add("is_fastener")
+        bridge_tokens.add("product_type_chassis_bolt")
+    if "product_type_apparel" in tokens:
+        bridge_tokens.add("product_type_apparel_textile")
+    if "product_type_electronics" in tokens:
+        bridge_tokens.add("product_type_electronics")  # already same name
+    if "has_coating" in tokens or "has_lamination" in tokens:
+        bridge_tokens.add("has_coating_or_lamination")
+    if "material_stainless_steel" in tokens:
+        bridge_tokens.add("material_steel")
+        bridge_tokens.add("fastener_stainless")
+    # Fiber presence -> dominant hints (for broad matching)
+    if "fiber_cotton" in tokens:
+        bridge_tokens.add("fiber_cotton_dominant")
+    if "fiber_polyester" in tokens:
+        bridge_tokens.add("fiber_polyester_dominant")
+    if "fiber_nylon" in tokens:
+        bridge_tokens.add("fiber_nylon_present")
+    tokens.update(bridge_tokens)
+
     return sorted(tokens)
