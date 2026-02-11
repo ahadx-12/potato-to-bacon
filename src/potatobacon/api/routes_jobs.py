@@ -14,6 +14,7 @@ production would swap to Celery/Redis.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import uuid
 from copy import deepcopy
@@ -30,6 +31,13 @@ from potatobacon.api.routes_teaas import (
     TEaaSAnalyzeResponse,
     teaas_analyze,
 )
+
+# Sprint E: PostgreSQL integration
+USE_POSTGRES = os.getenv("PTB_STORAGE_BACKEND", "jsonl").lower() == "postgres"
+
+if USE_POSTGRES:
+    from potatobacon.db.models import Job as JobModel
+    from potatobacon.db.session import get_db_session
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/jobs", tags=["jobs"])
@@ -142,16 +150,45 @@ def submit_job(
 ) -> JobSubmitResponse:
     """Submit a batch of BOMs for async analysis."""
     job_id = f"job_{uuid.uuid4().hex[:12]}"
-    job = _JobRecord(job_id=job_id, tenant_id=tenant.tenant_id, items=req.items)
 
-    with _lock:
-        _jobs[job_id] = job
+    # Sprint E: Use PostgreSQL if enabled, otherwise in-memory
+    if USE_POSTGRES:
+        from sqlalchemy.orm import Session
 
-    # Launch in background thread
-    thread = threading.Thread(
-        target=_run_job, args=(job, api_key, tenant), daemon=True
-    )
-    thread.start()
+        db_session: Session = next(get_db_session())
+        try:
+            # Create job in PostgreSQL
+            db_job = JobModel(
+                job_id=job_id,
+                tenant_id=tenant.tenant_id,
+                job_type="batch_analysis",
+                status="queued",
+                total_items=len(req.items),
+                input_params={"items": [item.dict() for item in req.items]},
+            )
+            db_session.add(db_job)
+            db_session.commit()
+
+            # Note: If using Celery, dispatch task here
+            # For now, keep thread-based execution
+            thread = threading.Thread(
+                target=_run_job_postgres, args=(job_id, tenant.tenant_id, req.items), daemon=True
+            )
+            thread.start()
+
+            logger.info(f"Created job {job_id} in PostgreSQL for tenant {tenant.tenant_id}")
+        finally:
+            db_session.close()
+    else:
+        # In-memory mode
+        job = _JobRecord(job_id=job_id, tenant_id=tenant.tenant_id, items=req.items)
+        with _lock:
+            _jobs[job_id] = job
+
+        thread = threading.Thread(
+            target=_run_job, args=(job, api_key, tenant), daemon=True
+        )
+        thread.start()
 
     return JobSubmitResponse(
         job_id=job_id,
@@ -168,20 +205,48 @@ def get_job(
     tenant: Tenant = Depends(resolve_tenant_from_request),
 ) -> JobStatus:
     """Check the status of an analysis job."""
-    with _lock:
-        job = _jobs.get(job_id)
+    # Sprint E: Query PostgreSQL if enabled, otherwise in-memory
+    if USE_POSTGRES:
+        from sqlalchemy.orm import Session
 
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if job.tenant_id != tenant.tenant_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        db_session: Session = next(get_db_session())
+        try:
+            db_job = db_session.query(JobModel).filter_by(job_id=job_id).first()
+            if not db_job:
+                raise HTTPException(status_code=404, detail="Job not found")
+            if db_job.tenant_id != tenant.tenant_id:
+                raise HTTPException(status_code=403, detail="Access denied")
 
-    return JobStatus(
-        job_id=job.job_id,
-        tenant_id=job.tenant_id,
-        status=job.status,
-        total_items=job.total_items,
-        completed_items=job.completed_items,
+            return JobStatus(
+                job_id=db_job.job_id,
+                tenant_id=db_job.tenant_id,
+                status=db_job.status,
+                total_items=db_job.total_items,
+                completed_items=db_job.completed_items,
+                failed_items=db_job.failed_items,
+                submitted_at=db_job.created_at.isoformat(),
+                completed_at=db_job.completed_at.isoformat() if db_job.completed_at else None,
+                results=db_job.result.get("results", []) if db_job.result else [],
+                errors=db_job.errors or [],
+            )
+        finally:
+            db_session.close()
+    else:
+        # In-memory mode
+        with _lock:
+            job = _jobs.get(job_id)
+
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        if job.tenant_id != tenant.tenant_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        return JobStatus(
+            job_id=job.job_id,
+            tenant_id=job.tenant_id,
+            status=job.status,
+            total_items=job.total_items,
+            completed_items=job.completed_items,
         failed_items=job.failed_items,
         submitted_at=job.submitted_at,
         completed_at=job.completed_at,
