@@ -10,10 +10,11 @@ from potatobacon.proofs.engine import record_tariff_proof
 from potatobacon.tariff.context_registry import DEFAULT_CONTEXT_ID, load_atoms_for_context
 from potatobacon.tariff.overlays import effective_duty_rate, evaluate_overlays
 from potatobacon.tariff.origin_engine import build_origin_policy_atoms
+from potatobacon.tariff.duty_calculator import DutyBreakdown, compute_total_duty
 
 from .atom_utils import atom_provenance
 from .atoms_hts import DUTY_RATES
-from .models import TariffDossierModel, TariffExplainResponseModel, TariffScenario
+from .models import DutyBreakdownModel, TariffDossierModel, TariffExplainResponseModel, TariffScenario
 
 
 @dataclass(frozen=True)
@@ -215,7 +216,36 @@ def run_tariff_hack(
     optimized_rate_raw = optimized_result.duty_rate if optimized_result.duty_rate is not None else baseline_rate_raw
     optimized_effective = effective_duty_rate(optimized_rate_raw, optimized_overlays)
 
-    stop_optimization_flag = any(ov.stop_optimization for ov in baseline_overlays + optimized_overlays)
+    # --- Unified duty breakdowns ---
+    baseline_duty_bd = compute_total_duty(
+        base_rate=baseline_rate_raw,
+        hts_code=base_facts.get("hts_code", ""),
+        origin_country=base_facts.get("origin_country") or base_facts.get("origin_country_raw") or "",
+        import_country=base_facts.get("import_country") or "US",
+        facts=baseline.facts,
+        active_codes=[atom.source_id for atom in baseline_result.active_atoms],
+        overlays=baseline_overlays,
+    )
+    optimized_origin = (
+        optimized.facts.get("origin_country_raw")
+        or base_facts.get("origin_country")
+        or ""
+    )
+    optimized_duty_bd = compute_total_duty(
+        base_rate=optimized_rate_raw,
+        hts_code=optimized.facts.get("hts_code") or base_facts.get("hts_code", ""),
+        origin_country=optimized_origin,
+        import_country=optimized.facts.get("import_country") or base_facts.get("import_country") or "US",
+        facts=optimized.facts,
+        active_codes=[atom.source_id for atom in optimized_result.active_atoms],
+        overlays=optimized_overlays,
+    )
+
+    # Use unified totals for effective rates
+    baseline_effective = baseline_duty_bd.total_duty_rate
+    optimized_effective = optimized_duty_bd.total_duty_rate
+
+    stop_optimization_flag = baseline_duty_bd.stop_optimization or optimized_duty_bd.stop_optimization
     status = "REQUIRES_REVIEW" if stop_optimization_flag else ("OPTIMIZED" if optimized_effective < baseline_effective else "BASELINE")
     savings = baseline_effective - optimized_effective
 
@@ -254,6 +284,14 @@ def run_tariff_hack(
         "overlay_stop_optimization": stop_optimization_flag,
         "baseline_effective_duty_rate": baseline_effective,
         "optimized_effective_duty_rate": optimized_effective,
+        "baseline_ad_duty": baseline_duty_bd.ad_duty_rate,
+        "baseline_cvd_duty": baseline_duty_bd.cvd_duty_rate,
+        "optimized_ad_duty": optimized_duty_bd.ad_duty_rate,
+        "optimized_cvd_duty": optimized_duty_bd.cvd_duty_rate,
+        "baseline_fta_preference": baseline_duty_bd.fta_preference_pct,
+        "optimized_fta_preference": optimized_duty_bd.fta_preference_pct,
+        "baseline_exclusion_relief": baseline_duty_bd.exclusion_relief_rate,
+        "optimized_exclusion_relief": optimized_duty_bd.exclusion_relief_rate,
     }
 
     proof_handle = record_tariff_proof(
@@ -281,6 +319,25 @@ def run_tariff_hack(
         tariff_manifest_hash=context_meta["manifest_hash"],
     )
 
+    def _bd_to_model(bd: DutyBreakdown) -> DutyBreakdownModel:
+        return DutyBreakdownModel(
+            base_rate=bd.base_rate,
+            section_232_rate=bd.section_232_rate,
+            section_301_rate=bd.section_301_rate,
+            ad_duty_rate=bd.ad_duty_rate,
+            cvd_duty_rate=bd.cvd_duty_rate,
+            exclusion_relief_rate=bd.exclusion_relief_rate,
+            fta_preference_pct=bd.fta_preference_pct,
+            total_duty_rate=bd.total_duty_rate,
+            effective_base_rate=bd.effective_base_rate,
+            has_232_exposure=bd.has_232_exposure,
+            has_301_exposure=bd.has_301_exposure,
+            has_adcvd_exposure=bd.has_adcvd_exposure,
+            has_fta_preference=bd.has_fta_preference,
+            has_active_exclusion=bd.has_active_exclusion,
+            stop_optimization=bd.stop_optimization,
+        )
+
     dossier = TariffDossierModel(
         proof_id=proof_handle.proof_id,
         proof_payload_hash=proof_handle.proof_payload_hash,
@@ -302,6 +359,8 @@ def run_tariff_hack(
         },
         tariff_manifest_hash=context_meta["manifest_hash"],
         metrics=metrics,
+        baseline_duty_breakdown=_bd_to_model(baseline_duty_bd),
+        optimized_duty_breakdown=_bd_to_model(optimized_duty_bd),
     )
     return dossier
 

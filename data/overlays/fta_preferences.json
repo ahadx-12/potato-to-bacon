@@ -1,0 +1,207 @@
+{
+  "metadata": {
+    "source": "USTR Free Trade Agreement Database",
+    "last_updated": "2025-01-15",
+    "description": "FTA preference programs applicable to US imports"
+  },
+  "programs": [
+    {
+      "program_id": "USMCA",
+      "name": "United States-Mexico-Canada Agreement",
+      "partner_countries": ["CA", "MX"],
+      "import_country": "US",
+      "preference_type": "FTA",
+      "default_preference_pct": 100.0,
+      "requires_certificate_of_origin": true,
+      "rvc_threshold_pct": 75.0,
+      "tariff_shift_required": true,
+      "effective_date": "2020-07-01",
+      "status": "active",
+      "product_specific_rules": [
+        {
+          "hts_prefixes": ["72", "73"],
+          "description": "Steel articles: requires melting and pouring in USMCA territory",
+          "rvc_threshold_pct": 70.0,
+          "additional_requirements": ["melting_and_pouring_in_territory"]
+        },
+        {
+          "hts_prefixes": ["76"],
+          "description": "Aluminum articles: requires smelting in USMCA territory",
+          "rvc_threshold_pct": 70.0,
+          "additional_requirements": ["smelting_in_territory"]
+        },
+        {
+          "hts_prefixes": ["87"],
+          "description": "Vehicles: requires 75% RVC with labor value content",
+          "rvc_threshold_pct": 75.0,
+          "additional_requirements": ["labor_value_content_met"]
+        }
+      ]
+    },
+    {
+      "program_id": "GSP",
+      "name": "Generalized System of Preferences",
+      "partner_countries": [
+        "AF", "AL", "DZ", "AO", "AM", "BD", "BJ", "BT", "BO", "BW",
+        "BF", "BI", "KH", "CM", "CV", "CF", "TD", "KM", "CD", "CG",
+        "CI", "DJ", "EG", "SZ", "ET", "FJ", "GA", "GM", "GE", "GH",
+        "GN", "GW", "GY", "HT", "ID", "IN", "IQ", "JM", "JO", "KZ",
+        "KE", "KI", "KG", "LA", "LB", "LS", "LR", "MG", "MW", "MV",
+        "ML", "MR", "MU", "MZ", "MM", "NA", "NP", "NE", "NG", "PK",
+        "PG", "PH", "RW", "WS", "ST", "SN", "SL", "SB", "SO", "ZA",
+        "LK", "SR", "TZ", "TH", "TL", "TG", "TO", "TT", "TN", "TR",
+        "UG", "UA", "UZ", "VU", "YE", "ZM", "ZW"
+      ],
+      "import_country": "US",
+      "preference_type": "GSP",
+      "default_preference_pct": 100.0,
+      "requires_certificate_of_origin": false,
+      "rvc_threshold_pct": 35.0,
+      "tariff_shift_required": false,
+      "effective_date": "1976-01-01",
+      "status": "active",
+      "excluded_hts_prefixes": ["3926", "4202", "6402", "6403", "6404", "6110", "6109"],
+      "notes": "GSP was renewed through 2025; certain products and countries are excluded"
+    },
+    {
+      "program_id": "CAFTA-DR",
+      "name": "Dominican Republic-Central America FTA",
+      "partner_countries": ["CR", "SV", "GT", "HN", "NI", "DO"],
+      "import_country": "US",
+      "preference_type": "FTA",
+      "default_preference_pct": 100.0,
+      "requires_certificate_of_origin": true,
+      "rvc_threshold_pct": 35.0,
+      "tariff_shift_required": true,
+      "effective_date": "2006-03-01",
+      "status": "active"
+    },
+    {
+      "program_id": "KORUS",
+      "name": "United States-Korea Free Trade Agreement",
+      "partner_countries": ["KR"],
+      "import_country": "US",
+      "preference_type": "FTA",
+      "default_preference_pct": 100.0,
+      "requires_certificate_of_origin": true,
+      "rvc_threshold_pct": 35.0,
+      "tariff_shift_required": true,
+      "effective_date": "2012-03-15",
+      "status": "active",
+      "product_specific_rules": [
+        {
+          "hts_prefixes": ["72", "73"],
+          "description": "Steel articles under KORUS",
+          "rvc_threshold_pct": 35.0,
+          "additional_requirements": []
+        }
+      ]
+    },
+    {
+      "program_id": "US-AU",
+      "name": "United States-Australia Free Trade Agreement",
+      "partner_countries": ["AU"],
+      "import_country": "US",
+      "preference_type": "FTA",
+      "default_preference_pct": 100.0,
+      "requires_certificate_of_origin": true,
+      "rvc_threshold_pct": 35.0,
+      "tariff_shift_required": true,
+      "effective_date": "2005-01-01",
+      "status": "active"
+    },
+    {
+      "program_id": "US-IL",
+      "name": "United States-Israel Free Trade Agreement",
+      "partner_countries": ["IL"],
+      "import_country": "US",
+      "preference_type": "FTA",
+      "default_preference_pct": 100.0,
+      "requires_certificate_of_origin": true,
+      "rvc_threshold_pct": 35.0,
+      "tariff_shift_required": false,
+      "effective_date": "1985-09-01",
+      "status": "active"
+    },
+    {
+      "program_id": "US-JP",
+      "name": "United States-Japan Trade Agreement",
+      "partner_countries": ["JP"],
+      "import_country": "US",
+      "preference_type": "FTA",
+      "default_preference_pct": 100.0,
+      "requires_certificate_of_origin": true,
+      "rvc_threshold_pct": 0.0,
+      "tariff_shift_required": false,
+      "effective_date": "2020-01-01",
+      "status": "active",
+      "notes": "Limited agreement covering agricultural and digital trade; industrial goods covered by specific schedules",
+      "covered_hts_prefixes": ["0201", "0202", "0406", "0703", "0808", "2204", "2208"]
+    },
+    {
+      "program_id": "US-SG",
+      "name": "United States-Singapore Free Trade Agreement",
+      "partner_countries": ["SG"],
+      "import_country": "US",
+      "preference_type": "FTA",
+      "default_preference_pct": 100.0,
+      "requires_certificate_of_origin": true,
+      "rvc_threshold_pct": 35.0,
+      "tariff_shift_required": true,
+      "effective_date": "2004-01-01",
+      "status": "active"
+    },
+    {
+      "program_id": "US-CL",
+      "name": "United States-Chile Free Trade Agreement",
+      "partner_countries": ["CL"],
+      "import_country": "US",
+      "preference_type": "FTA",
+      "default_preference_pct": 100.0,
+      "requires_certificate_of_origin": true,
+      "rvc_threshold_pct": 35.0,
+      "tariff_shift_required": true,
+      "effective_date": "2004-01-01",
+      "status": "active"
+    },
+    {
+      "program_id": "US-CO",
+      "name": "United States-Colombia Trade Promotion Agreement",
+      "partner_countries": ["CO"],
+      "import_country": "US",
+      "preference_type": "FTA",
+      "default_preference_pct": 100.0,
+      "requires_certificate_of_origin": true,
+      "rvc_threshold_pct": 35.0,
+      "tariff_shift_required": true,
+      "effective_date": "2012-05-15",
+      "status": "active"
+    },
+    {
+      "program_id": "US-PA",
+      "name": "United States-Panama Trade Promotion Agreement",
+      "partner_countries": ["PA"],
+      "import_country": "US",
+      "preference_type": "FTA",
+      "default_preference_pct": 100.0,
+      "requires_certificate_of_origin": true,
+      "rvc_threshold_pct": 35.0,
+      "tariff_shift_required": true,
+      "effective_date": "2012-10-31",
+      "status": "active"
+    },
+    {
+      "program_id": "US-PE",
+      "name": "United States-Peru Trade Promotion Agreement",
+      "partner_countries": ["PE"],
+      "import_country": "US",
+      "preference_type": "FTA",
+      "default_preference_pct": 100.0,
+      "requires_certificate_of_origin": true,
+      "rvc_threshold_pct": 35.0,
+      "tariff_shift_required": true,
+      "effective_date": "2009-02-01",
+      "status": "active"
+    }
+  ]
+}

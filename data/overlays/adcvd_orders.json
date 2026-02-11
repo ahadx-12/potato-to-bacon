@@ -1,0 +1,189 @@
+{
+  "metadata": {
+    "source": "USITC AD/CVD Orders Database",
+    "last_updated": "2025-01-15",
+    "description": "Active antidumping and countervailing duty orders applicable to US imports"
+  },
+  "orders": [
+    {
+      "order_id": "A-570-967",
+      "type": "AD",
+      "product_description": "Steel Nails",
+      "hts_prefixes": ["7317"],
+      "origin_countries": ["CN"],
+      "duty_rate_pct": 118.04,
+      "effective_date": "2008-07-30",
+      "status": "active",
+      "case_number": "A-570-967",
+      "federal_register_citation": "73 FR 44961"
+    },
+    {
+      "order_id": "A-570-049",
+      "type": "AD",
+      "product_description": "Carbon and Certain Alloy Steel Wire Rod",
+      "hts_prefixes": ["7213", "7227"],
+      "origin_countries": ["CN"],
+      "duty_rate_pct": 110.25,
+      "effective_date": "2015-01-08",
+      "status": "active",
+      "case_number": "A-570-049",
+      "federal_register_citation": "80 FR 1017"
+    },
+    {
+      "order_id": "C-570-050",
+      "type": "CVD",
+      "product_description": "Carbon and Certain Alloy Steel Wire Rod",
+      "hts_prefixes": ["7213", "7227"],
+      "origin_countries": ["CN"],
+      "duty_rate_pct": 178.46,
+      "effective_date": "2015-01-08",
+      "status": "active",
+      "case_number": "C-570-050",
+      "federal_register_citation": "80 FR 1019"
+    },
+    {
+      "order_id": "A-570-848",
+      "type": "AD",
+      "product_description": "Certain Steel Threaded Rod",
+      "hts_prefixes": ["7318"],
+      "origin_countries": ["CN"],
+      "duty_rate_pct": 206.0,
+      "effective_date": "2009-04-14",
+      "status": "active",
+      "case_number": "A-570-848",
+      "federal_register_citation": "74 FR 17154"
+    },
+    {
+      "order_id": "A-570-601",
+      "type": "AD",
+      "product_description": "Tapered Roller Bearings",
+      "hts_prefixes": ["8482"],
+      "origin_countries": ["CN"],
+      "duty_rate_pct": 92.84,
+      "effective_date": "1987-06-15",
+      "status": "active",
+      "case_number": "A-570-601",
+      "federal_register_citation": "52 FR 22667"
+    },
+    {
+      "order_id": "A-570-504",
+      "type": "AD",
+      "product_description": "Certain Iron Construction Castings",
+      "hts_prefixes": ["7325"],
+      "origin_countries": ["CN"],
+      "duty_rate_pct": 67.93,
+      "effective_date": "1986-05-15",
+      "status": "active",
+      "case_number": "A-570-504",
+      "federal_register_citation": "51 FR 17220"
+    },
+    {
+      "order_id": "A-580-836",
+      "type": "AD",
+      "product_description": "Large Diameter Welded Pipe",
+      "hts_prefixes": ["7305"],
+      "origin_countries": ["KR"],
+      "duty_rate_pct": 10.42,
+      "effective_date": "2019-05-07",
+      "status": "active",
+      "case_number": "A-580-836",
+      "federal_register_citation": "84 FR 20086"
+    },
+    {
+      "order_id": "A-549-502",
+      "type": "AD",
+      "product_description": "Certain Carbon Steel Butt-Weld Pipe Fittings",
+      "hts_prefixes": ["7307"],
+      "origin_countries": ["TH"],
+      "duty_rate_pct": 44.43,
+      "effective_date": "1992-04-16",
+      "status": "active",
+      "case_number": "A-549-502",
+      "federal_register_citation": "57 FR 13489"
+    },
+    {
+      "order_id": "A-570-932",
+      "type": "AD",
+      "product_description": "Circular Welded Carbon-Quality Steel Pipe",
+      "hts_prefixes": ["7306"],
+      "origin_countries": ["CN"],
+      "duty_rate_pct": 69.2,
+      "effective_date": "2008-07-24",
+      "status": "active",
+      "case_number": "A-570-932",
+      "federal_register_citation": "73 FR 42545"
+    },
+    {
+      "order_id": "C-570-933",
+      "type": "CVD",
+      "product_description": "Circular Welded Carbon-Quality Steel Pipe",
+      "hts_prefixes": ["7306"],
+      "origin_countries": ["CN"],
+      "duty_rate_pct": 29.57,
+      "effective_date": "2008-07-24",
+      "status": "active",
+      "case_number": "C-570-933",
+      "federal_register_citation": "73 FR 42547"
+    },
+    {
+      "order_id": "A-583-008",
+      "type": "AD",
+      "product_description": "Stainless Steel Sheet and Strip",
+      "hts_prefixes": ["7219", "7220"],
+      "origin_countries": ["TW"],
+      "duty_rate_pct": 6.67,
+      "effective_date": "1999-07-27",
+      "status": "active",
+      "case_number": "A-583-008",
+      "federal_register_citation": "64 FR 40550"
+    },
+    {
+      "order_id": "A-475-818",
+      "type": "AD",
+      "product_description": "Stainless Steel Sheet and Strip",
+      "hts_prefixes": ["7219", "7220"],
+      "origin_countries": ["IT"],
+      "duty_rate_pct": 11.42,
+      "effective_date": "1999-07-27",
+      "status": "active",
+      "case_number": "A-475-818",
+      "federal_register_citation": "64 FR 40555"
+    },
+    {
+      "order_id": "A-570-890",
+      "type": "AD",
+      "product_description": "Hand Trucks and Certain Parts",
+      "hts_prefixes": ["8716"],
+      "origin_countries": ["CN"],
+      "duty_rate_pct": 383.6,
+      "effective_date": "2004-12-22",
+      "status": "active",
+      "case_number": "A-570-890",
+      "federal_register_citation": "69 FR 70122"
+    },
+    {
+      "order_id": "A-570-977",
+      "type": "AD",
+      "product_description": "Aluminum Extrusions",
+      "hts_prefixes": ["7604", "7608", "7610", "7616"],
+      "origin_countries": ["CN"],
+      "duty_rate_pct": 374.15,
+      "effective_date": "2011-05-26",
+      "status": "active",
+      "case_number": "A-570-977",
+      "federal_register_citation": "76 FR 30650"
+    },
+    {
+      "order_id": "C-570-978",
+      "type": "CVD",
+      "product_description": "Aluminum Extrusions",
+      "hts_prefixes": ["7604", "7608", "7610", "7616"],
+      "origin_countries": ["CN"],
+      "duty_rate_pct": 374.15,
+      "effective_date": "2011-05-26",
+      "status": "active",
+      "case_number": "C-570-978",
+      "federal_register_citation": "76 FR 30653"
+    }
+  ]
+}

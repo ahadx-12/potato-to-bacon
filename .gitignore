@@ -30,3 +30,4 @@ sandbox/
 models/finance/pipeline.joblib
 models/finance/metadata.json
 src/caletariff.egg-info/
+.hypothesis/
