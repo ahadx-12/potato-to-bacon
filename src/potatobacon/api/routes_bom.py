@@ -10,6 +10,7 @@ Sprint C: Provides a three-step flow for real-world BOM ingestion:
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import uuid
 from copy import deepcopy
@@ -21,6 +22,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from potatobacon.api.security import require_api_key
 from potatobacon.api.tenants import Tenant, get_registry, resolve_tenant_from_request
+
+# Sprint E: Celery integration
+USE_CELERY = os.getenv("PTB_JOB_BACKEND", "threads").lower() == "celery"
+
+if USE_CELERY:
+    from potatobacon.db.models import Job as JobModel
+    from potatobacon.db.session import get_db_session
+    from potatobacon.workers.tasks import analyze_bom_batch
 from potatobacon.tariff.bom_parser import (
     BOMParseResult,
     ParsedBOMItem,
@@ -489,14 +498,75 @@ def analyze_bom(
         import_country=req.import_country or "US",
     )
 
-    with _lock:
-        _bom_jobs[job_id] = job
+    # Sprint E: Dispatch to Celery or threading based on configuration
+    if USE_CELERY:
+        # Use Celery distributed task queue (production)
+        from sqlalchemy.orm import Session
 
-    # Launch background thread
-    thread = threading.Thread(
-        target=_run_bom_job, args=(job, api_key, tenant), daemon=True
-    )
-    thread.start()
+        db_session: Session = next(get_db_session())
+        try:
+            # Create job in PostgreSQL
+            db_job = JobModel(
+                job_id=job_id,
+                tenant_id=tenant.tenant_id,
+                job_type="bom_analysis",
+                status="queued",
+                total_items=len(items),
+                input_params={
+                    "upload_id": upload_id,
+                    "law_context": req.law_context,
+                    "max_mutations": req.max_mutations,
+                    "import_country": req.import_country or "US",
+                },
+            )
+            db_session.add(db_job)
+            db_session.commit()
+
+            # Convert items to dicts for Celery serialization
+            items_dicts = [
+                {
+                    "part_id": item.part_id,
+                    "description": item.description,
+                    "origin_country": item.origin_country,
+                    "value_usd": item.value_usd,
+                    "inferred_category": item.inferred_category,
+                }
+                for item in items
+            ]
+
+            # Dispatch to Celery worker
+            task = analyze_bom_batch.apply_async(
+                args=[
+                    job_id,
+                    tenant.tenant_id,
+                    items_dicts,
+                    {
+                        "law_context": req.law_context,
+                        "max_mutations": req.max_mutations,
+                        "import_country": req.import_country or "US",
+                    },
+                ],
+                queue="bom_analysis",
+            )
+
+            # Update job with Celery task ID
+            db_job.celery_task_id = task.id
+            db_session.commit()
+
+            logger.info(
+                f"Dispatched BOM job {job_id} to Celery (task {task.id})"
+            )
+        finally:
+            db_session.close()
+    else:
+        # Use threading (MVP/development)
+        with _lock:
+            _bom_jobs[job_id] = job
+
+        thread = threading.Thread(
+            target=_run_bom_job, args=(job, api_key, tenant), daemon=True
+        )
+        thread.start()
 
     return BOMAnalyzeResponse(
         job_id=job_id,
@@ -514,26 +584,54 @@ def bom_job_status(
     tenant: Tenant = Depends(resolve_tenant_from_request),
 ) -> BOMJobStatus:
     """Poll batch analysis progress."""
-    with _lock:
-        job = _bom_jobs.get(job_id)
+    # Sprint E: Check PostgreSQL if Celery enabled, otherwise in-memory
+    if USE_CELERY:
+        from sqlalchemy.orm import Session
 
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if job.tenant_id != tenant.tenant_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        db_session: Session = next(get_db_session())
+        try:
+            db_job = db_session.query(JobModel).filter_by(job_id=job_id).first()
+            if not db_job:
+                raise HTTPException(status_code=404, detail="Job not found")
+            if db_job.tenant_id != tenant.tenant_id:
+                raise HTTPException(status_code=403, detail="Access denied")
 
-    return BOMJobStatus(
-        job_id=job.job_id,
-        upload_id=job.upload_id,
-        tenant_id=job.tenant_id,
-        status=job.status,
-        total=job.total,
-        completed=job.completed,
-        failed=job.failed,
-        submitted_at=job.submitted_at,
-        completed_at=job.completed_at,
-        errors=job.errors,
-    )
+            return BOMJobStatus(
+                job_id=db_job.job_id,
+                upload_id=db_job.input_params.get("upload_id"),
+                tenant_id=db_job.tenant_id,
+                status=db_job.status,
+                total=db_job.total_items,
+                completed=db_job.completed_items,
+                failed=db_job.failed_items,
+                submitted_at=db_job.created_at.isoformat(),
+                completed_at=db_job.completed_at.isoformat() if db_job.completed_at else None,
+                errors=db_job.errors,
+            )
+        finally:
+            db_session.close()
+    else:
+        # In-memory threading mode
+        with _lock:
+            job = _bom_jobs.get(job_id)
+
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        if job.tenant_id != tenant.tenant_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        return BOMJobStatus(
+            job_id=job.job_id,
+            upload_id=job.upload_id,
+            tenant_id=job.tenant_id,
+            status=job.status,
+            total=job.total,
+            completed=job.completed,
+            failed=job.failed,
+            submitted_at=job.submitted_at,
+            completed_at=job.completed_at,
+            errors=job.errors,
+        )
 
 
 @router.get("/{job_id}/results", response_model=BOMJobResults)
