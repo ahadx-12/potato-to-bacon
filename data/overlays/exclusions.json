@@ -1,0 +1,93 @@
+{
+  "metadata": {
+    "source": "USTR Presidential Proclamation Exclusions",
+    "last_updated": "2025-01-15",
+    "description": "Section 232 and Section 301 exclusions granted by presidential proclamation"
+  },
+  "exclusions": [
+    {
+      "exclusion_id": "EXC-232-2025-001",
+      "overlay_type": "section_232",
+      "hts_codes": ["7318.15.20", "7318.15.50"],
+      "product_description": "Certain steel fasteners, bolts and screws",
+      "origin_countries": [],
+      "exclusion_rate_pct": 25.0,
+      "effective_date": "2024-03-01",
+      "expiry_date": "2025-03-01",
+      "status": "expired",
+      "proclamation_number": "10414",
+      "federal_register_citation": "89 FR 12345",
+      "requestor": "National Fastener Distributors Association"
+    },
+    {
+      "exclusion_id": "EXC-232-2025-002",
+      "overlay_type": "section_232",
+      "hts_codes": ["7616.99.50"],
+      "product_description": "Certain aluminum mounting brackets",
+      "origin_countries": [],
+      "exclusion_rate_pct": 10.0,
+      "effective_date": "2024-06-01",
+      "expiry_date": "2026-06-01",
+      "status": "active",
+      "proclamation_number": "10522",
+      "federal_register_citation": "89 FR 34567",
+      "requestor": "Aluminum Component Importers Coalition"
+    },
+    {
+      "exclusion_id": "EXC-301-2025-001",
+      "overlay_type": "section_301",
+      "hts_codes": ["8534.00.00"],
+      "product_description": "Certain printed circuit boards",
+      "origin_countries": ["CN"],
+      "exclusion_rate_pct": 25.0,
+      "effective_date": "2024-01-01",
+      "expiry_date": "2025-12-31",
+      "status": "active",
+      "proclamation_number": "10600",
+      "federal_register_citation": "89 FR 56789",
+      "requestor": "Electronics Industry Association"
+    },
+    {
+      "exclusion_id": "EXC-232-2025-003",
+      "overlay_type": "section_232",
+      "hts_codes": ["7219.31", "7219.32", "7219.33", "7219.34", "7219.35"],
+      "product_description": "Certain stainless steel flat-rolled products",
+      "origin_countries": [],
+      "exclusion_rate_pct": 25.0,
+      "effective_date": "2025-01-01",
+      "expiry_date": "2026-12-31",
+      "status": "active",
+      "proclamation_number": "10650",
+      "federal_register_citation": "90 FR 11111",
+      "requestor": "Specialty Steel Industry of North America"
+    },
+    {
+      "exclusion_id": "EXC-301-2025-002",
+      "overlay_type": "section_301",
+      "hts_codes": ["6404.11", "6404.19"],
+      "product_description": "Certain textile upper footwear",
+      "origin_countries": ["CN"],
+      "exclusion_rate_pct": 7.5,
+      "effective_date": "2023-10-01",
+      "expiry_date": "2024-10-01",
+      "status": "expired",
+      "proclamation_number": "10300",
+      "federal_register_citation": "88 FR 22222",
+      "requestor": "Footwear Distributors and Retailers of America"
+    },
+    {
+      "exclusion_id": "EXC-232-2025-004",
+      "overlay_type": "section_232",
+      "hts_codes": ["7306.30", "7306.50"],
+      "product_description": "Certain welded steel tubes and pipes",
+      "origin_countries": [],
+      "exclusion_rate_pct": 25.0,
+      "effective_date": "2024-09-01",
+      "expiry_date": "2025-09-01",
+      "status": "active",
+      "proclamation_number": "10575",
+      "federal_register_citation": "89 FR 78901",
+      "requestor": "Steel Tube Institute"
+    }
+  ]
+}

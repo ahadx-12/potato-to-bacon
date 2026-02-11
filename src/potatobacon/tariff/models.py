@@ -47,6 +47,29 @@ class TariffOverlayResultModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class DutyBreakdownModel(BaseModel):
+    """Full duty breakdown across all layers for API responses."""
+
+    base_rate: float
+    section_232_rate: float = 0.0
+    section_301_rate: float = 0.0
+    ad_duty_rate: float = 0.0
+    cvd_duty_rate: float = 0.0
+    exclusion_relief_rate: float = 0.0
+    fta_preference_pct: float = 0.0
+    total_duty_rate: float
+    effective_base_rate: float
+
+    has_232_exposure: bool = False
+    has_301_exposure: bool = False
+    has_adcvd_exposure: bool = False
+    has_fta_preference: bool = False
+    has_active_exclusion: bool = False
+    stop_optimization: bool = False
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class TariffFeasibility(BaseModel):
     """Implementation feasibility and cost profile for an optimization lever."""
 
@@ -167,6 +190,8 @@ class TariffDossierModel(BaseModel):
     active_codes_baseline: List[str]
     active_codes_optimized: List[str]
     provenance_chain: List[Dict[str, Any]]
+    baseline_duty_breakdown: Optional["DutyBreakdownModel"] = None
+    optimized_duty_breakdown: Optional["DutyBreakdownModel"] = None
     overlays: Dict[str, List["TariffOverlayResultModel"]] | None = None
     tariff_manifest_hash: Optional[str] = None
     metrics: Optional[Dict[str, Any]] = None
