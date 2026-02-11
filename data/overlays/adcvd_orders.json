@@ -45,13 +45,25 @@
       "order_id": "A-570-848",
       "type": "AD",
       "product_description": "Certain Steel Threaded Rod",
-      "hts_prefixes": ["7318"],
+      "hts_prefixes": ["7318.15"],
       "origin_countries": ["CN"],
       "duty_rate_pct": 206.0,
       "effective_date": "2009-04-14",
       "status": "active",
       "case_number": "A-570-848",
       "federal_register_citation": "74 FR 17154"
+    },
+    {
+      "order_id": "A-570-056",
+      "type": "AD",
+      "product_description": "Steel Fasteners (Bolts, Nuts, Screws)",
+      "hts_prefixes": ["7318.11", "7318.12", "7318.13", "7318.14", "7318.16", "7318.19", "7318.21", "7318.22", "7318.23", "7318.24", "7318.29"],
+      "origin_countries": ["CN"],
+      "duty_rate_pct": 78.21,
+      "effective_date": "2020-04-30",
+      "status": "active",
+      "case_number": "A-570-056",
+      "federal_register_citation": "85 FR 24068"
     },
     {
       "order_id": "A-570-601",
