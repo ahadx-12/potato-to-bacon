@@ -12,6 +12,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from potatobacon.proofs.canonical import canonical_json
 
+# Sprint E: S3 integration
+USE_S3 = os.getenv("PTB_EVIDENCE_BACKEND", "local").lower() == "s3"
+
+if USE_S3:
+    from potatobacon.storage.s3_backend import get_s3_backend
+    from potatobacon.db.models import EvidenceMetadata
+    from potatobacon.db.session import get_standalone_session
+
 
 ALLOWED_CONTENT_TYPES = {
     "application/pdf",
@@ -146,8 +154,139 @@ class EvidenceStore:
 _DEFAULT_EVIDENCE_STORE: Optional[EvidenceStore] = None
 
 
-def get_default_evidence_store(index_path: Path | None = None, data_dir: Path | None = None) -> EvidenceStore:
-    """Return a singleton evidence store configured for the current environment."""
+# ---------------------------------------------------------------------------
+# S3-backed evidence store (Sprint E)
+# ---------------------------------------------------------------------------
+if USE_S3:
+    class S3EvidenceStore:
+        """S3-backed evidence store with PostgreSQL metadata."""
+
+        def __init__(self, tenant_id: str = "default"):
+            self.tenant_id = tenant_id
+            self.s3 = get_s3_backend()
+
+        def _validate_type(self, content_type: str) -> None:
+            normalized = content_type.lower()
+            if normalized not in ALLOWED_CONTENT_TYPES:
+                raise ValueError(f"Unsupported content type: {content_type}")
+
+        def save(
+            self,
+            content: bytes,
+            *,
+            filename: str,
+            content_type: str,
+            evidence_kind: str | None = None,
+        ) -> EvidenceRecord:
+            """Upload evidence to S3 and store metadata in PostgreSQL."""
+            self._validate_type(content_type)
+
+            # Compute SHA-256 for content addressing
+            digest = sha256(content).hexdigest()
+            now = datetime.now(timezone.utc)
+            byte_length = len(content)
+
+            # Upload to S3
+            s3_key = self.s3.save_evidence(
+                tenant_id=self.tenant_id,
+                evidence_id=digest,
+                content=content,
+                content_type=content_type,
+                original_filename=filename,
+            )
+
+            # Store metadata in PostgreSQL
+            with get_standalone_session() as session:
+                # Check if already exists
+                existing = session.query(EvidenceMetadata).filter_by(
+                    evidence_id=digest
+                ).first()
+
+                if existing:
+                    # Return existing record
+                    return EvidenceRecord(
+                        evidence_id=existing.evidence_id,
+                        original_filename=existing.original_filename,
+                        content_type=existing.content_type,
+                        byte_length=existing.byte_length,
+                        sha256=existing.evidence_id,
+                        uploaded_at=existing.uploaded_at.isoformat(),
+                        evidence_kind=existing.evidence_kind,
+                    )
+
+                # Create new metadata record
+                metadata = EvidenceMetadata(
+                    evidence_id=digest,
+                    tenant_id=self.tenant_id,
+                    original_filename=filename,
+                    content_type=content_type,
+                    byte_length=byte_length,
+                    s3_bucket=self.s3.bucket,
+                    s3_key=s3_key,
+                    evidence_kind=evidence_kind,
+                    uploaded_at=now,
+                )
+                session.add(metadata)
+                session.commit()
+
+                return EvidenceRecord(
+                    evidence_id=digest,
+                    original_filename=filename,
+                    content_type=content_type,
+                    byte_length=byte_length,
+                    sha256=digest,
+                    uploaded_at=now.isoformat(),
+                    evidence_kind=evidence_kind,
+                )
+
+        def get(self, evidence_id: str) -> Optional[EvidenceRecord]:
+            """Get evidence metadata from PostgreSQL."""
+            with get_standalone_session() as session:
+                metadata = session.query(EvidenceMetadata).filter_by(
+                    evidence_id=evidence_id
+                ).first()
+
+                if not metadata:
+                    return None
+
+                return EvidenceRecord(
+                    evidence_id=metadata.evidence_id,
+                    original_filename=metadata.original_filename,
+                    content_type=metadata.content_type,
+                    byte_length=metadata.byte_length,
+                    sha256=metadata.evidence_id,
+                    uploaded_at=metadata.uploaded_at.isoformat(),
+                    evidence_kind=metadata.evidence_kind,
+                )
+
+        def exists(self, evidence_id: str) -> bool:
+            """Check if evidence exists."""
+            return self.get(evidence_id) is not None
+
+        def retrieve_blob(self, evidence_id: str) -> Optional[bytes]:
+            """Download evidence from S3."""
+            return self.s3.get_evidence(self.tenant_id, evidence_id)
+
+        def get_presigned_url(self, evidence_id: str, expiration: int = 3600) -> Optional[str]:
+            """Generate presigned URL for direct download."""
+            with get_standalone_session() as session:
+                metadata = session.query(EvidenceMetadata).filter_by(
+                    evidence_id=evidence_id
+                ).first()
+
+                if not metadata:
+                    return None
+
+                return self.s3.generate_presigned_url(metadata.s3_key, expiration)
+
+
+def get_default_evidence_store(index_path: Path | None = None, data_dir: Path | None = None, tenant_id: str = "default") -> EvidenceStore:
+    """Return a singleton evidence store (S3 or local filesystem).
+
+    Sprint E: Returns S3EvidenceStore when PTB_EVIDENCE_BACKEND=s3, otherwise local filesystem.
+    """
+    if USE_S3:
+        return S3EvidenceStore(tenant_id=tenant_id)
 
     global _DEFAULT_EVIDENCE_STORE
     resolved_index = index_path or _default_index_path()

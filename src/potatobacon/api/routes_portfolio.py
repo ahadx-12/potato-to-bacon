@@ -10,6 +10,7 @@ Provides the data layer for the importer dashboard:
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -19,6 +20,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from potatobacon.api.security import require_api_key
 from potatobacon.api.tenants import Tenant, get_registry, resolve_tenant_from_request
 from potatobacon.tariff.sku_store import get_default_sku_store
+
+# Sprint E: PostgreSQL integration
+USE_POSTGRES = os.getenv("PTB_STORAGE_BACKEND", "jsonl").lower() == "postgres"
+
+if USE_POSTGRES:
+    from potatobacon.db.models import Alert as AlertModel
+    from potatobacon.db.session import get_standalone_session
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/portfolio", tags=["portfolio"])
@@ -85,15 +93,59 @@ _alerts: Dict[str, List[ScheduleAlert]] = {}  # tenant_id -> alerts
 
 
 def register_alert(tenant_id: str, alert: ScheduleAlert) -> None:
-    """Register a schedule change alert for a tenant."""
-    if tenant_id not in _alerts:
-        _alerts[tenant_id] = []
-    _alerts[tenant_id].append(alert)
+    """Register a schedule change alert (PostgreSQL or in-memory)."""
+    if USE_POSTGRES:
+        with get_standalone_session() as session:
+            alert_model = AlertModel(
+                alert_id=alert.alert_id,
+                tenant_id=tenant_id,
+                sku_id=alert.sku_id,
+                change_type=alert.change_type,
+                current_hts=alert.current_hts,
+                old_rate=alert.old_rate,
+                new_rate=alert.new_rate,
+                description=alert.description,
+                detected_at=datetime.fromisoformat(alert.detected_at) if isinstance(alert.detected_at, str) else alert.detected_at,
+                acknowledged=alert.acknowledged,
+            )
+            session.add(alert_model)
+            session.commit()
+    else:
+        if tenant_id not in _alerts:
+            _alerts[tenant_id] = []
+        _alerts[tenant_id].append(alert)
 
 
-def get_alerts(tenant_id: str) -> List[ScheduleAlert]:
-    """Get all alerts for a tenant."""
-    return _alerts.get(tenant_id, [])
+def get_alerts(tenant_id: str, acknowledged: Optional[bool] = None) -> List[ScheduleAlert]:
+    """Get all alerts for a tenant (PostgreSQL or in-memory)."""
+    if USE_POSTGRES:
+        with get_standalone_session() as session:
+            query = session.query(AlertModel).filter_by(tenant_id=tenant_id)
+
+            if acknowledged is not None:
+                query = query.filter_by(acknowledged=acknowledged)
+
+            alerts = query.order_by(AlertModel.detected_at.desc()).limit(100).all()
+
+            return [
+                ScheduleAlert(
+                    alert_id=a.alert_id,
+                    sku_id=a.sku_id,
+                    current_hts=a.current_hts,
+                    change_type=a.change_type,
+                    old_rate=a.old_rate,
+                    new_rate=a.new_rate,
+                    description=a.description,
+                    detected_at=a.detected_at.isoformat(),
+                    acknowledged=a.acknowledged,
+                )
+                for a in alerts
+            ]
+    else:
+        alerts = _alerts.get(tenant_id, [])
+        if acknowledged is not None:
+            alerts = [a for a in alerts if a.acknowledged == acknowledged]
+        return alerts
 
 
 # ---------------------------------------------------------------------------
@@ -188,10 +240,7 @@ def portfolio_alerts(
     acknowledged: Optional[bool] = Query(default=None),
 ) -> List[ScheduleAlert]:
     """Get schedule change alerts affecting this tenant's SKUs."""
-    alerts = get_alerts(tenant.tenant_id)
-    if acknowledged is not None:
-        alerts = [a for a in alerts if a.acknowledged == acknowledged]
-    return alerts
+    return get_alerts(tenant.tenant_id, acknowledged=acknowledged)
 
 
 @router.post("/alerts/{alert_id}/acknowledge")
@@ -201,9 +250,25 @@ def acknowledge_alert(
     tenant: Tenant = Depends(resolve_tenant_from_request),
 ) -> Dict[str, Any]:
     """Acknowledge a schedule change alert."""
-    alerts = get_alerts(tenant.tenant_id)
-    for alert in alerts:
-        if alert.alert_id == alert_id:
+    if USE_POSTGRES:
+        with get_standalone_session() as session:
+            alert = session.query(AlertModel).filter_by(
+                alert_id=alert_id,
+                tenant_id=tenant.tenant_id
+            ).first()
+
+            if not alert:
+                raise HTTPException(status_code=404, detail="Alert not found")
+
             alert.acknowledged = True
+            alert.acknowledged_at = datetime.now(timezone.utc)
+            session.commit()
+
             return {"status": "OK", "alert_id": alert_id}
-    raise HTTPException(status_code=404, detail="Alert not found")
+    else:
+        alerts = get_alerts(tenant.tenant_id)
+        for alert in alerts:
+            if alert.alert_id == alert_id:
+                alert.acknowledged = True
+                return {"status": "OK", "alert_id": alert_id}
+        raise HTTPException(status_code=404, detail="Alert not found")
