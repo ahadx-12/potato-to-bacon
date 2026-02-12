@@ -9,14 +9,17 @@ that accounts for all duty layers.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 from potatobacon.tariff.adcvd_registry import ADCVDLookupResult, ADCVDRegistry, get_adcvd_registry
 from potatobacon.tariff.exclusion_tracker import ExclusionLookupResult, ExclusionTracker, get_exclusion_tracker
 from potatobacon.tariff.fta_engine import FTALookupResult, FTAPreferenceEngine, get_fta_engine
 from potatobacon.tariff.models import TariffOverlayResultModel
 from potatobacon.tariff.overlays import effective_duty_rate, evaluate_overlays
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -47,6 +50,10 @@ class DutyBreakdown:
     has_active_exclusion: bool = False
     stop_optimization: bool = False
 
+    # Rate resolution metadata
+    base_rate_source: str = "manual"
+    base_rate_warning: Optional[str] = None
+
     @property
     def overlay_total(self) -> float:
         """Sum of Section 232 + 301 overlay rates, net of exclusions."""
@@ -67,7 +74,7 @@ class DutyBreakdown:
 
 def compute_total_duty(
     *,
-    base_rate: float,
+    base_rate: Optional[float] = None,
     hts_code: str = "",
     origin_country: str = "",
     import_country: str = "US",
@@ -84,6 +91,8 @@ def compute_total_duty(
     ----------
     base_rate:
         The base ad-valorem duty rate from HTS classification.
+        When *None*, the rate is auto-resolved from the MFN rate store
+        using *hts_code*.
     hts_code:
         Full or partial HTS code for overlay matching.
     origin_country:
@@ -105,6 +114,35 @@ def compute_total_duty(
     """
     facts = facts or {}
     active_codes = list(active_codes or [])
+
+    # --- Auto-resolve base rate from rate store when not provided ---
+    base_rate_source = "manual"
+    base_rate_warning: Optional[str] = None
+
+    if base_rate is None:
+        from potatobacon.tariff.rate_store import get_rate_store
+
+        rate_store = get_rate_store()
+        lookup = rate_store.lookup(hts_code)
+        if lookup.found and lookup.ad_valorem_rate is not None:
+            base_rate = lookup.ad_valorem_rate
+            base_rate_source = f"auto:{lookup.match_level}"
+            if lookup.warning:
+                base_rate_warning = lookup.warning
+            logger.debug(
+                "Auto-resolved base rate for %s: %.2f%% (%s)",
+                hts_code, base_rate, lookup.match_level,
+            )
+        elif lookup.found and lookup.requires_manual_review:
+            base_rate = 0.0
+            base_rate_source = "manual_review_required"
+            base_rate_warning = lookup.warning or f"Rate for {hts_code} requires manual review"
+            logger.warning("Rate for %s requires manual review: %s", hts_code, lookup.warning)
+        else:
+            raise ValueError(
+                f"HTS code {hts_code!r} not found in rate store and no base_rate supplied. "
+                "Provide base_rate explicitly or ensure the rate store is populated."
+            )
 
     # --- Section 232/301 overlays ---
     if overlays is None:
@@ -190,6 +228,8 @@ def compute_total_duty(
         has_fta_preference=fta_preference_pct > 0,
         has_active_exclusion=exclusion_result.has_active_exclusion if exclusion_result else False,
         stop_optimization=stop_opt,
+        base_rate_source=base_rate_source,
+        base_rate_warning=base_rate_warning,
     )
 
 

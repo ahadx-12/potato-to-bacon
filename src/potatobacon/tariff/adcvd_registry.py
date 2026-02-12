@@ -30,6 +30,16 @@ class ADCVDOrder:
 
 
 @dataclass(frozen=True)
+class ADCVDOrderMatch:
+    """Single AD/CVD order match with confidence metadata."""
+
+    order: ADCVDOrder
+    confidence: str  # "high" (6+ digit match) or "low" (4-digit broad match)
+    matched_prefix: str
+    note: str
+
+
+@dataclass(frozen=True)
 class ADCVDLookupResult:
     """Result of an AD/CVD lookup for a specific HTS code + origin."""
 
@@ -39,6 +49,9 @@ class ADCVDLookupResult:
     total_cvd_rate: float
     combined_rate: float
     has_exposure: bool
+    confidence: str = "none"  # "high", "low", or "none"
+    confidence_note: str = ""
+    order_matches: tuple[ADCVDOrderMatch, ...] = ()
 
 
 def _default_data_path() -> Path:
@@ -83,14 +96,41 @@ class ADCVDRegistry:
 
         ad_orders: list[ADCVDOrder] = []
         cvd_orders: list[ADCVDOrder] = []
+        order_matches: list[ADCVDOrderMatch] = []
 
         for order in self._orders:
             if order.status != "active":
                 continue
             if origin_norm not in order.origin_countries:
                 continue
-            if not any(_matches_prefix(hts_digits, pfx) for pfx in order.hts_prefixes):
+            matched_pfx: str | None = None
+            for pfx in order.hts_prefixes:
+                if _matches_prefix(hts_digits, pfx):
+                    matched_pfx = pfx
+                    break
+            if matched_pfx is None:
                 continue
+
+            # Determine confidence based on prefix specificity
+            pfx_digits = _normalize_hts(matched_pfx)
+            if len(pfx_digits) >= 6:
+                confidence = "high"
+                note = f"Matched at {len(pfx_digits)}-digit level ({matched_pfx})"
+            else:
+                confidence = "low"
+                note = (
+                    f"Broad HTS prefix match ({matched_pfx}, {len(pfx_digits)} digits) "
+                    "— verify product is within order scope"
+                )
+
+            match = ADCVDOrderMatch(
+                order=order,
+                confidence=confidence,
+                matched_prefix=matched_pfx,
+                note=note,
+            )
+            order_matches.append(match)
+
             if order.order_type == "AD":
                 ad_orders.append(order)
             elif order.order_type == "CVD":
@@ -99,6 +139,18 @@ class ADCVDRegistry:
         total_ad = sum(o.duty_rate_pct for o in ad_orders)
         total_cvd = sum(o.duty_rate_pct for o in cvd_orders)
 
+        # Overall confidence is the lowest of any match
+        if not order_matches:
+            overall_confidence = "none"
+            confidence_note = ""
+        elif any(m.confidence == "low" for m in order_matches):
+            overall_confidence = "low"
+            low_notes = [m.note for m in order_matches if m.confidence == "low"]
+            confidence_note = "; ".join(low_notes)
+        else:
+            overall_confidence = "high"
+            confidence_note = "All matches at 6+ digit specificity"
+
         return ADCVDLookupResult(
             ad_orders=tuple(sorted(ad_orders, key=lambda o: o.order_id)),
             cvd_orders=tuple(sorted(cvd_orders, key=lambda o: o.order_id)),
@@ -106,6 +158,9 @@ class ADCVDRegistry:
             total_cvd_rate=total_cvd,
             combined_rate=total_ad + total_cvd,
             has_exposure=bool(ad_orders or cvd_orders),
+            confidence=overall_confidence,
+            confidence_note=confidence_note,
+            order_matches=tuple(order_matches),
         )
 
     def lookup_by_hts(self, hts_code: str) -> list[ADCVDOrder]:

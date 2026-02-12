@@ -91,6 +91,40 @@ def _matches_prefix(hts_digits: str, prefix: str) -> bool:
     return hts_digits.startswith(prefix_digits)
 
 
+def _lookup_special_rate(hts_code: str, origin_country: str) -> float | None:
+    """Look up the USITC Special-column preferential rate for *origin_country*.
+
+    Returns the preference percentage (100.0 for Free, calculated otherwise),
+    or *None* when no Special-column entry exists.
+    """
+    try:
+        from potatobacon.tariff.rate_store import get_rate_store
+    except Exception:
+        return None
+
+    store = get_rate_store()
+    if store.entry_count == 0:
+        return None
+
+    result = store.lookup_special(hts_code, origin_country)
+    if not result.found:
+        return None
+
+    if result.is_free:
+        return 100.0
+
+    # Non-free preferential rate — convert to percentage preference
+    if result.ad_valorem_rate is not None:
+        # Look up the general rate to compute the preference %
+        general = store.lookup(hts_code)
+        if general.found and general.ad_valorem_rate and general.ad_valorem_rate > 0:
+            reduction = general.ad_valorem_rate - result.ad_valorem_rate
+            return max(0.0, min(100.0, (reduction / general.ad_valorem_rate) * 100.0))
+        if result.ad_valorem_rate == 0.0:
+            return 100.0
+    return None
+
+
 def _evaluate_single_program(
     program: FTAProgram,
     hts_code: str,
@@ -232,7 +266,18 @@ def _evaluate_single_program(
     # Only explicit failures ("failed", "not met", "below") are hard blockers
     hard_blockers = [m for m in missing if "not met" in m.lower() or "failed" in m.lower() or "below" in m.lower()]
     eligible = len(hard_blockers) == 0
-    preference_pct = program.default_preference_pct if eligible else 0.0
+
+    # Determine preference rate: check Special column from rate store first,
+    # then fall back to program default.
+    preference_pct = 0.0
+    if eligible:
+        special_rate = _lookup_special_rate(hts_code, origin_country)
+        if special_rate is not None:
+            # Special column found — use it.  "Free" = 100% preference.
+            preference_pct = special_rate
+            reasons.append(f"Special column rate applied ({origin_norm})")
+        else:
+            preference_pct = program.default_preference_pct
 
     return FTAEligibilityResult(
         program_id=program.program_id,
