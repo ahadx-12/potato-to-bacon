@@ -17,13 +17,28 @@ def _parse_api_keys(raw: str | None) -> set[str]:
     return {key.strip() for key in raw.split(",") if key.strip()}
 
 
+# Mutable shared set — allows runtime key registration
+_allowed_keys: set[str] = set()
+_keys_initialized = False
+
+
 def allowed_api_keys() -> set[str]:
     """Return the configured API keys from env or fallback to a dev key."""
+    global _keys_initialized
+    if not _keys_initialized:
+        env_keys = _parse_api_keys(os.getenv("CALE_API_KEYS"))
+        if env_keys:
+            _allowed_keys.update(env_keys)
+        if not _allowed_keys:
+            _allowed_keys.add("dev-key")
+        _keys_initialized = True
+    return _allowed_keys
 
-    keys = _parse_api_keys(os.getenv("CALE_API_KEYS"))
-    if not keys:
-        keys = {"dev-key"}
-    return keys
+
+def register_api_key(key: str) -> None:
+    """Dynamically register an API key at runtime (used by provision_tenant)."""
+    allowed_api_keys()  # ensure initialized
+    _allowed_keys.add(key)
 
 
 class RateLimiter:

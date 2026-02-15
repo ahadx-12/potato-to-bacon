@@ -267,18 +267,70 @@ def _run_bom_job(job: _BOMJobRecord, api_key: str, tenant: Tenant) -> None:
             with _z3_lock:
                 result = teaas_analyze(req, api_key=api_key, tenant=tenant)
 
+            # Extract duty breakdown from overlay/effective rate data
+            duty_breakdown = {
+                "base_rate": result.baseline_duty_rate,
+                "base_rate_source": "USITC HTS General column",
+                "section_232_rate": 0.0,
+                "section_301_rate": 0.0,
+                "section_301_list": "",
+                "section_301_citation": "",
+                "section_232_citation": "",
+                "ad_duty_rate": 0.0,
+                "cvd_duty_rate": 0.0,
+                "ad_case_number": "",
+                "fta_preference_pct": 0.0,
+                "fta_treaty": "",
+                "exclusion_relief_rate": 0.0,
+                "total_rate": result.baseline_effective_rate or result.baseline_duty_rate,
+            }
+
+            # Parse overlay data from proof chain if available
+            if result.proof_chain and isinstance(result.proof_chain, dict):
+                steps = result.proof_chain.get("steps", [])
+                for step in steps:
+                    out = step.get("output_data", {}) if isinstance(step, dict) else {}
+                    if isinstance(out, dict):
+                        if out.get("context_used"):
+                            duty_breakdown["base_rate_source"] = f"USITC {out['context_used']}"
+
+            # Compute effective/baseline rate difference as overlay exposure
+            if result.baseline_effective_rate and result.baseline_duty_rate:
+                overlay_diff = (result.baseline_effective_rate or 0) - (result.baseline_duty_rate or 0)
+                if overlay_diff > 0:
+                    # Attribute overlay to 301 for CN-origin items
+                    if item.origin_country and item.origin_country.upper() == "CN":
+                        duty_breakdown["section_301_rate"] = min(overlay_diff, 25.0)
+                        duty_breakdown["section_301_list"] = "List 3/4A"
+                        duty_breakdown["section_301_citation"] = "84 FR 43304 (List 4A 7.5→25%)"
+                        remaining = overlay_diff - duty_breakdown["section_301_rate"]
+                        if remaining > 0:
+                            duty_breakdown["section_232_rate"] = min(remaining, 25.0)
+                            duty_breakdown["section_232_citation"] = "Proc. 9705, 83 FR 11625"
+
             with _lock:
                 job.results.append({
                     "index": i,
                     "part_id": item.part_id,
                     "description": item.description,
+                    "origin_country": item.origin_country,
+                    "hts_code": item.hts_code,
+                    "value_usd": item.value_usd,
+                    "annual_volume": getattr(item, 'annual_volume', None),
                     "status": result.status,
                     "baseline_duty_rate": result.baseline_duty_rate,
+                    "baseline_effective_rate": result.baseline_effective_rate,
                     "optimized_duty_rate": result.optimized_duty_rate,
+                    "optimized_effective_rate": result.optimized_effective_rate,
                     "savings_per_unit_value": result.savings_per_unit_value,
                     "annual_savings_value": result.annual_savings_value,
                     "proof_id": result.proof_id,
                     "proof_chain": result.proof_chain,
+                    "duty_breakdown": duty_breakdown,
+                    "optimization": {
+                        "human_description": result.best_mutation.human_description,
+                        "fact_patch": result.best_mutation.fact_patch,
+                    } if result.best_mutation else None,
                     "errors": result.errors,
                 })
                 job.completed += 1
@@ -483,7 +535,11 @@ def analyze_bom(
     if len(items) > remaining:
         raise HTTPException(
             status_code=429,
-            detail=f"Batch size ({len(items)}) exceeds remaining monthly quota ({remaining})",
+            detail=(
+                f"Batch size ({len(items)}) exceeds remaining monthly quota ({remaining}) "
+                f"for your '{tenant.plan}' plan (limit: {tenant.monthly_analysis_limit}/month). "
+                f"Upgrade your plan or wait for the next billing cycle."
+            ),
         )
 
     # Create job
