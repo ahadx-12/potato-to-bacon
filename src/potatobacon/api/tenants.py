@@ -11,12 +11,16 @@ Sprint E: Added PostgreSQL backend support via PTB_STORAGE_BACKEND env var.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
-from dataclasses import dataclass, field
+import threading
+from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
-from fastapi import HTTPException, Request
+if TYPE_CHECKING:
+    from fastapi import Request
 
 # Sprint E: PostgreSQL integration
 USE_POSTGRES = os.getenv("PTB_STORAGE_BACKEND", "jsonl").lower() == "postgres"
@@ -45,6 +49,13 @@ class Tenant:
     monthly_analysis_limit: int = 500
     metadata: Dict[str, Any] = field(default_factory=dict)
 
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> Tenant:
+        return cls(**data)
+
 
 # ---------------------------------------------------------------------------
 # Registry (in-memory for MVP, PostgreSQL for production)
@@ -52,9 +63,33 @@ class Tenant:
 class TenantRegistry:
     """Maps API keys to tenants and enforces rate limits."""
 
-    def __init__(self) -> None:
+    def __init__(self, path: Optional[Path] = None) -> None:
         self._tenants: Dict[str, Tenant] = {}
         self._key_to_tenant: Dict[str, str] = {}
+        self.path = path or Path(os.getenv("PTB_DATA_ROOT", ".")) / "data" / "tenants.json"
+        self._lock = threading.Lock()
+        self._load()
+
+    def _load(self) -> None:
+        if not self.path.exists():
+            return
+        try:
+            with self.path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+                for t_data in data.get("tenants", []):
+                    tenant = Tenant.from_dict(t_data)
+                    self._tenants[tenant.tenant_id] = tenant
+                    for key in tenant.api_keys:
+                        self._key_to_tenant[key] = tenant.tenant_id
+        except Exception:
+            pass
+
+    def _persist(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        data = {"tenants": [t.to_dict() for t in self._tenants.values()]}
+        with self._lock:
+            with self.path.open("w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
 
     def register_tenant(
         self,
@@ -72,33 +107,57 @@ class TenantRegistry:
             sku_limit=_plan_limits(plan)["sku_limit"],
             monthly_analysis_limit=_plan_limits(plan)["monthly_analyses"],
         )
-        self._tenants[tenant_id] = tenant
-        self._key_to_tenant[api_key] = tenant_id
+        with self._lock:
+            self._tenants[tenant_id] = tenant
+            self._key_to_tenant[api_key] = tenant_id
+            self._persist()
+
+        # Also register in security layer if running in same process
+        try:
+            from potatobacon.api.security import register_api_key
+            register_api_key(api_key)
+        except ImportError:
+            pass
+
         return tenant
 
     def add_api_key(self, tenant_id: str, api_key: str) -> None:
         """Associate an additional API key with a tenant."""
-        if tenant_id not in self._tenants:
-            raise KeyError(f"Unknown tenant: {tenant_id}")
-        self._tenants[tenant_id].api_keys.append(api_key)
-        self._key_to_tenant[api_key] = tenant_id
+        with self._lock:
+            if tenant_id not in self._tenants:
+                raise KeyError(f"Unknown tenant: {tenant_id}")
+            self._tenants[tenant_id].api_keys.append(api_key)
+            self._key_to_tenant[api_key] = tenant_id
+            self._persist()
 
     def resolve(self, api_key: str) -> Optional[Tenant]:
         """Look up the tenant for an API key."""
         tenant_id = self._key_to_tenant.get(api_key)
+        if tenant_id is None:
+            # Try reloading in case another process updated it
+            self._load()
+            tenant_id = self._key_to_tenant.get(api_key)
+
         if tenant_id is None:
             return None
         return self._tenants.get(tenant_id)
 
     def get_tenant(self, tenant_id: str) -> Optional[Tenant]:
         """Look up a tenant by ID."""
-        return self._tenants.get(tenant_id)
+        tenant = self._tenants.get(tenant_id)
+        if not tenant:
+             # Try reloading
+            self._load()
+            tenant = self._tenants.get(tenant_id)
+        return tenant
 
     def increment_usage(self, tenant_id: str) -> None:
         """Increment the monthly analysis counter."""
-        tenant = self._tenants.get(tenant_id)
-        if tenant:
-            tenant.monthly_analyses += 1
+        with self._lock:
+            tenant = self._tenants.get(tenant_id)
+            if tenant:
+                tenant.monthly_analyses += 1
+                self._persist()
 
     def check_rate_limit(self, tenant: Tenant) -> bool:
         """Return True if the tenant is within their monthly limit."""
@@ -279,6 +338,8 @@ def resolve_tenant_from_request(request: Request) -> Tenant:
 
     Returns the Tenant or raises 401/429.
     """
+    from fastapi import HTTPException
+
     api_key = request.headers.get("X-API-Key") or os.getenv("PTB_API_KEY", "dev-key-local")
     registry = get_registry()
     tenant = registry.resolve(api_key)

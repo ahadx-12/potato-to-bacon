@@ -43,10 +43,6 @@ def main() -> None:
     tenant_id = args.tenant_id or f"tenant_{secrets.token_hex(6)}"
     api_key = args.api_key or f"ptb_{secrets.token_urlsafe(32)}"
 
-    # Register in security layer (CALE_API_KEYS)
-    from potatobacon.api.security import register_api_key
-    register_api_key(api_key)
-
     # Register in tenant registry
     from potatobacon.api.tenants import get_registry
     registry = get_registry()

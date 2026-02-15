@@ -98,7 +98,21 @@ def require_api_key(
     keys = allowed_api_keys()
     if not x_api_key:
         raise HTTPException(status_code=401, detail={"message": "Missing API key"})
-    if x_api_key not in keys:
+
+    valid = False
+    if x_api_key in keys:
+        valid = True
+    else:
+        # Check tenant registry
+        try:
+            from potatobacon.api.tenants import get_registry
+            registry = get_registry()
+            if registry.resolve(x_api_key):
+                valid = True
+        except ImportError:
+            pass
+
+    if not valid:
         raise HTTPException(status_code=401, detail={"message": "Invalid API key"})
 
     route = request.url.path
@@ -117,4 +131,3 @@ def set_rate_limit(limit: int) -> None:
             pass
     rate_limiter.rate_per_minute = max(1, int(limit))
     rate_limiter.reset()
-
