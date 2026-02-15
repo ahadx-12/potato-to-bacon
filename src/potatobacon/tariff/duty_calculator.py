@@ -36,6 +36,12 @@ class DutyBreakdown:
     total_duty_rate: float
     effective_base_rate: float  # base_rate adjusted by FTA preference
 
+    # Specific/compound rate components
+    specific_duty_amount: float = 0.0  # Absolute $ amount from specific rates
+    compound_ad_valorem_amount: float = 0.0  # Ad valorem $ amount (for compound)
+    is_specific_or_compound: bool = False
+    rate_type: str = "ad_valorem"  # ad_valorem | specific | compound | compound_max | free
+
     # Component details
     overlays: list[TariffOverlayResultModel] = field(default_factory=list)
     adcvd_result: ADCVDLookupResult | None = None
@@ -78,6 +84,9 @@ def compute_total_duty(
     hts_code: str = "",
     origin_country: str = "",
     import_country: str = "US",
+    declared_value: float | None = None,
+    weight_kg: float | None = None,
+    quantity: int | None = None,
     facts: Mapping[str, Any] | None = None,
     active_codes: Sequence[str] | None = None,
     overlays: list[TariffOverlayResultModel] | None = None,
@@ -118,6 +127,10 @@ def compute_total_duty(
     # --- Auto-resolve base rate from rate store when not provided ---
     base_rate_source = "manual"
     base_rate_warning: Optional[str] = None
+    specific_duty_amount = 0.0
+    compound_ad_valorem_amount = 0.0
+    is_specific_or_compound = False
+    rate_type = "ad_valorem"
 
     if base_rate is None:
         from potatobacon.tariff.rate_store import get_rate_store
@@ -133,6 +146,44 @@ def compute_total_duty(
                 "Auto-resolved base rate for %s: %.2f%% (%s)",
                 hts_code, base_rate, lookup.match_level,
             )
+        elif lookup.found and lookup.parsed_rate is not None:
+            # Handle specific-only and compound rates
+            parsed = lookup.parsed_rate
+            if parsed.specific_amount is not None and parsed.ad_valorem_pct is None:
+                # Specific rate only — compute from weight/quantity
+                base_rate = 0.0  # No ad valorem component
+                rate_type = "specific"
+                is_specific_or_compound = True
+                base_rate_source = f"auto:{lookup.match_level}"
+                if weight_kg is not None:
+                    specific_duty_amount = parsed.specific_amount * weight_kg
+                elif quantity is not None:
+                    specific_duty_amount = parsed.specific_amount * quantity
+                else:
+                    base_rate_warning = (
+                        f"Specific rate {parsed.raw} requires weight_kg or quantity "
+                        "to compute duty amount"
+                    )
+            elif parsed.is_compound:
+                # Compound rate: ad valorem + specific
+                base_rate = parsed.ad_valorem_pct / 100.0 if parsed.ad_valorem_pct else 0.0
+                rate_type = "compound"
+                is_specific_or_compound = True
+                base_rate_source = f"auto:{lookup.match_level}"
+                if parsed.specific_amount is not None:
+                    if weight_kg is not None:
+                        specific_duty_amount = parsed.specific_amount * weight_kg
+                    elif quantity is not None:
+                        specific_duty_amount = parsed.specific_amount * quantity
+                if declared_value is not None and base_rate > 0:
+                    compound_ad_valorem_amount = base_rate * declared_value
+                if lookup.warning:
+                    base_rate_warning = lookup.warning
+            else:
+                base_rate = 0.0
+                base_rate_source = "manual_review_required"
+                base_rate_warning = lookup.warning or f"Rate for {hts_code} requires manual review"
+                logger.warning("Rate for %s requires manual review: %s", hts_code, lookup.warning)
         elif lookup.found and lookup.requires_manual_review:
             base_rate = 0.0
             base_rate_source = "manual_review_required"
@@ -218,6 +269,10 @@ def compute_total_duty(
         fta_preference_pct=fta_preference_pct,
         total_duty_rate=total,
         effective_base_rate=effective_base,
+        specific_duty_amount=specific_duty_amount,
+        compound_ad_valorem_amount=compound_ad_valorem_amount,
+        is_specific_or_compound=is_specific_or_compound,
+        rate_type=rate_type,
         overlays=list(overlays),
         adcvd_result=adcvd_result,
         exclusion_result=exclusion_result,

@@ -19,6 +19,7 @@ class _OverlayRule:
     stop_optimization: bool = False
     origin_countries: tuple[str, ...] = ()
     import_countries: tuple[str, ...] = ()
+    match_level: str = ""  # exact_8digit | heading_fallback | ""
 
 
 def _data_root(base_path: str | None = None) -> Path:
@@ -58,32 +59,101 @@ def _normalize_text(value: str) -> str:
 def _load_overlay_rules(base_path: str | None) -> tuple[_OverlayRule, ...]:
     base_dir = _data_root(base_path)
     rules: list[_OverlayRule] = []
-    for filename in sorted(["section232_sample.json", "section301_sample.json"]):
-        for path in sorted(base_dir.glob(filename)):
-            for entry in _load_overlay_payload(path):
-                prefixes = tuple(str(prefix) for prefix in entry.get("hts_prefixes", []))
-                rules.append(
-                    _OverlayRule(
-                        overlay_name=str(entry.get("overlay_name") or entry.get("name") or "unknown"),
-                        hts_prefixes=prefixes,
-                        additional_rate=float(entry.get("additional_rate") or 0.0),
-                        reason=str(entry.get("reason") or "unspecified"),
-                        requires_review=bool(entry.get("requires_review", False)),
-                        stop_optimization=bool(entry.get("stop_optimization", False)),
-                        origin_countries=tuple(
-                            _normalize_country(country)
-                            for country in entry.get("origin_countries", [])
-                            if _normalize_country(country)
-                        ),
-                        import_countries=tuple(
-                            _normalize_country(country)
-                            for country in entry.get("import_countries", [])
-                            if _normalize_country(country)
-                        ),
-                    )
+
+    # Section 232 — always load from sample
+    for path in sorted(base_dir.glob("section232_sample.json")):
+        for entry in _load_overlay_payload(path):
+            prefixes = tuple(str(prefix) for prefix in entry.get("hts_prefixes", []))
+            rules.append(
+                _OverlayRule(
+                    overlay_name=str(entry.get("overlay_name") or entry.get("name") or "unknown"),
+                    hts_prefixes=prefixes,
+                    additional_rate=float(entry.get("additional_rate") or 0.0),
+                    reason=str(entry.get("reason") or "unspecified"),
+                    requires_review=bool(entry.get("requires_review", False)),
+                    stop_optimization=bool(entry.get("stop_optimization", False)),
+                    origin_countries=tuple(
+                        _normalize_country(country)
+                        for country in entry.get("origin_countries", [])
+                        if _normalize_country(country)
+                    ),
+                    import_countries=tuple(
+                        _normalize_country(country)
+                        for country in entry.get("import_countries", [])
+                        if _normalize_country(country)
+                    ),
                 )
+            )
+
+    # Section 301 — prefer subheading-level (8-digit), fall back to heading-level
+    subheading_path = base_dir / "section301_subheading.json"
+    heading_path = base_dir / "section301_sample.json"
+    loaded_301_prefixes: set[str] = set()
+
+    if subheading_path.exists():
+        for entry in _load_overlay_payload(subheading_path):
+            prefixes = tuple(str(prefix) for prefix in entry.get("hts_prefixes", []))
+            for pfx in prefixes:
+                loaded_301_prefixes.add(_normalize_numeric(pfx)[:4])
+            rules.append(
+                _OverlayRule(
+                    overlay_name=str(entry.get("overlay_name") or entry.get("name") or "unknown"),
+                    hts_prefixes=prefixes,
+                    additional_rate=float(entry.get("additional_rate") or 0.0),
+                    reason=str(entry.get("reason") or "unspecified"),
+                    requires_review=bool(entry.get("requires_review", False)),
+                    stop_optimization=bool(entry.get("stop_optimization", False)),
+                    origin_countries=tuple(
+                        _normalize_country(country)
+                        for country in entry.get("origin_countries", [])
+                        if _normalize_country(country)
+                    ),
+                    import_countries=tuple(
+                        _normalize_country(country)
+                        for country in entry.get("import_countries", [])
+                        if _normalize_country(country)
+                    ),
+                    match_level=str(entry.get("match_level", "exact_8digit")),
+                )
+            )
+
+    # Load heading-level 301 as fallback for chapters not covered at 8-digit
+    if heading_path.exists():
+        for entry in _load_overlay_payload(heading_path):
+            prefixes = tuple(str(prefix) for prefix in entry.get("hts_prefixes", []))
+            # Only add heading-level rules for headings not already covered by 8-digit
+            uncovered = [
+                pfx for pfx in prefixes
+                if _normalize_numeric(pfx)[:4] not in loaded_301_prefixes
+            ]
+            if not uncovered and loaded_301_prefixes:
+                continue
+            use_prefixes = tuple(uncovered) if uncovered else prefixes
+            rules.append(
+                _OverlayRule(
+                    overlay_name=str(entry.get("overlay_name") or entry.get("name") or "unknown"),
+                    hts_prefixes=use_prefixes,
+                    additional_rate=float(entry.get("additional_rate") or 0.0),
+                    reason=str(entry.get("reason") or "unspecified"),
+                    requires_review=bool(entry.get("requires_review", False)),
+                    stop_optimization=bool(entry.get("stop_optimization", False)),
+                    origin_countries=tuple(
+                        _normalize_country(country)
+                        for country in entry.get("origin_countries", [])
+                        if _normalize_country(country)
+                    ),
+                    import_countries=tuple(
+                        _normalize_country(country)
+                        for country in entry.get("import_countries", [])
+                        if _normalize_country(country)
+                    ),
+                    match_level="heading_fallback",
+                )
+            )
+
     rules.sort(key=lambda rule: (rule.overlay_name, rule.additional_rate, rule.reason))
     return tuple(rules)
+
 
 
 def _candidate_codes(
@@ -171,6 +241,7 @@ def evaluate_overlays(
                 reason=rule.reason,
                 requires_review=rule.requires_review,
                 stop_optimization=rule.stop_optimization,
+                match_level=rule.match_level,
             )
         )
 

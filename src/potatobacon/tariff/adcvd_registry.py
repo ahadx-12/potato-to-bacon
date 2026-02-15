@@ -27,6 +27,7 @@ class ADCVDOrder:
     status: str
     case_number: str
     federal_register_citation: str
+    scope_keywords: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -34,7 +35,7 @@ class ADCVDOrderMatch:
     """Single AD/CVD order match with confidence metadata."""
 
     order: ADCVDOrder
-    confidence: str  # "high" (6+ digit match) or "low" (4-digit broad match)
+    confidence: str  # "high" (8+ digit match), "high" (6+ digit), "medium" (4-digit), or "low"
     matched_prefix: str
     note: str
 
@@ -58,6 +59,10 @@ def _default_data_path() -> Path:
     return Path(__file__).resolve().parents[3] / "data" / "overlays" / "adcvd_orders.json"
 
 
+def _full_data_path() -> Path:
+    return Path(__file__).resolve().parents[3] / "data" / "overlays" / "adcvd_orders_full.json"
+
+
 def _normalize_hts(code: str) -> str:
     """Strip dots/spaces and return digits only."""
     return "".join(ch for ch in str(code) if ch.isdigit())
@@ -78,8 +83,15 @@ class ADCVDRegistry:
     """Registry of active AD/CVD orders with lookup by HTS + origin."""
 
     def __init__(self, data_path: str | Path | None = None) -> None:
-        path = Path(data_path) if data_path else _default_data_path()
-        self._orders = _load_orders(path)
+        if data_path:
+            self._orders = _load_orders(Path(data_path))
+        else:
+            # Try full database first, fall back to original
+            full = _full_data_path()
+            if full.exists():
+                self._orders = _load_orders(full)
+            else:
+                self._orders = _load_orders(_default_data_path())
 
     @property
     def orders(self) -> tuple[ADCVDOrder, ...]:
@@ -113,9 +125,18 @@ class ADCVDRegistry:
 
             # Determine confidence based on prefix specificity
             pfx_digits = _normalize_hts(matched_pfx)
-            if len(pfx_digits) >= 6:
+            if len(pfx_digits) >= 8:
+                confidence = "high"
+                note = f"Exact 8-digit match ({matched_pfx})"
+            elif len(pfx_digits) >= 6:
                 confidence = "high"
                 note = f"Matched at {len(pfx_digits)}-digit level ({matched_pfx})"
+            elif len(pfx_digits) >= 4:
+                confidence = "medium"
+                note = (
+                    f"Heading-level match ({matched_pfx}, {len(pfx_digits)} digits) "
+                    "— verify product is within order scope"
+                )
             else:
                 confidence = "low"
                 note = (
@@ -147,6 +168,10 @@ class ADCVDRegistry:
             overall_confidence = "low"
             low_notes = [m.note for m in order_matches if m.confidence == "low"]
             confidence_note = "; ".join(low_notes)
+        elif any(m.confidence == "medium" for m in order_matches):
+            overall_confidence = "medium"
+            med_notes = [m.note for m in order_matches if m.confidence == "medium"]
+            confidence_note = "; ".join(med_notes)
         else:
             overall_confidence = "high"
             confidence_note = "All matches at 6+ digit specificity"
@@ -205,6 +230,9 @@ def _load_orders(path: Path) -> tuple[ADCVDOrder, ...]:
                 status=str(entry.get("status", "active")),
                 case_number=str(entry.get("case_number", "")),
                 federal_register_citation=str(entry.get("federal_register_citation", "")),
+                scope_keywords=tuple(
+                    str(kw).lower() for kw in entry.get("scope_keywords", [])
+                ),
             )
         )
     return tuple(sorted(orders, key=lambda o: (o.order_type, o.order_id)))

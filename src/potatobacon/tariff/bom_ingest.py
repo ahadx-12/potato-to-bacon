@@ -12,7 +12,10 @@ SUPPORTED_HEADERS = {
     "material": "material",
     "quantity": "quantity",
     "unit_cost": "unit_cost",
+    "weight_kg": "weight_kg",
+    "intended_use": "intended_use",
     "country_of_origin": "country_of_origin",
+    "hts_code": "hts_code",
 }
 
 
@@ -53,7 +56,10 @@ def parse_bom_csv(csv_text: str) -> StructuredBOMModel:
             material=normalized_row.get("material"),
             quantity=_coerce_float(normalized_row.get("quantity")),
             unit_cost=_coerce_float(normalized_row.get("unit_cost")),
+            weight_kg=_coerce_float(normalized_row.get("weight_kg")),
+            intended_use=normalized_row.get("intended_use"),
             country_of_origin=normalized_row.get("country_of_origin"),
+            hts_code=normalized_row.get("hts_code"),
         )
         items.append(item)
 
@@ -72,6 +78,12 @@ def bom_to_text(bom: StructuredBOMModel) -> str:
             parts.append(f"material={item.material}")
         if item.country_of_origin:
             parts.append(f"origin={item.country_of_origin}")
+        if item.hts_code:
+            parts.append(f"hts={item.hts_code}")
+        if item.intended_use:
+            parts.append(f"use={item.intended_use}")
+        if item.weight_kg is not None:
+            parts.append(f"weight_kg={item.weight_kg}")
         if item.quantity is not None:
             parts.append(f"qty={item.quantity}")
         if item.unit_cost is not None:

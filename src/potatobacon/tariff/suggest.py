@@ -19,6 +19,7 @@ from potatobacon.tariff.fact_requirements import FactRequirementRegistry
 from potatobacon.tariff.levers import LeverModel, applicable_levers, generate_candidate_levers
 from potatobacon.tariff.mutation_generator import baseline_facts_from_profile, infer_product_profile
 from potatobacon.tariff.models import (
+    AutoClassificationResultModel,
     BaselineCandidateModel,
     NetSavings,
     TariffFeasibility,
@@ -26,6 +27,11 @@ from potatobacon.tariff.models import (
     TariffSuggestRequestModel,
     TariffSuggestResponseModel,
     TariffSuggestionItemModel,
+)
+from potatobacon.tariff.reclassification_engine import (
+    build_advisory_strategies,
+    build_auto_classification_payload,
+    build_reclassification_candidates,
 )
 from potatobacon.tariff.overlays import effective_duty_rate, evaluate_overlays
 from potatobacon.tariff.sku_models import build_sku_metadata_snapshot
@@ -464,6 +470,12 @@ def _documentation_levers(
                 defensibility_grade=adjusted_grade,
                 risk_reasons=risk.risk_reasons,
                 tariff_manifest_hash=context_meta["manifest_hash"],
+                strategy_type="conditional_optimization",
+                risk_level=_risk_level_for_score(adjusted_risk_score),
+                required_actions=["Collect missing evidence and support selected classification pathway."],
+                documentation_required=list(evidence_templates),
+                confidence_level=optimized_confidence,
+                implementation_difficulty="low",
             )
         )
 
@@ -562,9 +574,28 @@ def _sort_key(item: TariffSuggestionItemModel, annual_volume: int | None, index:
         item.annual_savings_value if annual_volume is not None else item.savings_per_unit_value
     )
     primary_value = primary if primary is not None else item.savings_per_unit_rate
+    difficulty_rank = {"low": 0, "medium": 1, "high": 2}.get((item.implementation_difficulty or "").lower(), 3)
     risk_score = item.risk_score if item.risk_score is not None else 999
     confidence = item.classification_confidence if item.classification_confidence is not None else 0.0
-    return (-primary_value, risk_score, -confidence, item.lever_id or "", index)
+    return (-primary_value, difficulty_rank, risk_score, -confidence, item.lever_id or "", index)
+
+
+def _risk_level_for_score(score: int | None) -> str:
+    value = score if score is not None else 60
+    if value <= 30:
+        return "low_risk"
+    if value <= 60:
+        return "medium_risk"
+    return "high_risk"
+
+
+def _strategy_type_for_lever(lever: LeverModel) -> str:
+    mutation_keys = set(lever.mutation.keys())
+    if {"origin_country", "export_country"} & mutation_keys:
+        return "origin_shift"
+    if lever.lever_type == "DOCUMENTATION":
+        return "conditional_optimization"
+    return "product_modification"
 
 
 def _grade_rank(value: str | None) -> int:
@@ -700,9 +731,37 @@ def suggest_tariff_optimizations(
                 baseline_facts[key] = value
 
     normalized_facts, normalization_notes = normalize_compiled_facts(baseline_facts)
+
+    material_parts = [mat.material for mat in spec.materials]
+    if bom_structured is not None:
+        material_parts.extend(item.material or "" for item in bom_structured.items if item.material)
+    material_text = " ".join(part for part in material_parts if part)
+    intended_use = spec.use_function or ""
+    declared_hts = str(normalized_facts.get("hts_code") or "").strip() or None
+    if declared_hts is None and bom_structured is not None:
+        for item in bom_structured.items:
+            if item.hts_code:
+                declared_hts = item.hts_code
+                normalized_facts["hts_code"] = declared_hts
+                break
+    auto_classification_payload = build_auto_classification_payload(
+        description=request.description,
+        material=material_text,
+        intended_use=intended_use,
+        declared_hts=declared_hts,
+    )
+    auto_classification = AutoClassificationResultModel(**auto_classification_payload)
+
+    if auto_classification.hts_source == "auto_classified" and auto_classification.selected_hts_code:
+        normalized_facts["hts_code"] = auto_classification.selected_hts_code
+
     missing_inputs = validate_minimum_inputs(spec.model_dump(), normalized_facts)
     compiled_pack = {"raw": compiled_facts, "normalized": normalized_facts}
     compiled_pack.update(compiled_facts)
+    compiled_pack["auto_classification"] = auto_classification.model_dump()
+    compiled_pack["hts_source"] = auto_classification.hts_source
+    if auto_classification.mismatch_flag and auto_classification.review_reason:
+        normalization_notes.append(auto_classification.review_reason)
 
     resolved_context = request.law_context or DEFAULT_CONTEXT_ID
     atoms, context_meta = load_atoms_for_context(resolved_context)
@@ -753,6 +812,7 @@ def suggest_tariff_optimizations(
             fact_evidence=fact_evidence if request.include_fact_evidence else None,
             product_spec=spec if request.include_fact_evidence else None,
             baseline_candidates=baseline_candidates,
+            auto_classification=auto_classification,
             why_not_optimized=missing_inputs + why_not_optimized,
             proof_id=None,
             proof_payload_hash=None,
@@ -791,6 +851,7 @@ def suggest_tariff_optimizations(
             fact_evidence=fact_evidence if request.include_fact_evidence else None,
             product_spec=spec if request.include_fact_evidence else None,
             baseline_candidates=baseline_candidates,
+            auto_classification=auto_classification,
             why_not_optimized=why_not_optimized,
             proof_id=None,
             proof_payload_hash=None,
@@ -823,6 +884,7 @@ def suggest_tariff_optimizations(
             fact_evidence=fact_evidence if request.include_fact_evidence else None,
             product_spec=spec if request.include_fact_evidence else None,
             baseline_candidates=baseline_candidates,
+            auto_classification=auto_classification,
             why_not_optimized=review_reasons + why_not_optimized,
             proof_id=baseline_proof.proof_id,
             proof_payload_hash=baseline_proof.proof_payload_hash,
@@ -980,6 +1042,12 @@ def suggest_tariff_optimizations(
                 defensibility_grade=adjusted_grade,
                 risk_reasons=risk.risk_reasons,
                 tariff_manifest_hash=context_meta["manifest_hash"],
+                strategy_type=_strategy_type_for_lever(lever),
+                risk_level=_risk_level_for_score(adjusted_risk_score),
+                required_actions=["Validate operational feasibility and execute mutation with broker review."],
+                documentation_required=list(lever.evidence_requirements),
+                confidence_level=optimized_confidence,
+                implementation_difficulty=(lever.feasibility or "medium").lower(),
                 **documentation_fields,
             )
         )
@@ -1001,6 +1069,131 @@ def suggest_tariff_optimizations(
         overlay_context=overlay_context,
     )
     suggestion_items.extend(documentation_levers)
+
+    baseline_proof_for_advisories = _record_proof(
+        law_context=law_context,
+        context_meta=context_meta,
+        baseline_facts=normalized_facts,
+        optimized_facts=normalized_facts,
+        baseline_eval=baseline_eval,
+        optimized_eval=baseline_eval,
+        lever=None,
+        evidence_pack=evidence_pack,
+        overlays={
+            "baseline": [ov.model_dump() for ov in baseline_eval.overlays],
+            "optimized": [ov.model_dump() for ov in baseline_eval.overlays],
+        },
+    )
+
+    reclass_candidates = build_reclassification_candidates(
+        current_hts=str(normalized_facts.get("hts_code") or ""),
+        baseline_rate=baseline_rate,
+        description=request.description,
+        material=material_text,
+        annual_volume=request.annual_volume,
+        declared_value_per_unit=declared_value,
+        material_breakdown=[item.model_dump() for item in spec.materials],
+    )
+    risk_to_score = {"low_risk": 20, "medium_risk": 45, "high_risk": 75}
+
+    for candidate in reclass_candidates:
+        risk_level = str(candidate["risk_level"])
+        risk_score = risk_to_score.get(risk_level, 70)
+        suggestion_items.append(
+            TariffSuggestionItemModel(
+                human_summary=(
+                    f"Reclassify from {candidate['from_hts']} to {candidate['to_hts']} when product details match "
+                    "the lower-duty heading."
+                ),
+                lever_id=f"RECLASS_{str(candidate['to_hts']).replace('.', '_')}",
+                optimization_type="RECLASSIFICATION",
+                strategy_type="reclassification",
+                lever_feasibility=str(candidate.get("implementation_difficulty", "medium")).upper(),
+                evidence_requirements=list(candidate.get("documentation_required", [])),
+                baseline_duty_rate=baseline_rate_raw or baseline_eval.duty_rate or 0.0,
+                optimized_duty_rate=float(candidate["optimized_duty_rate"]),
+                baseline_effective_duty_rate=baseline_rate,
+                optimized_effective_duty_rate=float(candidate["optimized_duty_rate"]),
+                savings_per_unit_rate=float(candidate["savings_per_unit_rate"]),
+                savings_per_unit_value=float(candidate["savings_per_unit_value"]),
+                annual_savings_value=candidate.get("annual_savings_value"),
+                ranking_score=float(
+                    candidate.get("annual_savings_value")
+                    if candidate.get("annual_savings_value") is not None
+                    else candidate["savings_per_unit_value"]
+                ),
+                best_mutation={"hts_code": candidate["to_hts"]},
+                classification_confidence=float(candidate.get("plausibility_score") or 0.0),
+                active_codes_baseline=sorted({atom.source_id for atom in baseline_eval.duty_atoms}),
+                active_codes_optimized=[str(candidate["to_hts"])],
+                provenance_chain=[],
+                overlays={"baseline": baseline_eval.overlays, "optimized": baseline_eval.overlays},
+                law_context=law_context,
+                proof_id=baseline_proof_for_advisories.proof_id,
+                proof_payload_hash=baseline_proof_for_advisories.proof_payload_hash,
+                risk_score=risk_score,
+                defensibility_grade=_defensibility_grade(risk_score),
+                risk_reasons=[str(candidate.get("risk_rationale") or "")],
+                tariff_manifest_hash=context_meta["manifest_hash"],
+                risk_level=risk_level,
+                required_actions=list(candidate.get("required_actions") or []),
+                documentation_required=list(candidate.get("documentation_required") or []),
+                confidence_level=float(candidate.get("confidence_level") or 0.0),
+                implementation_difficulty=str(candidate.get("implementation_difficulty") or "medium"),
+            )
+        )
+
+    advisory_items = build_advisory_strategies(
+        origin_country=request.origin_country,
+        bom_items=[item.model_dump() for item in bom_structured.items] if bom_structured is not None else [],
+        baseline_rate=baseline_rate,
+        declared_value_per_unit=declared_value,
+        annual_volume=request.annual_volume,
+        material_breakdown=[item.model_dump() for item in spec.materials],
+    )
+    for advisory in advisory_items:
+        risk_level = str(advisory.get("risk_level") or "medium_risk")
+        risk_score = risk_to_score.get(risk_level, 50)
+        suggestion_items.append(
+            TariffSuggestionItemModel(
+                human_summary=str(advisory["human_summary"]),
+                lever_id=f"ADVISORY_{str(advisory['strategy_type']).upper()}",
+                optimization_type="ADVISORY",
+                strategy_type=str(advisory["strategy_type"]),
+                lever_feasibility=str(advisory.get("implementation_difficulty", "medium")).upper(),
+                evidence_requirements=list(advisory.get("documentation_required", [])),
+                baseline_duty_rate=baseline_rate_raw or baseline_eval.duty_rate or 0.0,
+                optimized_duty_rate=float(advisory.get("optimized_duty_rate") or (baseline_rate or 0.0)),
+                baseline_effective_duty_rate=baseline_rate,
+                optimized_effective_duty_rate=float(advisory.get("optimized_duty_rate") or (baseline_rate or 0.0)),
+                savings_per_unit_rate=float(advisory.get("savings_per_unit_rate") or 0.0),
+                savings_per_unit_value=float(advisory.get("savings_per_unit_value") or 0.0),
+                annual_savings_value=advisory.get("annual_savings_value"),
+                ranking_score=float(
+                    advisory.get("annual_savings_value")
+                    if advisory.get("annual_savings_value") is not None
+                    else advisory.get("savings_per_unit_value") or 0.0
+                ),
+                best_mutation={},
+                classification_confidence=float(advisory.get("confidence_level") or 0.0),
+                active_codes_baseline=sorted({atom.source_id for atom in baseline_eval.duty_atoms}),
+                active_codes_optimized=sorted({atom.source_id for atom in baseline_eval.duty_atoms}),
+                provenance_chain=[],
+                overlays={"baseline": baseline_eval.overlays, "optimized": baseline_eval.overlays},
+                law_context=law_context,
+                proof_id=baseline_proof_for_advisories.proof_id,
+                proof_payload_hash=baseline_proof_for_advisories.proof_payload_hash,
+                risk_score=risk_score,
+                defensibility_grade=_defensibility_grade(risk_score),
+                risk_reasons=[str(advisory.get("risk_rationale") or "")],
+                tariff_manifest_hash=context_meta["manifest_hash"],
+                risk_level=risk_level,
+                required_actions=list(advisory.get("required_actions") or []),
+                documentation_required=list(advisory.get("documentation_required") or []),
+                confidence_level=float(advisory.get("confidence_level") or 0.0),
+                implementation_difficulty=str(advisory.get("implementation_difficulty") or "medium"),
+            )
+        )
 
     atoms_by_id = {atom.source_id: atom for atom in atoms}
     suggestion_items = [_apply_precedent_signals(item, atoms_by_id) for item in suggestion_items]
@@ -1047,6 +1240,7 @@ def suggest_tariff_optimizations(
         fact_evidence=fact_evidence if request.include_fact_evidence else None,
         product_spec=spec if request.include_fact_evidence else None,
         baseline_candidates=baseline_candidates,
+        auto_classification=auto_classification,
         why_not_optimized=why_not_optimized,
         proof_id=proof_id,
         proof_payload_hash=proof_payload_hash,

@@ -43,8 +43,10 @@ class TariffOverlayResultModel(BaseModel):
     reason: str
     requires_review: bool = False
     stop_optimization: bool = False
+    match_level: str = ""  # exact_8digit | heading_fallback | ""
 
     model_config = ConfigDict(extra="forbid")
+
 
 
 class DutyBreakdownModel(BaseModel):
@@ -101,7 +103,10 @@ class BOMLineItemModel(BaseModel):
     material: Optional[str] = None
     quantity: Optional[float] = None
     unit_cost: Optional[float] = None
+    weight_kg: Optional[float] = None
+    intended_use: Optional[str] = None
     country_of_origin: Optional[str] = None
+    hts_code: Optional[str] = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -409,6 +414,35 @@ class TariffSuggestionItemModel(BaseModel):
     risk_reasons: Optional[List[str]] = None
     precedent_context: Optional[Dict[str, Any]] = None
     tariff_manifest_hash: Optional[str] = None
+    strategy_type: Optional[str] = None
+    risk_level: Optional[str] = None
+    required_actions: List[str] = Field(default_factory=list)
+    documentation_required: List[str] = Field(default_factory=list)
+    confidence_level: Optional[float] = None
+    implementation_difficulty: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class HTSClassificationAlternativeModel(BaseModel):
+    hts_code: str
+    description: str
+    duty_rate: float
+    confidence: float
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class AutoClassificationResultModel(BaseModel):
+    classification: Literal["provided", "auto", "manual_review"]
+    hts_source: Literal["declared", "auto_classified", "unresolved"]
+    selected_hts_code: Optional[str] = None
+    declared_hts_code: Optional[str] = None
+    confidence: float = 0.0
+    needs_manual_review: bool = False
+    review_reason: Optional[str] = None
+    mismatch_flag: bool = False
+    alternatives: List[HTSClassificationAlternativeModel] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -434,6 +468,7 @@ class TariffSuggestResponseModel(BaseModel):
     fact_evidence: Optional[List[FactEvidenceModel]] = None
     product_spec: Optional["ProductSpecModel"] = None
     baseline_candidates: List[BaselineCandidateModel] = Field(default_factory=list)
+    auto_classification: Optional[AutoClassificationResultModel] = None
     why_not_optimized: List[str] = Field(default_factory=list)
     proof_id: Optional[str] = None
     proof_payload_hash: Optional[str] = None

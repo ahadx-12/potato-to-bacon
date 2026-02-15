@@ -1,0 +1,88 @@
+{
+  "total_skus": 50,
+  "duty_reasonable_count": 50,
+  "auto_classified_total": 12,
+  "auto_classified_reasonable": 5,
+  "baseline_total_duty": 167132.5,
+  "optimized_total_duty": 144502.5,
+  "total_savings": 22630.0,
+  "strategy_types_proposed": [
+    "conditional_optimization",
+    "first_sale_valuation",
+    "product_modification"
+  ],
+  "dangerous_advice_candidates": [],
+  "top_10_savings_opportunities": [
+    {
+      "sku_id": "SM-6005",
+      "strategy_type": "product_modification",
+      "human_summary": "Shift from steel to aluminum alloy where feasible to capture lower duty lane.",
+      "annual_savings_value": 17020.0,
+      "risk_level": "medium_risk"
+    },
+    {
+      "sku_id": "SM-6005",
+      "strategy_type": "conditional_optimization",
+      "human_summary": "Substantiate missing facts (material_aluminum) to access HTS_ALUMINUM_PART. This does not change the product; it changes substantiation.",
+      "annual_savings_value": 17020.0,
+      "risk_level": "low_risk"
+    },
+    {
+      "sku_id": "AP-1004",
+      "strategy_type": "product_modification",
+      "human_summary": "Document connectors, insulation, and low-voltage rating to classify as a cable assembly under the demo electronics lanes.",
+      "annual_savings_value": 2897.5,
+      "risk_level": "low_risk"
+    },
+    {
+      "sku_id": "AP-1004",
+      "strategy_type": "conditional_optimization",
+      "human_summary": "Substantiate missing facts to unlock lower-duty pathway",
+      "annual_savings_value": 2897.5,
+      "risk_level": "low_risk"
+    },
+    {
+      "sku_id": "TX-3001",
+      "strategy_type": "product_modification",
+      "human_summary": "Document polyester dominance when blend is near 50/50 to access lower synthetic brackets.",
+      "annual_savings_value": 2712.5000000000005,
+      "risk_level": "low_risk"
+    },
+    {
+      "sku_id": "AP-1004",
+      "strategy_type": "conditional_optimization",
+      "human_summary": "Substantiate missing facts to unlock lower-duty pathway",
+      "annual_savings_value": 1448.75,
+      "risk_level": "low_risk"
+    },
+    {
+      "sku_id": "AP-1004",
+      "strategy_type": "first_sale_valuation",
+      "human_summary": "First sale valuation may reduce dutiable value if purchases route through a middleman.",
+      "annual_savings_value": 0.0,
+      "risk_level": "medium_risk"
+    },
+    {
+      "sku_id": "CE-2001",
+      "strategy_type": "first_sale_valuation",
+      "human_summary": "First sale valuation may reduce dutiable value if purchases route through a middleman.",
+      "annual_savings_value": 0.0,
+      "risk_level": "medium_risk"
+    },
+    {
+      "sku_id": "CE-2002",
+      "strategy_type": "first_sale_valuation",
+      "human_summary": "First sale valuation may reduce dutiable value if purchases route through a middleman.",
+      "annual_savings_value": 0.0,
+      "risk_level": "medium_risk"
+    },
+    {
+      "sku_id": "CE-2005",
+      "strategy_type": "first_sale_valuation",
+      "human_summary": "First sale valuation may reduce dutiable value if purchases route through a middleman.",
+      "annual_savings_value": 0.0,
+      "risk_level": "medium_risk"
+    }
+  ],
+  "verdict": "universal_tariff_engineer"
+}
