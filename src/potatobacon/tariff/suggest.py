@@ -1085,15 +1085,51 @@ def suggest_tariff_optimizations(
         },
     )
 
-    reclass_candidates = build_reclassification_candidates(
-        current_hts=str(normalized_facts.get("hts_code") or ""),
-        baseline_rate=baseline_rate,
-        description=request.description,
-        material=material_text,
-        annual_volume=request.annual_volume,
-        declared_value_per_unit=declared_value,
-        material_breakdown=[item.model_dump() for item in spec.materials],
-    )
+    has_declared_classification = bool(normalized_facts.get("hts_code"))
+    reclass_candidates: list[dict[str, Any]] = []
+    if has_declared_classification:
+        reclass_candidates = build_reclassification_candidates(
+            current_hts=str(normalized_facts.get("hts_code") or ""),
+            baseline_rate=baseline_rate,
+            description=request.description,
+            material=material_text,
+            annual_volume=request.annual_volume,
+            declared_value_per_unit=declared_value,
+            material_breakdown=[item.model_dump() for item in spec.materials],
+        )
+    if has_declared_classification and (not reclass_candidates) and auto_classification.alternatives and baseline_rate is not None:
+        current_hts = str(normalized_facts.get("hts_code") or "")
+        for alternative in auto_classification.alternatives:
+            if not alternative.hts_code or alternative.hts_code == current_hts:
+                continue
+            if alternative.duty_rate >= baseline_rate:
+                continue
+            savings_rate = baseline_rate - alternative.duty_rate
+            savings_value = savings_rate / 100.0 * declared_value
+            annual_savings = savings_value * request.annual_volume if request.annual_volume is not None else None
+            reclass_candidates.append(
+                {
+                    "strategy_type": "reclassification",
+                    "from_hts": current_hts,
+                    "to_hts": alternative.hts_code,
+                    "candidate_description": alternative.description,
+                    "optimized_duty_rate": alternative.duty_rate,
+                    "savings_per_unit_rate": savings_rate,
+                    "savings_per_unit_value": savings_value,
+                    "annual_savings_value": annual_savings,
+                    "plausibility_score": alternative.confidence,
+                    "confidence_level": alternative.confidence,
+                    "risk_level": "medium_risk",
+                    "risk_rationale": "Alternative heading inferred from text; broker review required.",
+                    "required_actions": [
+                        "Validate candidate heading language against BOM and intended use.",
+                        "Prepare backup ruling request package.",
+                    ],
+                    "documentation_required": ["BOM and datasheet", "Product photos and drawings"],
+                    "implementation_difficulty": "medium",
+                }
+            )
+            break
     risk_to_score = {"low_risk": 20, "medium_risk": 45, "high_risk": 75}
 
     for candidate in reclass_candidates:
@@ -1143,14 +1179,16 @@ def suggest_tariff_optimizations(
             )
         )
 
-    advisory_items = build_advisory_strategies(
-        origin_country=request.origin_country,
-        bom_items=[item.model_dump() for item in bom_structured.items] if bom_structured is not None else [],
-        baseline_rate=baseline_rate,
-        declared_value_per_unit=declared_value,
-        annual_volume=request.annual_volume,
-        material_breakdown=[item.model_dump() for item in spec.materials],
-    )
+    advisory_items: list[dict[str, Any]] = []
+    if has_declared_classification or bom_structured is not None:
+        advisory_items = build_advisory_strategies(
+            origin_country=request.origin_country,
+            bom_items=[item.model_dump() for item in bom_structured.items] if bom_structured is not None else [],
+            baseline_rate=baseline_rate,
+            declared_value_per_unit=declared_value,
+            annual_volume=request.annual_volume,
+            material_breakdown=[item.model_dump() for item in spec.materials],
+        )
     for advisory in advisory_items:
         risk_level = str(advisory.get("risk_level") or "medium_risk")
         risk_score = risk_to_score.get(risk_level, 50)

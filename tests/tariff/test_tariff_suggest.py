@@ -35,3 +35,28 @@ def test_suggest_engine_handles_unknown_category():
 
     assert response.status in {"OK_BASELINE_ONLY", "INSUFFICIENT_RULE_COVERAGE", "INSUFFICIENT_INPUTS"}
     assert response.suggestions == []
+
+
+def test_suggest_emits_auto_classification_payload():
+    request = TariffSuggestRequestModel(
+        description="lithium ion battery module",
+        bom_json={
+            "items": [
+                {
+                    "part_id": "BAT-1",
+                    "description": "lithium ion battery module",
+                    "material": "battery cells",
+                    "quantity": 1,
+                    "unit_cost": 8.5,
+                    "country_of_origin": "KR",
+                }
+            ],
+            "currency": "USD",
+        },
+        declared_value_per_unit=12.0,
+        annual_volume=5000,
+    )
+
+    response = suggest_tariff_optimizations(request)
+    assert response.auto_classification is not None
+    assert response.auto_classification.classification in {"auto", "manual_review", "provided"}
