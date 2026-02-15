@@ -1,0 +1,61 @@
+﻿[
+  {"industry":"consumer_electronics","part_id":"CE-1001","description":"Laptop lithium-ion battery pack with protective PCB for portable computer","material":"lithium cells, electronics","weight_kg":0.45,"value_usd":78.0,"origin_country":"CN","hts_code":"8507.60.00","annual_volume":18000},
+  {"industry":"consumer_electronics","part_id":"CE-1002","description":"USB-C charging cable with copper conductors and polymer insulation","material":"copper, plastic","weight_kg":0.08,"value_usd":6.2,"origin_country":"VN","hts_code":null,"annual_volume":42000},
+  {"industry":"consumer_electronics","part_id":"CE-1003","description":"Bluetooth wireless earbuds set with charging case","material":"plastic, electronics","weight_kg":0.12,"value_usd":25.0,"origin_country":"KR","hts_code":"8518.30.20","annual_volume":26000},
+  {"industry":"consumer_electronics","part_id":"CE-1004","description":"HDMI to USB-C adapter dongle with integrated signal conversion circuit","material":"electronics, aluminum","weight_kg":0.09,"value_usd":14.0,"origin_country":"TW","hts_code":null,"annual_volume":30000},
+  {"industry":"consumer_electronics","part_id":"CE-1005","description":"Injection-molded smartphone protective case","material":"plastic","weight_kg":0.05,"value_usd":3.5,"origin_country":"MY","hts_code":null,"annual_volume":50000},
+
+  {"industry":"textiles_apparel","part_id":"TX-2001","description":"Men short-sleeve cotton t-shirt knitted","material":"cotton textile","weight_kg":0.22,"value_usd":4.8,"origin_country":"VN","hts_code":"6109.10.00","annual_volume":70000},
+  {"industry":"textiles_apparel","part_id":"TX-2002","description":"Polyester windproof jacket with zipper","material":"polyester textile","weight_kg":0.55,"value_usd":16.0,"origin_country":"BD","hts_code":null,"annual_volume":25000},
+  {"industry":"textiles_apparel","part_id":"TX-2003","description":"Genuine leather belt with steel buckle","material":"leather, steel","weight_kg":0.28,"value_usd":9.5,"origin_country":"CN","hts_code":"4203.30.00","annual_volume":32000},
+  {"industry":"textiles_apparel","part_id":"TX-2004","description":"Wool winter scarf woven","material":"wool textile","weight_kg":0.18,"value_usd":7.2,"origin_country":"IN","hts_code":null,"annual_volume":22000},
+  {"industry":"textiles_apparel","part_id":"TX-2005","description":"Nylon travel backpack with polyester lining","material":"nylon textile, polyester","weight_kg":0.65,"value_usd":13.0,"origin_country":"PK","hts_code":null,"annual_volume":19000},
+
+  {"industry":"industrial_machinery","part_id":"IM-3001","description":"Hydraulic cylinder assembly for industrial press","material":"steel","weight_kg":18.0,"value_usd":120.0,"origin_country":"CN","hts_code":"8412.21.00","annual_volume":5000},
+  {"industry":"industrial_machinery","part_id":"IM-3002","description":"Deep groove ball bearing for conveyor systems","material":"steel","weight_kg":1.2,"value_usd":22.0,"origin_country":"DE","hts_code":null,"annual_volume":12000},
+  {"industry":"industrial_machinery","part_id":"IM-3003","description":"AC servo motor for CNC axis control","material":"electronics, steel","weight_kg":4.6,"value_usd":260.0,"origin_country":"JP","hts_code":"8501.52.40","annual_volume":4500},
+  {"industry":"industrial_machinery","part_id":"IM-3004","description":"Industrial centrifugal pump body and impeller assembly","material":"steel","weight_kg":9.5,"value_usd":140.0,"origin_country":"TW","hts_code":null,"annual_volume":6800},
+  {"industry":"industrial_machinery","part_id":"IM-3005","description":"High-speed CNC spindle cartridge","material":"steel, ceramic","weight_kg":6.8,"value_usd":390.0,"origin_country":"IT","hts_code":null,"annual_volume":2400},
+
+  {"industry":"plastics_rubber","part_id":"PR-4001","description":"PVC pipe elbow fitting for plumbing","material":"pvc plastic","weight_kg":0.16,"value_usd":1.8,"origin_country":"CN","hts_code":"3917.40.00","annual_volume":110000},
+  {"industry":"plastics_rubber","part_id":"PR-4002","description":"Silicone gasket ring for food processing machine","material":"silicone rubber","weight_kg":0.04,"value_usd":1.1,"origin_country":"MY","hts_code":null,"annual_volume":90000},
+  {"industry":"plastics_rubber","part_id":"PR-4003","description":"Polyethylene packaging film roll","material":"polyethylene plastic","weight_kg":2.2,"value_usd":8.5,"origin_country":"TH","hts_code":"3920.10.00","annual_volume":16000},
+  {"industry":"plastics_rubber","part_id":"PR-4004","description":"Rubber coated work gloves","material":"rubber, textile","weight_kg":0.11,"value_usd":2.9,"origin_country":"MX","hts_code":null,"annual_volume":52000},
+  {"industry":"plastics_rubber","part_id":"PR-4005","description":"Cast acrylic sheet panel","material":"acrylic plastic","weight_kg":4.5,"value_usd":32.0,"origin_country":"DE","hts_code":null,"annual_volume":5400},
+
+  {"industry":"steel_metals","part_id":"SM-5001","description":"Cold rolled stainless steel coil","material":"stainless steel","weight_kg":24.0,"value_usd":95.0,"origin_country":"CN","hts_code":"7219.33.00","annual_volume":6000},
+  {"industry":"steel_metals","part_id":"SM-5002","description":"Aluminum extrusion profile for framing systems","material":"aluminum","weight_kg":6.0,"value_usd":34.0,"origin_country":"CN","hts_code":null,"annual_volume":13000},
+  {"industry":"steel_metals","part_id":"SM-5003","description":"Copper busbar for switchgear","material":"copper","weight_kg":3.8,"value_usd":42.0,"origin_country":"KR","hts_code":"7407.10.00","annual_volume":8500},
+  {"industry":"steel_metals","part_id":"SM-5004","description":"Brass valve body machined","material":"brass","weight_kg":1.9,"value_usd":18.0,"origin_country":"DE","hts_code":null,"annual_volume":14000},
+  {"industry":"steel_metals","part_id":"SM-5005","description":"Titanium hex bolt for aerospace fixtures","material":"titanium","weight_kg":0.09,"value_usd":6.8,"origin_country":"TW","hts_code":null,"annual_volume":26000},
+
+  {"industry":"furniture","part_id":"FU-6001","description":"Wooden office desk with metal legs","material":"wood, steel","weight_kg":28.0,"value_usd":145.0,"origin_country":"CN","hts_code":"9403.30.80","annual_volume":4200},
+  {"industry":"furniture","part_id":"FU-6002","description":"Upholstered three-seat sofa with wooden frame","material":"textile, wood, foam","weight_kg":52.0,"value_usd":260.0,"origin_country":"VN","hts_code":null,"annual_volume":2800},
+  {"industry":"furniture","part_id":"FU-6003","description":"Powder-coated metal shelving unit","material":"steel","weight_kg":18.0,"value_usd":72.0,"origin_country":"MX","hts_code":"9403.20.00","annual_volume":7600},
+  {"industry":"furniture","part_id":"FU-6004","description":"Foam mattress with textile cover","material":"foam, textile","weight_kg":21.0,"value_usd":98.0,"origin_country":"MY","hts_code":null,"annual_volume":5300},
+  {"industry":"furniture","part_id":"FU-6005","description":"Ergonomic office chair with gas lift mechanism","material":"steel, textile, plastic","weight_kg":14.0,"value_usd":88.0,"origin_country":"PL","hts_code":"9401.30.80","annual_volume":6200},
+
+  {"industry":"chemicals","part_id":"CH-7001","description":"Bisphenol-A epoxy resin liquid","material":"chemical resin","weight_kg":20.0,"value_usd":58.0,"origin_country":"CN","hts_code":"3907.30.00","annual_volume":7800},
+  {"industry":"chemicals","part_id":"CH-7002","description":"Industrial solvent blend for coatings","material":"chemical solvent","weight_kg":18.0,"value_usd":42.0,"origin_country":"DE","hts_code":null,"annual_volume":6900},
+  {"industry":"chemicals","part_id":"CH-7003","description":"Titanium dioxide white pigment","material":"chemical pigment","weight_kg":25.0,"value_usd":54.0,"origin_country":"JP","hts_code":"3206.11.00","annual_volume":7300},
+  {"industry":"chemicals","part_id":"CH-7004","description":"Cyanoacrylate instant adhesive","material":"chemical adhesive","weight_kg":0.12,"value_usd":5.4,"origin_country":"IN","hts_code":null,"annual_volume":34000},
+  {"industry":"chemicals","part_id":"CH-7005","description":"Synthetic industrial lubricant","material":"chemical lubricant","weight_kg":4.5,"value_usd":19.0,"origin_country":"KR","hts_code":"3403.19.00","annual_volume":12500},
+
+  {"industry":"food_agriculture","part_id":"FA-8001","description":"Natural honey in retail jars","material":"food honey","weight_kg":0.7,"value_usd":3.9,"origin_country":"CN","hts_code":"0409.00.00","annual_volume":80000},
+  {"industry":"food_agriculture","part_id":"FA-8002","description":"Frozen warmwater shrimp peeled and deveined","material":"food shrimp","weight_kg":1.0,"value_usd":6.1,"origin_country":"VN","hts_code":null,"annual_volume":70000},
+  {"industry":"food_agriculture","part_id":"FA-8003","description":"Extra virgin olive oil bottled","material":"food oil","weight_kg":1.1,"value_usd":5.8,"origin_country":"IT","hts_code":"1509.20.00","annual_volume":64000},
+  {"industry":"food_agriculture","part_id":"FA-8004","description":"Unroasted green coffee beans","material":"food coffee","weight_kg":60.0,"value_usd":150.0,"origin_country":"CO","hts_code":null,"annual_volume":2200},
+  {"industry":"food_agriculture","part_id":"FA-8005","description":"Canned whole tomatoes in juice","material":"food tomato","weight_kg":0.45,"value_usd":1.5,"origin_country":"IN","hts_code":"2002.10.00","annual_volume":95000},
+
+  {"industry":"solar_energy","part_id":"SE-9001","description":"Crystalline silicon photovoltaic module 400W","material":"solar panel, glass, aluminum","weight_kg":22.0,"value_usd":118.0,"origin_country":"CN","hts_code":"8541.43.00","annual_volume":9000},
+  {"industry":"solar_energy","part_id":"SE-9002","description":"String inverter for rooftop PV system","material":"electronics, aluminum","weight_kg":16.0,"value_usd":240.0,"origin_country":"MY","hts_code":null,"annual_volume":4800},
+  {"industry":"solar_energy","part_id":"SE-9003","description":"Lithium iron phosphate battery cell module","material":"battery, electronics","weight_kg":14.0,"value_usd":210.0,"origin_country":"VN","hts_code":"8507.60.00","annual_volume":4200},
+  {"industry":"solar_energy","part_id":"SE-9004","description":"PWM solar charge controller","material":"electronics","weight_kg":0.95,"value_usd":38.0,"origin_country":"KR","hts_code":null,"annual_volume":17000},
+  {"industry":"solar_energy","part_id":"SE-9005","description":"LED high-bay industrial fixture","material":"electronics, aluminum","weight_kg":4.8,"value_usd":66.0,"origin_country":"DE","hts_code":"9405.11.40","annual_volume":9800},
+
+  {"industry":"auto_parts","part_id":"AP-1001","description":"Ventilated brake rotor cast iron for passenger vehicle","material":"iron","weight_kg":8.6,"value_usd":42.0,"origin_country":"CN","hts_code":"8708.30.50","annual_volume":21000},
+  {"industry":"auto_parts","part_id":"AP-1004","description":"LED automotive headlamp assembly with housing","material":"electronics, plastic","weight_kg":2.1,"value_usd":85.0,"origin_country":"VN","hts_code":null,"annual_volume":14000},
+  {"industry":"auto_parts","part_id":"AP-1008","description":"Wiper motor assembly for windshield system","material":"electronics, steel","weight_kg":1.7,"value_usd":36.0,"origin_country":"KR","hts_code":"8501.31.40","annual_volume":18000},
+  {"industry":"auto_parts","part_id":"AP-1011","description":"Wheel lug nuts hardened steel","material":"steel","weight_kg":0.4,"value_usd":4.2,"origin_country":"TW","hts_code":null,"annual_volume":60000},
+  {"industry":"auto_parts","part_id":"AP-1012","description":"Ignition coil module for spark-ignition engine","material":"electronics","weight_kg":0.6,"value_usd":18.0,"origin_country":"MY","hts_code":"8511.30.00","annual_volume":27000}
+]
