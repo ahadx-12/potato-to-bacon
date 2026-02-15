@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import threading
 import time
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 from fastapi import Header, HTTPException, Request
 
@@ -95,7 +95,6 @@ def require_api_key(
 ) -> str:
     """Validate the provided API key and enforce per-route rate limits."""
 
-    keys = allowed_api_keys()
     if not x_api_key:
         raise HTTPException(status_code=401, detail={"message": "Missing API key"})
 

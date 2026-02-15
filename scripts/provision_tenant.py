@@ -5,9 +5,8 @@ Usage:
     python scripts/provision_tenant.py --name "test-importer" --plan professional
     python scripts/provision_tenant.py --name "acme-corp" --plan enterprise
 
-Creates a tenant in the active backend (in-memory or PostgreSQL),
-generates an API key, registers it in both the security layer and
-the tenant registry, and prints the key.
+Creates a tenant in the active backend (persistent JSON registry or PostgreSQL),
+generates an API key, stores it in tenant key storage, and prints the key.
 """
 
 from __future__ import annotations
