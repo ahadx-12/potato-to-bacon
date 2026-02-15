@@ -98,14 +98,21 @@ def require_api_key(
     if not x_api_key:
         raise HTTPException(status_code=401, detail={"message": "Missing API key"})
 
-    if x_api_key not in allowed_api_keys():
-        # Runtime tenant provisioning persists keys in tenant storage.
-        # This supports both in-memory/json-backed registry and PostgreSQL.
-        from potatobacon.api.tenants import get_registry
+    valid = False
+    if x_api_key in keys:
+        valid = True
+    else:
+        # Check tenant registry
+        try:
+            from potatobacon.api.tenants import get_registry
+            registry = get_registry()
+            if registry.resolve(x_api_key):
+                valid = True
+        except ImportError:
+            pass
 
-        tenant = get_registry().resolve(x_api_key)
-        if tenant is None:
-            raise HTTPException(status_code=401, detail={"message": "Invalid API key"})
+    if not valid:
+        raise HTTPException(status_code=401, detail={"message": "Invalid API key"})
 
     route = request.url.path
     rate_limiter.check(x_api_key, route)
