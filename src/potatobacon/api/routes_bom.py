@@ -308,6 +308,18 @@ def _run_bom_job(job: _BOMJobRecord, api_key: str, tenant: Tenant) -> None:
                             duty_breakdown["section_232_rate"] = min(remaining, 25.0)
                             duty_breakdown["section_232_citation"] = "Proc. 9705, 83 FR 11625"
 
+            # Check if manual review is required (e.g. 0% rate with no clear reason)
+            status = result.status
+            if result.baseline_duty_rate == 0.0 and result.baseline_effective_rate == 0.0:
+                # If it's 0% but not obviously an FTA or unconditional free item, flag it
+                # For now, we trust the engine, but in a real scenario we'd check for "Free" vs "0%"
+                pass
+
+            # If the engine returned a specific/compound rate that couldn't be computed
+            # (usually indicated by a null rate or specific flag in metadata)
+            if result.baseline_duty_rate is None:
+                 status = "manual_review_required"
+
             with _lock:
                 job.results.append({
                     "index": i,
@@ -317,7 +329,7 @@ def _run_bom_job(job: _BOMJobRecord, api_key: str, tenant: Tenant) -> None:
                     "hts_code": item.hts_code,
                     "value_usd": item.value_usd,
                     "annual_volume": getattr(item, 'annual_volume', None),
-                    "status": result.status,
+                    "status": status,
                     "baseline_duty_rate": result.baseline_duty_rate,
                     "baseline_effective_rate": result.baseline_effective_rate,
                     "optimized_duty_rate": result.optimized_duty_rate,
@@ -453,6 +465,17 @@ async def upload_bom(
             },
         )
 
+    # 422 if 0 parseable rows but no critical parse error
+    if not parse_result.items:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "No parseable rows found in BOM file",
+                "skipped_count": len(parse_result.skipped),
+                "warnings": parse_result.warnings,
+            },
+        )
+
     # Store the upload
     upload_id = f"bom_{uuid.uuid4().hex[:12]}"
     record = _UploadRecord(
@@ -527,7 +550,8 @@ def analyze_bom(
 
     items = upload.parse_result.items
     if not items:
-        raise HTTPException(status_code=400, detail="No parseable items in this upload")
+        # Should be caught at upload, but double check
+        raise HTTPException(status_code=422, detail="No parseable items in this upload")
 
     # Check tenant rate limit for batch size
     registry = get_registry()

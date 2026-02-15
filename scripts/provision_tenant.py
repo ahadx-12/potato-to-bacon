@@ -42,7 +42,7 @@ def main() -> None:
     tenant_id = args.tenant_id or f"tenant_{secrets.token_hex(6)}"
     api_key = args.api_key or f"ptb_{secrets.token_urlsafe(32)}"
 
-    # Register in tenant registry (persistent JSON registry or PostgreSQL)
+    # Register in tenant registry
     from potatobacon.api.tenants import get_registry
     registry = get_registry()
     tenant = registry.register_tenant(
