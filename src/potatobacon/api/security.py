@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import threading
 import time
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 from fastapi import Header, HTTPException, Request
 
@@ -95,11 +95,17 @@ def require_api_key(
 ) -> str:
     """Validate the provided API key and enforce per-route rate limits."""
 
-    keys = allowed_api_keys()
     if not x_api_key:
         raise HTTPException(status_code=401, detail={"message": "Missing API key"})
-    if x_api_key not in keys:
-        raise HTTPException(status_code=401, detail={"message": "Invalid API key"})
+
+    if x_api_key not in allowed_api_keys():
+        # Runtime tenant provisioning persists keys in tenant storage.
+        # This supports both in-memory/json-backed registry and PostgreSQL.
+        from potatobacon.api.tenants import get_registry
+
+        tenant = get_registry().resolve(x_api_key)
+        if tenant is None:
+            raise HTTPException(status_code=401, detail={"message": "Invalid API key"})
 
     route = request.url.path
     rate_limiter.check(x_api_key, route)
@@ -117,4 +123,3 @@ def set_rate_limit(limit: int) -> None:
             pass
     rate_limiter.rate_per_minute = max(1, int(limit))
     rate_limiter.reset()
-

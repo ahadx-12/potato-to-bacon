@@ -11,9 +11,11 @@ Sprint E: Added PostgreSQL backend support via PTB_STORAGE_BACKEND env var.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, Request
@@ -55,6 +57,62 @@ class TenantRegistry:
     def __init__(self) -> None:
         self._tenants: Dict[str, Tenant] = {}
         self._key_to_tenant: Dict[str, str] = {}
+        base = Path(os.getenv("PTB_DATA_ROOT", "artifacts"))
+        self._registry_path = base / "tenants" / "registry.json"
+        self._load_from_disk()
+
+    def _serialize(self) -> Dict[str, Any]:
+        return {
+            "tenants": [
+                {
+                    "tenant_id": tenant.tenant_id,
+                    "name": tenant.name,
+                    "api_keys": list(tenant.api_keys),
+                    "plan": tenant.plan,
+                    "created_at": tenant.created_at,
+                    "sku_limit": tenant.sku_limit,
+                    "monthly_analyses": tenant.monthly_analyses,
+                    "monthly_analysis_limit": tenant.monthly_analysis_limit,
+                    "metadata": tenant.metadata,
+                }
+                for tenant in self._tenants.values()
+            ]
+        }
+
+    def _load_from_disk(self) -> None:
+        if not self._registry_path.exists():
+            return
+        try:
+            payload = json.loads(self._registry_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return
+
+        tenants = payload.get("tenants", []) if isinstance(payload, dict) else []
+        for raw_tenant in tenants:
+            if not isinstance(raw_tenant, dict):
+                continue
+            tenant_id = str(raw_tenant.get("tenant_id", "")).strip()
+            name = str(raw_tenant.get("name", "")).strip()
+            if not tenant_id or not name:
+                continue
+            tenant = Tenant(
+                tenant_id=tenant_id,
+                name=name,
+                api_keys=[str(key) for key in raw_tenant.get("api_keys", []) if str(key)],
+                plan=str(raw_tenant.get("plan", "starter")),
+                created_at=str(raw_tenant.get("created_at", datetime.now(timezone.utc).isoformat())),
+                sku_limit=int(raw_tenant.get("sku_limit", 100)),
+                monthly_analyses=int(raw_tenant.get("monthly_analyses", 0)),
+                monthly_analysis_limit=int(raw_tenant.get("monthly_analysis_limit", 500)),
+                metadata=raw_tenant.get("metadata", {}),
+            )
+            self._tenants[tenant_id] = tenant
+            for api_key in tenant.api_keys:
+                self._key_to_tenant[api_key] = tenant_id
+
+    def _persist(self) -> None:
+        self._registry_path.parent.mkdir(parents=True, exist_ok=True)
+        self._registry_path.write_text(json.dumps(self._serialize(), sort_keys=True, indent=2))
 
     def register_tenant(
         self,
@@ -74,6 +132,7 @@ class TenantRegistry:
         )
         self._tenants[tenant_id] = tenant
         self._key_to_tenant[api_key] = tenant_id
+        self._persist()
         return tenant
 
     def add_api_key(self, tenant_id: str, api_key: str) -> None:
@@ -82,6 +141,7 @@ class TenantRegistry:
             raise KeyError(f"Unknown tenant: {tenant_id}")
         self._tenants[tenant_id].api_keys.append(api_key)
         self._key_to_tenant[api_key] = tenant_id
+        self._persist()
 
     def resolve(self, api_key: str) -> Optional[Tenant]:
         """Look up the tenant for an API key."""
@@ -99,6 +159,7 @@ class TenantRegistry:
         tenant = self._tenants.get(tenant_id)
         if tenant:
             tenant.monthly_analyses += 1
+            self._persist()
 
     def check_rate_limit(self, tenant: Tenant) -> bool:
         """Return True if the tenant is within their monthly limit."""
