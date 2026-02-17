@@ -67,6 +67,7 @@ def analyze_bom_batch(
                     origin_country=item.get("origin_country"),
                     import_country=params.get("import_country", "US"),
                     declared_value_per_unit=item.get("value_usd"),
+                    hts_hint=item.get("hts_code"),
                     product_category=item.get("inferred_category"),
                     law_context=params.get("law_context"),
                     max_mutations=params.get("max_mutations"),

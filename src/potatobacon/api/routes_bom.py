@@ -259,6 +259,7 @@ def _run_bom_job(job: _BOMJobRecord, api_key: str, tenant: Tenant) -> None:
                 origin_country=item.origin_country,
                 import_country=job.import_country,
                 declared_value_per_unit=item.value_usd,
+                hts_hint=item.hts_code,
                 product_category=item.inferred_category,
                 law_context=job.law_context,
                 max_mutations=job.max_mutations,
