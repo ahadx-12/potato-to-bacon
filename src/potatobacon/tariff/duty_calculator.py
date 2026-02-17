@@ -195,6 +195,8 @@ def compute_total_duty(
                 "Provide base_rate explicitly or ensure the rate store is populated."
             )
 
+    user_supplied_overlays = overlays is not None
+
     # --- Section 232/301 overlays ---
     if overlays is None:
         overlays = evaluate_overlays(
@@ -219,35 +221,42 @@ def compute_total_duty(
         if ov.stop_optimization:
             stop_opt = True
 
+    apply_extended_layers = (not user_supplied_overlays) or any(
+        dep is not None for dep in (adcvd_registry, exclusion_tracker, fta_engine)
+    )
+
     # --- AD/CVD orders ---
-    registry = adcvd_registry or get_adcvd_registry()
     adcvd_result: ADCVDLookupResult | None = None
     ad_duty_rate = 0.0
     cvd_duty_rate = 0.0
-    if hts_code and origin_country:
-        adcvd_result = registry.lookup(hts_code, origin_country)
-        ad_duty_rate = adcvd_result.total_ad_rate
-        cvd_duty_rate = adcvd_result.total_cvd_rate
+    if apply_extended_layers:
+        registry = adcvd_registry or get_adcvd_registry()
+        if hts_code and origin_country:
+            adcvd_result = registry.lookup(hts_code, origin_country)
+            ad_duty_rate = adcvd_result.total_ad_rate
+            cvd_duty_rate = adcvd_result.total_cvd_rate
 
     # --- Exclusions ---
-    tracker = exclusion_tracker or get_exclusion_tracker()
     exclusion_result: ExclusionLookupResult | None = None
     exclusion_relief = 0.0
-    if hts_code:
-        exclusion_result = tracker.check(hts_code, origin_country or None)
-        exclusion_relief = exclusion_result.total_exclusion_relief_pct
+    if apply_extended_layers:
+        tracker = exclusion_tracker or get_exclusion_tracker()
+        if hts_code:
+            exclusion_result = tracker.check(hts_code, origin_country or None)
+            exclusion_relief = exclusion_result.total_exclusion_relief_pct
 
     # Cap exclusion relief to the total overlay it applies against
     overlay_total_before_exclusion = section_232_rate + section_301_rate
     exclusion_relief = min(exclusion_relief, overlay_total_before_exclusion)
 
     # --- FTA preference ---
-    fta = fta_engine or get_fta_engine()
     fta_result: FTALookupResult | None = None
     fta_preference_pct = 0.0
-    if hts_code and origin_country and import_country:
-        fta_result = fta.evaluate(hts_code, origin_country, import_country, facts)
-        fta_preference_pct = fta_result.best_preference_pct
+    if apply_extended_layers:
+        fta = fta_engine or get_fta_engine()
+        if hts_code and origin_country and import_country:
+            fta_result = fta.evaluate(hts_code, origin_country, import_country, facts)
+            fta_preference_pct = fta_result.best_preference_pct
 
     # --- Compute effective base rate after FTA preference ---
     effective_base = base_rate

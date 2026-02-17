@@ -55,6 +55,21 @@ def _normalize_text(value: str) -> str:
     return cleaned.upper()
 
 
+def _normalize_rate_percent(value: Any) -> float:
+    """Normalize overlay rates to percentage points.
+
+    Data feeds may encode rates as either `25` (percentage points) or
+    `0.25` (fraction). This helper standardizes to percentage points.
+    """
+    try:
+        rate = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if 0.0 < rate <= 1.0:
+        return rate * 100.0
+    return rate
+
+
 @lru_cache(maxsize=None)
 def _load_overlay_rules(base_path: str | None) -> tuple[_OverlayRule, ...]:
     base_dir = _data_root(base_path)
@@ -68,7 +83,7 @@ def _load_overlay_rules(base_path: str | None) -> tuple[_OverlayRule, ...]:
                 _OverlayRule(
                     overlay_name=str(entry.get("overlay_name") or entry.get("name") or "unknown"),
                     hts_prefixes=prefixes,
-                    additional_rate=float(entry.get("additional_rate") or 0.0),
+                    additional_rate=_normalize_rate_percent(entry.get("additional_rate") or 0.0),
                     reason=str(entry.get("reason") or "unspecified"),
                     requires_review=bool(entry.get("requires_review", False)),
                     stop_optimization=bool(entry.get("stop_optimization", False)),
@@ -99,7 +114,7 @@ def _load_overlay_rules(base_path: str | None) -> tuple[_OverlayRule, ...]:
                 _OverlayRule(
                     overlay_name=str(entry.get("overlay_name") or entry.get("name") or "unknown"),
                     hts_prefixes=prefixes,
-                    additional_rate=float(entry.get("additional_rate") or 0.0),
+                    additional_rate=_normalize_rate_percent(entry.get("additional_rate") or 0.0),
                     reason=str(entry.get("reason") or "unspecified"),
                     requires_review=bool(entry.get("requires_review", False)),
                     stop_optimization=bool(entry.get("stop_optimization", False)),
@@ -133,7 +148,7 @@ def _load_overlay_rules(base_path: str | None) -> tuple[_OverlayRule, ...]:
                 _OverlayRule(
                     overlay_name=str(entry.get("overlay_name") or entry.get("name") or "unknown"),
                     hts_prefixes=use_prefixes,
-                    additional_rate=float(entry.get("additional_rate") or 0.0),
+                    additional_rate=_normalize_rate_percent(entry.get("additional_rate") or 0.0),
                     reason=str(entry.get("reason") or "unspecified"),
                     requires_review=bool(entry.get("requires_review", False)),
                     stop_optimization=bool(entry.get("stop_optimization", False)),
