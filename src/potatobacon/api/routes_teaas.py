@@ -39,7 +39,7 @@ from potatobacon.tariff.mutation_generator import (
     generate_mutation_candidates,
     infer_product_profile,
 )
-from potatobacon.tariff.overlays import effective_duty_rate, evaluate_overlays
+from potatobacon.tariff.duty_calculator import compute_total_duty
 from potatobacon.tariff.origin_engine import build_origin_policy_atoms
 from potatobacon.tariff.product_schema import ProductCategory, ProductSpecModel
 from potatobacon.tariff.models import StructuredBOMModel
@@ -67,6 +67,10 @@ class TEaaSAnalyzeRequest(BaseModel):
     )
     law_context: Optional[str] = Field(
         default=None, description="Tariff context (e.g. HTS_US_2025_SLICE)"
+    )
+    hts_hint: Optional[str] = Field(
+        default=None,
+        description="Optional HTS hint (6/8/10-digit) to guide matching and overlays",
     )
     max_mutations: int = Field(default=10, ge=1, le=50)
 
@@ -241,6 +245,56 @@ def _build_product_spec(req: TEaaSAnalyzeRequest) -> ProductSpecModel:
     )
 
 
+def _normalize_hts_code(value: str) -> str:
+    """Normalize HTS-like identifiers into dotted 8/10-digit code strings."""
+    digits = "".join(ch for ch in value if ch.isdigit())
+    if len(digits) >= 10:
+        return f"{digits[:4]}.{digits[4:6]}.{digits[6:8]}.{digits[8:10]}"
+    if len(digits) >= 8:
+        return f"{digits[:4]}.{digits[4:6]}.{digits[6:8]}"
+    if len(digits) >= 6:
+        return f"{digits[:4]}.{digits[4:6]}"
+    return digits
+
+
+def _best_hts_code(active_atoms: List[Any]) -> str:
+    """Best-effort HTS code extraction from active duty atoms."""
+    for atom in active_atoms:
+        metadata = getattr(atom, "metadata", None)
+        if isinstance(metadata, dict):
+            hts_code = metadata.get("hts_code")
+            if isinstance(hts_code, str) and hts_code.strip():
+                return _normalize_hts_code(hts_code)
+        source_id = getattr(atom, "source_id", "")
+        if isinstance(source_id, str) and source_id.startswith("HTS_"):
+            normalized = _normalize_hts_code(source_id)
+            if normalized:
+                return normalized
+    return ""
+
+
+def _origin_shift_mutations(facts: Dict[str, Any], origin_country: str | None) -> List[Dict[str, Any]]:
+    """Generate general origin-shift candidates for broad savings discovery."""
+    current = (origin_country or "").upper()
+    candidates = [
+        ("MX", "Origin shift candidate to Mexico (USMCA lane)"),
+        ("CA", "Origin shift candidate to Canada (USMCA lane)"),
+        ("KR", "Origin shift candidate to South Korea (KORUS lane)"),
+    ]
+    patches: List[Dict[str, Any]] = []
+    for code, _desc in candidates:
+        if code == current:
+            continue
+        patch: Dict[str, Any] = {
+            f"origin_country_{code}": True,
+            "origin_country_raw": code,
+        }
+        if current:
+            patch[f"origin_country_{current}"] = False
+        patches.append(patch)
+    return patches
+
+
 # ---------------------------------------------------------------------------
 # Main endpoint
 # ---------------------------------------------------------------------------
@@ -259,33 +313,23 @@ def teaas_analyze(
     # to the caller's requested context (default: HTS_US_2025_SLICE).
     atoms: List[Any] = []
     context_meta: Dict[str, Any] = {}
-    used_live_context = False
 
     if not req.law_context:
-        # No explicit context requested — try live USITC data first
-        try:
-            atoms, context_meta = load_atoms_for_context("HTS_US_LIVE")
-            used_live_context = True
-            logger.info(
-                "Using HTS_US_LIVE context (%d atoms)",
-                len(atoms),
-            )
-        except (KeyError, ValueError, FileNotFoundError) as exc:
-            logger.info(
-                "HTS_US_LIVE not available (%s), falling back to %s",
-                exc,
-                DEFAULT_CONTEXT_ID,
-            )
+        # No explicit context requested — prefer broadest available context.
+        for candidate_context in ("HTS_US_LIVE", "HTS_US_2025_TOP5", DEFAULT_CONTEXT_ID):
+            try:
+                atoms, context_meta = load_atoms_for_context(candidate_context)
+                resolved_context = candidate_context
+                logger.info("Using %s context (%d atoms)", candidate_context, len(atoms))
+                break
+            except (KeyError, ValueError, FileNotFoundError) as exc:
+                logger.info("Context %s unavailable: %s", candidate_context, exc)
 
     if not atoms:
         try:
             atoms, context_meta = load_atoms_for_context(resolved_context)
-            logger.info(
-                "Using %s context (%d atoms)",
-                resolved_context,
-                len(atoms),
-            )
-        except (KeyError, ValueError) as exc:
+            logger.info("Using %s context (%d atoms)", resolved_context, len(atoms))
+        except (KeyError, ValueError, FileNotFoundError) as exc:
             return TEaaSAnalyzeResponse(
                 status="ERROR",
                 tenant_id=tenant.tenant_id,
@@ -308,11 +352,22 @@ def teaas_analyze(
     # so they can match guard tokens on USITC-sourced atoms
     facts = expand_facts(facts)
 
+    if req.hts_hint:
+        hint = _normalize_hts_code(req.hts_hint)
+        if hint:
+            facts["hts_code"] = hint
+            chapter_digits = "".join(ch for ch in hint if ch.isdigit())[:2]
+            if chapter_digits:
+                facts[f"chapter_{chapter_digits}"] = True
+
     # Chapter pre-filter: reduce atom set to only chapters matching
     # the BOM's inferred chapters for Z3 performance
     filtered_atoms = filter_atoms_by_chapter(
         atoms, facts, context_id=context_id
     )
+    if not filtered_atoms:
+        filtered_atoms = atoms
+        errors.append("Chapter filter produced no matches; fell back to full context atoms")
 
     # Baseline classification
     baseline = TariffScenario(name="baseline", facts=deepcopy(facts))
@@ -322,15 +377,17 @@ def teaas_analyze(
     baseline_result = compute_duty_result(filtered_atoms, baseline, duty_rates=duty_rates)
     baseline_rate = baseline_result.duty_rate if baseline_result.duty_rate is not None else 0.0
 
-    baseline_overlays = evaluate_overlays(
-        facts=baseline.facts,
-        active_codes=[a.source_id for a in baseline_result.active_atoms],
-        origin_country=req.origin_country,
-        import_country=req.import_country or "US",
-    )
-    baseline_effective = effective_duty_rate(baseline_rate, baseline_overlays)
-
     baseline_codes = sorted([a.source_id for a in baseline_result.active_atoms])
+    baseline_hts_code = req.hts_hint or _best_hts_code(baseline_result.active_atoms)
+    baseline_breakdown = compute_total_duty(
+        base_rate=baseline_rate,
+        hts_code=baseline_hts_code,
+        origin_country=req.origin_country or "",
+        import_country=req.import_country or "US",
+        facts=baseline.facts,
+        active_codes=baseline_codes,
+    )
+    baseline_effective = baseline_breakdown.total_duty_rate
 
     if baseline_result.status not in ("OK",):
         # Still try mutations but note the issue
@@ -349,6 +406,7 @@ def teaas_analyze(
     legacy_mutations = generate_candidate_mutations(
         infer_product_profile(req.description, req.bom_text)
     )
+    origin_lane_mutations = _origin_shift_mutations(facts, req.origin_country)
 
     # Test all mutations
     mutation_results: List[TEaaSMutationResult] = []
@@ -362,13 +420,18 @@ def teaas_analyze(
         )
         mut_result = compute_duty_result(filtered_atoms, mutated, duty_rates=duty_rates)
         mut_rate = mut_result.duty_rate if mut_result.duty_rate is not None else baseline_rate
-        mut_overlays = evaluate_overlays(
-            facts=mutated.facts,
-            active_codes=[a.source_id for a in mut_result.active_atoms],
-            origin_country=req.origin_country,
+        mut_codes = [a.source_id for a in mut_result.active_atoms]
+        mut_breakdown = compute_total_duty(
+            base_rate=mut_rate,
+            hts_code=req.hts_hint or _best_hts_code(mut_result.active_atoms),
+            origin_country=(
+                str(mutated.facts.get("origin_country_raw") or req.origin_country or "")
+            ),
             import_country=req.import_country or "US",
+            facts=mutated.facts,
+            active_codes=mut_codes,
         )
-        mut_effective = effective_duty_rate(mut_rate, mut_overlays)
+        mut_effective = mut_breakdown.total_duty_rate
         mutation_results.append(TEaaSMutationResult(
             mutation_id=mid,
             human_description=dm.human_description,
@@ -390,17 +453,49 @@ def teaas_analyze(
         mutated = apply_mutations(baseline, patch)
         mut_result = compute_duty_result(filtered_atoms, mutated, duty_rates=duty_rates)
         mut_rate = mut_result.duty_rate if mut_result.duty_rate is not None else baseline_rate
-        mut_overlays = evaluate_overlays(
-            facts=mutated.facts,
-            active_codes=[a.source_id for a in mut_result.active_atoms],
-            origin_country=req.origin_country,
+        mut_codes = [a.source_id for a in mut_result.active_atoms]
+        mut_breakdown = compute_total_duty(
+            base_rate=mut_rate,
+            hts_code=req.hts_hint or _best_hts_code(mut_result.active_atoms),
+            origin_country=(
+                str(mutated.facts.get("origin_country_raw") or req.origin_country or "")
+            ),
             import_country=req.import_country or "US",
+            facts=mutated.facts,
+            active_codes=mut_codes,
         )
-        mut_effective = effective_duty_rate(mut_rate, mut_overlays)
+        mut_effective = mut_breakdown.total_duty_rate
         if mut_effective < baseline_effective:
             mutation_results.append(TEaaSMutationResult(
                 mutation_id=mid,
                 human_description=desc,
+                fact_patch=patch,
+                projected_duty_rate=mut_rate,
+                effective_duty_rate=mut_effective,
+                savings_vs_baseline=baseline_rate - mut_rate,
+                effective_savings=baseline_effective - mut_effective,
+                verified=True,
+            ))
+
+    for patch in origin_lane_mutations:
+        mid += 1
+        mutated = apply_mutations(baseline, patch)
+        mut_result = compute_duty_result(filtered_atoms, mutated, duty_rates=duty_rates)
+        mut_rate = mut_result.duty_rate if mut_result.duty_rate is not None else baseline_rate
+        mut_codes = [a.source_id for a in mut_result.active_atoms]
+        mut_breakdown = compute_total_duty(
+            base_rate=mut_rate,
+            hts_code=req.hts_hint or _best_hts_code(mut_result.active_atoms),
+            origin_country=str(mutated.facts.get("origin_country_raw") or req.origin_country or ""),
+            import_country=req.import_country or "US",
+            facts=mutated.facts,
+            active_codes=mut_codes,
+        )
+        mut_effective = mut_breakdown.total_duty_rate
+        if mut_effective < baseline_effective:
+            mutation_results.append(TEaaSMutationResult(
+                mutation_id=mid,
+                human_description=f"Trade-lane optimization: evaluate origin shift to {patch.get('origin_country_raw')}",
                 fact_patch=patch,
                 projected_duty_rate=mut_rate,
                 effective_duty_rate=mut_effective,

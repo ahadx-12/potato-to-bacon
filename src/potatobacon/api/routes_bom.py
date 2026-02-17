@@ -46,6 +46,7 @@ from potatobacon.api.routes_teaas import (
     TEaaSAnalyzeResponse,
     teaas_analyze,
 )
+from potatobacon.tariff.duty_calculator import compute_total_duty
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/bom", tags=["bom"])
@@ -258,6 +259,7 @@ def _run_bom_job(job: _BOMJobRecord, api_key: str, tenant: Tenant) -> None:
                 origin_country=item.origin_country,
                 import_country=job.import_country,
                 declared_value_per_unit=item.value_usd,
+                hts_hint=item.hts_code,
                 product_category=item.inferred_category,
                 law_context=job.law_context,
                 max_mutations=job.max_mutations,
@@ -267,46 +269,37 @@ def _run_bom_job(job: _BOMJobRecord, api_key: str, tenant: Tenant) -> None:
             with _z3_lock:
                 result = teaas_analyze(req, api_key=api_key, tenant=tenant)
 
-            # Extract duty breakdown from overlay/effective rate data
+            # Compute full duty stack using unified calculator
+            duty_stack = compute_total_duty(
+                base_rate=result.baseline_duty_rate,
+                hts_code=item.hts_code or "",
+                origin_country=item.origin_country or "",
+                import_country=job.import_country or "US",
+            )
             duty_breakdown = {
-                "base_rate": result.baseline_duty_rate,
-                "base_rate_source": "USITC HTS General column",
-                "section_232_rate": 0.0,
-                "section_301_rate": 0.0,
+                "base_rate": duty_stack.base_rate,
+                "base_rate_source": duty_stack.base_rate_source,
+                "section_232_rate": duty_stack.section_232_rate,
+                "section_301_rate": duty_stack.section_301_rate,
                 "section_301_list": "",
                 "section_301_citation": "",
                 "section_232_citation": "",
-                "ad_duty_rate": 0.0,
-                "cvd_duty_rate": 0.0,
+                "ad_duty_rate": duty_stack.ad_duty_rate,
+                "cvd_duty_rate": duty_stack.cvd_duty_rate,
                 "ad_case_number": "",
-                "fta_preference_pct": 0.0,
-                "fta_treaty": "",
-                "exclusion_relief_rate": 0.0,
-                "total_rate": result.baseline_effective_rate or result.baseline_duty_rate,
+                "fta_preference_pct": duty_stack.fta_preference_pct,
+                "fta_treaty": (
+                    duty_stack.fta_result.best_program.program_id
+                    if duty_stack.fta_result and duty_stack.fta_result.best_program
+                    else ""
+                ),
+                "exclusion_relief_rate": duty_stack.exclusion_relief_rate,
+                "total_rate": duty_stack.total_duty_rate,
             }
 
-            # Parse overlay data from proof chain if available
-            if result.proof_chain and isinstance(result.proof_chain, dict):
-                steps = result.proof_chain.get("steps", [])
-                for step in steps:
-                    out = step.get("output_data", {}) if isinstance(step, dict) else {}
-                    if isinstance(out, dict):
-                        if out.get("context_used"):
-                            duty_breakdown["base_rate_source"] = f"USITC {out['context_used']}"
-
-            # Compute effective/baseline rate difference as overlay exposure
-            if result.baseline_effective_rate and result.baseline_duty_rate:
-                overlay_diff = (result.baseline_effective_rate or 0) - (result.baseline_duty_rate or 0)
-                if overlay_diff > 0:
-                    # Attribute overlay to 301 for CN-origin items
-                    if item.origin_country and item.origin_country.upper() == "CN":
-                        duty_breakdown["section_301_rate"] = min(overlay_diff, 25.0)
-                        duty_breakdown["section_301_list"] = "List 3/4A"
-                        duty_breakdown["section_301_citation"] = "84 FR 43304 (List 4A 7.5→25%)"
-                        remaining = overlay_diff - duty_breakdown["section_301_rate"]
-                        if remaining > 0:
-                            duty_breakdown["section_232_rate"] = min(remaining, 25.0)
-                            duty_breakdown["section_232_citation"] = "Proc. 9705, 83 FR 11625"
+            if duty_stack.adcvd_result and duty_stack.adcvd_result.order_matches:
+                first_case = duty_stack.adcvd_result.order_matches[0].order.case_number
+                duty_breakdown["ad_case_number"] = first_case
 
             # Check if manual review is required (e.g. 0% rate with no clear reason)
             status = result.status
@@ -318,7 +311,7 @@ def _run_bom_job(job: _BOMJobRecord, api_key: str, tenant: Tenant) -> None:
             # If the engine returned a specific/compound rate that couldn't be computed
             # (usually indicated by a null rate or specific flag in metadata)
             if result.baseline_duty_rate is None:
-                 status = "manual_review_required"
+                status = "manual_review_required"
 
             with _lock:
                 job.results.append({
