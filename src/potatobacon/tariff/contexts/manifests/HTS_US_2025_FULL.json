@@ -1,0 +1,22 @@
+{
+  "context_id": "HTS_US_2025_FULL",
+  "domain": "tariff",
+  "jurisdiction": "US",
+  "effective_from": "2025-01-01",
+  "effective_to": null,
+  "description": "HTSUS 2025 full context: chapters 39, 84, 87, 90, 94. Default context for general tariff engineering analysis.",
+  "loader": {
+    "type": "python",
+    "callable": "potatobacon.tariff.hts_ingest.full_ingest:load_policy_atoms"
+  },
+  "sources": [
+    "data/hts_extract/full_chapters/ch39.jsonl",
+    "data/hts_extract/full_chapters/ch84.jsonl",
+    "data/hts_extract/full_chapters/ch87.jsonl",
+    "data/hts_extract/full_chapters/ch90.jsonl",
+    "data/hts_extract/full_chapters/ch94.jsonl"
+  ],
+  "revision_id": "HTS_US_2025_FULL",
+  "section_notes_hash": null,
+  "gri_text_hash": "6b8b7d02003e51fe1dbe3afdfba440ef8fb1b641b5cf77387daca627beb2f220"
+}

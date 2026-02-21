@@ -53,6 +53,9 @@ from potatobacon.tariff.product_schema import ProductCategory, ProductSpecModel
 from potatobacon.tariff.adcvd_registry import get_adcvd_registry
 from potatobacon.tariff.fta_engine import get_fta_engine
 from potatobacon.tariff.exclusion_tracker import get_exclusion_tracker
+from potatobacon.tariff.hts_search import search_hts_by_description, top_chapters_for_description
+from potatobacon.tariff.gri_engine import apply_gri, gri_legal_basis
+from potatobacon.tariff.company_profile import CompanyProfile, DEFAULT_PROFILE
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/engineering", tags=["engineering"])
@@ -307,6 +310,10 @@ def _analyze_single_sku(
     facts, _ = compile_facts(product_spec)
     facts = expand_facts(facts)
 
+    # Auto-classify with HTS text search when no hts_hint is provided.
+    # This makes the engine general-purpose: any product description can be
+    # routed to the right HTS chapter without requiring a pre-known HTS code.
+    gri_classification = None
     if hts_hint:
         hint_norm = _normalize_hts_code(hts_hint)
         if hint_norm:
@@ -314,6 +321,17 @@ def _analyze_single_sku(
             chapter_digits = "".join(ch for ch in hint_norm if ch.isdigit())[:2]
             if chapter_digits:
                 facts[f"chapter_{chapter_digits}"] = True
+    else:
+        try:
+            hts_candidates = search_hts_by_description(description, top_n=5)
+            if hts_candidates:
+                gri_classification = apply_gri(description, materials_list or [], hts_candidates)
+                if gri_classification.winning_heading:
+                    ch = str(gri_classification.winning_chapter).zfill(2)
+                    facts[f"chapter_{ch}"] = True
+                    facts["hts_code"] = gri_classification.winning_code
+        except Exception as exc:
+            logger.debug("HTS auto-classify failed for %r: %s", description[:40], exc)
 
     # Chapter pre-filter
     filtered_atoms = filter_atoms_by_chapter(atoms, facts, context_id=context_id)
@@ -438,6 +456,7 @@ def _analyze_single_sku(
         if effective_savings <= 0:
             continue
 
+        gri_basis = gri_legal_basis(gri_classification) if gri_classification else []
         mutation_results.append({
             "human_description": dm.human_description,
             "fact_patch": dm.fact_patch,
@@ -446,6 +465,7 @@ def _analyze_single_sku(
             "savings_vs_baseline": baseline_rate - mut_rate,
             "effective_savings": effective_savings,
             "verified": dm.verified,
+            "gri_legal_basis": gri_basis,
         })
 
     # Sort mutations by savings
@@ -588,7 +608,7 @@ def analyze_sku(
     context_meta: Dict[str, Any] = {}
 
     if not req.law_context:
-        for candidate in ("HTS_US_LIVE", "HTS_US_2025_TOP5", DEFAULT_CONTEXT_ID):
+        for candidate in ("HTS_US_LIVE", "HTS_US_2025_FULL", "HTS_US_2025_TOP5", DEFAULT_CONTEXT_ID):
             try:
                 atoms, context_meta = load_atoms_for_context(candidate)
                 resolved_context = candidate
@@ -682,7 +702,7 @@ async def analyze_bom(
     context_meta: Dict[str, Any] = {}
 
     if not law_context:
-        for candidate in ("HTS_US_LIVE", "HTS_US_2025_TOP5", DEFAULT_CONTEXT_ID):
+        for candidate in ("HTS_US_LIVE", "HTS_US_2025_FULL", "HTS_US_2025_TOP5", DEFAULT_CONTEXT_ID):
             try:
                 atoms, context_meta = load_atoms_for_context(candidate)
                 resolved_context = candidate
@@ -763,3 +783,249 @@ async def analyze_bom(
 
     get_registry().increment_usage(tenant.tenant_id)
     return _report_to_out(report)
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/engineering/classify
+# ---------------------------------------------------------------------------
+
+class ClassifyRequest(BaseModel):
+    """Request for HTS classification of a product description."""
+
+    description: str = Field(..., min_length=3)
+    materials: Optional[List[Dict[str, str]]] = Field(
+        default=None,
+        description='Material list for GRI 3(b) essential character analysis',
+    )
+    top_n: int = Field(default=5, ge=1, le=20)
+    chapter_filter: Optional[List[int]] = Field(
+        default=None,
+        description="Restrict search to specific HTS chapters",
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class HTSCandidateOut(BaseModel):
+    hts_code: str
+    heading: str
+    chapter: int
+    description: str
+    base_duty_rate: str
+    score: float
+    matched_terms: List[str]
+    rationale: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class GRIReasoningOut(BaseModel):
+    gri_rule: str
+    rule_text: str
+    applied_test: str
+    result: str
+    legal_citation: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ClassifyResponse(BaseModel):
+    """HTS classification response with GRI reasoning."""
+
+    description: str
+    winning_code: str
+    winning_heading: str
+    winning_description: str
+    winning_chapter: int
+    base_duty_rate: str
+    determining_rule: str
+    confidence: str
+    reclassification_opportunity: bool
+    gri_chain: List[GRIReasoningOut]
+    gri_notes: List[str]
+    candidates: List[HTSCandidateOut]
+    legal_basis: List[str]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+@router.post("/classify", response_model=ClassifyResponse)
+def classify_product(
+    req: ClassifyRequest,
+    api_key: str = Depends(require_api_key),
+) -> ClassifyResponse:
+    """Classify a product description against the HTS schedule using GRI rules.
+
+    Returns the winning HTS heading and the full GRI reasoning chain explaining
+    WHY that heading was selected over alternatives.
+
+    This is the classification step that precedes engineering analysis.
+    A tariff engineer classifies before optimizing.
+    """
+    candidates = search_hts_by_description(
+        req.description,
+        top_n=req.top_n,
+        chapter_filter=req.chapter_filter,
+    )
+
+    if not candidates:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "No HTS heading candidates found for this description. "
+                "Provide a more specific product description or add material details."
+            ),
+        )
+
+    gri = apply_gri(req.description, req.materials or [], candidates)
+
+    candidates_out = [
+        HTSCandidateOut(
+            hts_code=c.hts_code,
+            heading=c.heading,
+            chapter=c.chapter,
+            description=c.description,
+            base_duty_rate=c.base_duty_rate,
+            score=c.score,
+            matched_terms=c.matched_terms,
+            rationale=c.rationale,
+        )
+        for c in candidates
+    ]
+
+    gri_chain_out = [
+        GRIReasoningOut(
+            gri_rule=r.gri_rule,
+            rule_text=r.rule_text,
+            applied_test=r.applied_test,
+            result=r.result,
+            legal_citation=r.legal_citation,
+        )
+        for r in gri.gri_chain
+    ]
+
+    return ClassifyResponse(
+        description=req.description,
+        winning_code=gri.winning_code,
+        winning_heading=gri.winning_heading,
+        winning_description=gri.winning_description,
+        winning_chapter=gri.winning_chapter,
+        base_duty_rate=gri.base_duty_rate,
+        determining_rule=gri.determining_rule,
+        confidence=gri.confidence,
+        reclassification_opportunity=gri.reclassification_opportunity,
+        gri_chain=gri_chain_out,
+        gri_notes=gri.notes,
+        candidates=candidates_out,
+        legal_basis=gri_legal_basis(gri),
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/engineering/company-profile
+# ---------------------------------------------------------------------------
+
+class CompanyProfileCapabilities(BaseModel):
+    """What the engine can and cannot recommend given the company's constraints."""
+
+    trade_lane_feasible_origins: List[str]
+    trade_lane_blocked_origins: List[str]
+    product_engineering_feasible: bool
+    fta_programs_already_claimed: List[str]
+    fta_programs_to_evaluate: List[str]
+    will_surface_grade_a: bool
+    will_surface_grade_b: bool
+    will_surface_grade_c: bool
+    audit_risk_flag: bool
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class CompanyProfileResponse(BaseModel):
+    profile: dict
+    capabilities: CompanyProfileCapabilities
+    guidance: List[str]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+@router.post("/company-profile", response_model=CompanyProfileResponse)
+def set_company_profile(
+    profile: CompanyProfile,
+    api_key: str = Depends(require_api_key),
+) -> CompanyProfileResponse:
+    """Accept and validate a company profile for tariff engineering analysis.
+
+    The profile shapes which opportunities are surfaced and suppressed:
+    - Fixed origins suppress trade lane recommendations for those countries
+    - Active FTA programs suppress FTA utilization findings
+    - Certified products suppress product engineering recommendations
+    - Risk tolerance filters opportunity grade (A/B/C)
+
+    Returns the accepted profile with a capabilities summary and
+    guidance notes for the analyst.
+    """
+    guidance: List[str] = []
+
+    if not profile.active_fta_programs:
+        guidance.append(
+            "No active FTA programs declared. The engine will surface all applicable "
+            "FTA utilization opportunities. If you are already claiming FTA preferences, "
+            "add them to active_fta_programs to avoid duplicate findings."
+        )
+
+    if profile.fixed_origin_countries:
+        guidance.append(
+            f"Fixed origins declared: {', '.join(profile.fixed_origin_countries)}. "
+            "Trade lane opportunities for these origins will be suppressed."
+        )
+
+    if profile.audit_status.value in ("active", "settlement"):
+        guidance.append(
+            "AUDIT STATUS: company is under active CBP audit or settlement. "
+            "All findings will be flagged as requiring legal counsel before acting. "
+            "Priority should be compliance remediation, not optimization."
+        )
+
+    if profile.risk_tolerance.value == "low":
+        guidance.append(
+            "Risk tolerance LOW: only Grade A opportunities will be surfaced. "
+            "This means documentation-only and well-established FTA claims only. "
+            "Reclassification and trade lane opportunities are excluded."
+        )
+
+    from potatobacon.tariff.origin_rules import _FTA_PARTNERS
+    applicable_ftas = [
+        fta_id
+        for fta_id, (_, partners) in _FTA_PARTNERS.items()
+        if any(c in partners for c in profile.primary_origin_countries)
+    ] if profile.primary_origin_countries else []
+
+    unclaimed = [f for f in applicable_ftas if not profile.fta_already_claimed(f)]
+    if unclaimed:
+        guidance.append(
+            f"Based on your origin countries, applicable FTAs include: "
+            f"{', '.join(unclaimed)}. "
+            "Consider adding these to fta_programs_of_interest for evaluation."
+        )
+
+    capabilities = CompanyProfileCapabilities(
+        trade_lane_feasible_origins=[
+            c for c in profile.primary_origin_countries
+            if profile.trade_lane_feasible(c)
+        ],
+        trade_lane_blocked_origins=list(profile.fixed_origin_countries),
+        product_engineering_feasible=profile.product_engineering_feasible(),
+        fta_programs_already_claimed=list(profile.active_fta_programs),
+        fta_programs_to_evaluate=list(profile.fta_programs_of_interest) or unclaimed,
+        will_surface_grade_a=True,
+        will_surface_grade_b=profile.risk_tolerance.value in ("moderate", "high"),
+        will_surface_grade_c=profile.risk_tolerance.value == "high",
+        audit_risk_flag=profile.audit_status.value in ("active", "settlement"),
+    )
+
+    return CompanyProfileResponse(
+        profile=profile.model_dump(),
+        capabilities=capabilities,
+        guidance=guidance,
+    )

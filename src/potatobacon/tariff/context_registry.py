@@ -13,7 +13,7 @@ from potatobacon.tariff.gri_atoms import build_gri_atoms, gri_text_hash
 CONTEXTS_DIR = Path(__file__).resolve().parent / "contexts"
 MANIFESTS_DIR = CONTEXTS_DIR / "manifests"
 RULES_DIR = CONTEXTS_DIR / "rules"
-DEFAULT_CONTEXT_ID = "HTS_US_2025_SLICE"
+DEFAULT_CONTEXT_ID = "HTS_US_2025_FULL"
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 _atoms_cache: Dict[str, Tuple[List[PolicyAtom], Dict[str, Any]]] = {}
