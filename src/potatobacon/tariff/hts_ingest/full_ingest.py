@@ -172,7 +172,28 @@ def extract_chapter(hts_code: str) -> int | None:
 
 
 def load_policy_atoms() -> List[PolicyAtom]:
-    atoms: List[PolicyAtom] = []
+    """Load all HTS policy atoms for the FULL context.
+
+    Returns atoms from two sources, merged without duplicates:
+    1. The base sample file (``hts_lines_sample.jsonl``) — these atoms carry
+       Z3 guard tokens and duty rates, enabling scenario-based classification.
+    2. The full chapter JSONL files (ch39/84/87/90/94) — these atoms carry
+       rich descriptions for text search and GRI candidate matching.
+
+    The base sample atoms take precedence on conflicts (same ``source_id``).
+    """
+    from potatobacon.tariff.hts_ingest.ingest import load_hts_policy_atoms
+
+    # Phase 1: base sample atoms — have guard tokens, duty rates, Z3-evaluable
+    base_result = load_hts_policy_atoms()
+    merged: List[PolicyAtom] = list(base_result.atoms)
+    seen_ids: set[str] = {atom.source_id for atom in merged}
+
+    # Phase 2: full chapter atoms — rich descriptions for search, guard=[](empty)
     for chapter in sorted(CHAPTER_PATHS.keys()):
-        atoms.extend(ingest_chapter(chapter))
-    return atoms
+        for atom in ingest_chapter(chapter):
+            if atom.source_id not in seen_ids:
+                merged.append(atom)
+                seen_ids.add(atom.source_id)
+
+    return merged
