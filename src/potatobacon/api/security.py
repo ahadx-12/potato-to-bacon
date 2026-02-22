@@ -99,7 +99,7 @@ def require_api_key(
         raise HTTPException(status_code=401, detail={"message": "Missing API key"})
 
     valid = False
-    if x_api_key in keys:
+    if x_api_key in allowed_api_keys():
         valid = True
     else:
         # Check tenant registry

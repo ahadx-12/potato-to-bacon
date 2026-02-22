@@ -32,6 +32,11 @@ from potatobacon.tariff.engineering_opportunity import (
     build_opportunity_from_fta,
     build_opportunity_from_mutation,
 )
+from potatobacon.tariff.risk_scorer import (
+    PortfolioRiskFinding,
+    PortfolioRiskSummary,
+    score_portfolio_risk,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +82,7 @@ class BOMEngineeringReport:
       - All findings sorted by annual_savings_estimate descending
       - Quick-win findings (documentation-only, can act immediately)
       - Per-SKU detailed findings
+      - Portfolio compliance risk findings and risk summary
     """
 
     # Identity
@@ -97,6 +103,10 @@ class BOMEngineeringReport:
 
     # Per-SKU detailed view
     sku_findings: List[SKUDutyExposure]
+
+    # Compliance risk findings (separate from savings opportunities)
+    risk_findings: List[PortfolioRiskFinding]
+    risk_summary: Optional[PortfolioRiskSummary]
 
     # Warnings / coverage notes from the engine
     warnings: List[str]
@@ -375,6 +385,14 @@ def build_bom_engineering_report(
         ),
     )
 
+    # Portfolio-level compliance risk scoring
+    try:
+        risk_findings, risk_summary = score_portfolio_risk(sku_results)
+    except Exception as exc:
+        logger.warning("Risk scoring failed: %s", exc)
+        risk_findings = []
+        risk_summary = None
+
     return BOMEngineeringReport(
         report_id=report_id,
         law_context=law_context,
@@ -385,6 +403,8 @@ def build_bom_engineering_report(
         all_opportunities=all_opportunities,
         quick_wins=quick_wins,
         sku_findings=sku_findings,
+        risk_findings=risk_findings,
+        risk_summary=risk_summary,
         warnings=warnings or [],
     )
 

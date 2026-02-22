@@ -28,7 +28,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
 from potatobacon.api.security import require_api_key
@@ -162,6 +162,49 @@ class PortfolioSummaryOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class RiskFindingOut(BaseModel):
+    """Serializable compliance risk finding for API response."""
+
+    risk_id: str
+    sku_id: Optional[str]
+    description: str
+    category: str
+    severity: str
+    estimated_exposure_pct: float
+    estimated_annual_exposure_usd: Optional[float]
+    potential_penalty_usd: Optional[float]
+    penalty_basis: str
+    risk_summary: str
+    risk_detail: str
+    immediate_actions: List[str]
+    remediation_steps: List[str]
+    legal_citations: List[str]
+    confidence: str
+    requires_legal_counsel: bool
+    prior_disclosure_recommended: bool
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class RiskSummaryOut(BaseModel):
+    """Portfolio-level risk summary for API response."""
+
+    total_risk_findings: int
+    critical_count: int
+    high_count: int
+    medium_count: int
+    low_count: int
+    total_estimated_exposure_usd: Optional[float]
+    total_potential_penalty_usd: Optional[float]
+    top_risk_categories: List[str]
+    prior_disclosure_recommended: bool
+    legal_counsel_required: bool
+    overall_risk_level: str
+    executive_summary: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class BOMEngineeringReportOut(BaseModel):
     """Full engineering report response."""
 
@@ -174,6 +217,8 @@ class BOMEngineeringReportOut(BaseModel):
     all_opportunities: List[OpportunityOut]
     quick_wins: List[OpportunityOut]
     sku_findings: List[SKUExposureOut]
+    risk_findings: List[RiskFindingOut]
+    risk_summary: Optional[RiskSummaryOut]
     warnings: List[str]
 
     model_config = ConfigDict(extra="forbid")
@@ -532,10 +577,51 @@ def _opp_to_out(o: TariffEngineeringOpportunity) -> OpportunityOut:
     )
 
 
+def _risk_to_out(r: Any) -> RiskFindingOut:
+    return RiskFindingOut(
+        risk_id=r.risk_id,
+        sku_id=r.sku_id,
+        description=r.description,
+        category=r.category.value if hasattr(r.category, "value") else str(r.category),
+        severity=r.severity.value if hasattr(r.severity, "value") else str(r.severity),
+        estimated_exposure_pct=r.estimated_exposure_pct,
+        estimated_annual_exposure_usd=r.estimated_annual_exposure_usd,
+        potential_penalty_usd=r.potential_penalty_usd,
+        penalty_basis=r.penalty_basis,
+        risk_summary=r.risk_summary,
+        risk_detail=r.risk_detail,
+        immediate_actions=list(r.immediate_actions),
+        remediation_steps=list(r.remediation_steps),
+        legal_citations=list(r.legal_citations),
+        confidence=r.confidence,
+        requires_legal_counsel=r.requires_legal_counsel,
+        prior_disclosure_recommended=r.prior_disclosure_recommended,
+    )
+
+
 def _report_to_out(report: BOMEngineeringReport) -> BOMEngineeringReportOut:
     from potatobacon.tariff.bom_engineering_report import PortfolioSummary
 
     ps = report.portfolio_summary
+    rs = report.risk_summary
+
+    risk_summary_out = None
+    if rs is not None:
+        risk_summary_out = RiskSummaryOut(
+            total_risk_findings=rs.total_risk_findings,
+            critical_count=rs.critical_count,
+            high_count=rs.high_count,
+            medium_count=rs.medium_count,
+            low_count=rs.low_count,
+            total_estimated_exposure_usd=rs.total_estimated_exposure_usd,
+            total_potential_penalty_usd=rs.total_potential_penalty_usd,
+            top_risk_categories=rs.top_risk_categories,
+            prior_disclosure_recommended=rs.prior_disclosure_recommended,
+            legal_counsel_required=rs.legal_counsel_required,
+            overall_risk_level=rs.overall_risk_level,
+            executive_summary=rs.executive_summary,
+        )
+
     return BOMEngineeringReportOut(
         report_id=report.report_id,
         law_context=report.law_context,
@@ -583,6 +669,8 @@ def _report_to_out(report: BOMEngineeringReport) -> BOMEngineeringReportOut:
             )
             for s in report.sku_findings
         ],
+        risk_findings=[_risk_to_out(r) for r in (report.risk_findings or [])],
+        risk_summary=risk_summary_out,
         warnings=report.warnings,
     )
 
@@ -1029,3 +1117,185 @@ def set_company_profile(
         capabilities=capabilities,
         guidance=guidance,
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/engineering/export/xlsx
+# ---------------------------------------------------------------------------
+
+class ExportRequest(BaseModel):
+    """Request to generate an Excel report from a prior BOMEngineeringReport."""
+
+    report: BOMEngineeringReportOut
+    company_name: str = Field(default="Importer of Record", max_length=100)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+@router.post(
+    "/export/xlsx",
+    response_class=Response,
+    summary="Export engineering report as Excel workbook",
+    description=(
+        "Generate a professional Excel workbook from a BOMEngineeringReport. "
+        "The workbook contains: Executive Summary, All Opportunities, Quick Wins, "
+        "Per-SKU Duty Breakdown, Compliance Risk Findings, and Implementation Roadmap."
+    ),
+)
+def export_xlsx(
+    req: ExportRequest,
+    api_key: str = Depends(require_api_key),
+) -> Response:
+    """Export a BOMEngineeringReport as a multi-sheet Excel workbook.
+
+    The workbook is suitable for direct delivery to a client's CFO and
+    trade compliance team.  It contains all findings, risk analysis,
+    and a color-coded implementation roadmap.
+    """
+    try:
+        from potatobacon.tariff.excel_generator import generate_excel_report
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=501,
+            detail=f"Excel export not available: {exc}",
+        )
+
+    # Reconstruct a lightweight report object that excel_generator can consume.
+    # We pass the BOMEngineeringReportOut directly since the generator uses duck typing.
+    try:
+        xlsx_bytes = generate_excel_report(
+            report=_reconstitute_report_for_export(req.report),
+            company_name=req.company_name,
+        )
+    except Exception as exc:
+        logger.error("Excel generation failed: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Excel generation failed: {exc}",
+        )
+
+    filename = f"tariff_engineering_report_{req.report.report_id[:8]}.xlsx"
+    return Response(
+        content=xlsx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(xlsx_bytes)),
+        },
+    )
+
+
+class _ExportReport:
+    """Lightweight shim that wraps BOMEngineeringReportOut for the Excel generator.
+
+    The Excel generator consumes a BOMEngineeringReport (dataclass).
+    This shim presents the same interface from the Pydantic API model
+    without requiring full deserialization back to the dataclass.
+    """
+
+    def __init__(self, out: BOMEngineeringReportOut) -> None:
+        self.report_id = out.report_id
+        self.law_context = out.law_context
+        self.tariff_manifest_hash = out.tariff_manifest_hash
+        self.tenant_id = out.tenant_id
+        self.analyzed_at = out.analyzed_at
+        self.portfolio_summary = out.portfolio_summary
+        self.risk_summary = out.risk_summary
+        self.warnings = out.warnings
+
+        # Wrap opportunities as simple objects for the generator
+        self.all_opportunities = [_OpportunityShim(o) for o in out.all_opportunities]
+        self.quick_wins = [_OpportunityShim(o) for o in out.quick_wins]
+        self.sku_findings = [_SKUShim(s, out) for s in out.sku_findings]
+        self.risk_findings = [_RiskShim(r) for r in out.risk_findings]
+
+
+class _OpportunityShim:
+    """Duck-typed shim around OpportunityOut for the Excel generator."""
+
+    def __init__(self, o: OpportunityOut) -> None:
+        from potatobacon.tariff.engineering_opportunity import (
+            OpportunityConfidence, OpportunityRisk, OpportunityType
+        )
+        self.opportunity_id = o.opportunity_id
+        self.sku_id = o.sku_id
+        self.opportunity_type = o.opportunity_type          # Already a string from the model
+        self.confidence = o.confidence
+        self.risk_grade = o.risk_grade
+        self.title = o.title
+        self.description = o.description
+        self.baseline_total_rate = o.baseline_total_rate
+        self.optimized_total_rate = o.optimized_total_rate
+        self.rate_reduction_pct = o.rate_reduction_pct
+        self.annual_savings_estimate = o.annual_savings_estimate
+        self.savings_per_unit = o.savings_per_unit
+        self.action_items = o.action_items
+        self.evidence_required = o.evidence_required
+        self.legal_basis = o.legal_basis
+        self.is_risk_finding = o.is_risk_finding
+        self.current_hts_code = o.current_hts_code
+        self.target_hts_code = o.target_hts_code
+        self.current_origin = o.current_origin
+        self.requires_professional_review = o.requires_professional_review
+        self.estimated_implementation_cost = None
+        self.implementation_time_days = None
+
+    @property
+    def payback_months(self):
+        if not self.annual_savings_estimate or not self.estimated_implementation_cost:
+            return None
+        monthly = self.annual_savings_estimate / 12.0
+        if monthly <= 0:
+            return None
+        return self.estimated_implementation_cost / monthly
+
+
+class _SKUShim:
+    """Duck-typed shim around SKUExposureOut."""
+
+    def __init__(self, s: SKUExposureOut, report: BOMEngineeringReportOut) -> None:
+        self.sku_id = s.sku_id
+        self.description = s.description
+        self.origin_country = s.origin_country
+        self.current_hts_code = s.current_hts_code
+        self.inferred_category = s.inferred_category
+        self.base_rate = s.base_rate
+        self.section_232_rate = s.section_232_rate
+        self.section_301_rate = s.section_301_rate
+        self.ad_duty_rate = s.ad_duty_rate
+        self.cvd_duty_rate = s.cvd_duty_rate
+        self.exclusion_relief_rate = s.exclusion_relief_rate
+        self.fta_preference_pct = s.fta_preference_pct
+        self.total_effective_rate = s.total_effective_rate
+        self.has_trade_remedy_exposure = s.has_trade_remedy_exposure
+        self.has_adcvd_exposure = s.has_adcvd_exposure
+        self.best_savings_pct = s.best_savings_pct
+        self.opportunities = [_OpportunityShim(o) for o in s.opportunities]
+
+
+class _RiskShim:
+    """Duck-typed shim around RiskFindingOut."""
+
+    def __init__(self, r: RiskFindingOut) -> None:
+        self.risk_id = r.risk_id
+        self.sku_id = r.sku_id
+        self.description = r.description
+        self.category = r.category
+        self.severity = r.severity
+        self.estimated_exposure_pct = r.estimated_exposure_pct
+        self.estimated_annual_exposure_usd = r.estimated_annual_exposure_usd
+        self.potential_penalty_usd = r.potential_penalty_usd
+        self.penalty_basis = r.penalty_basis
+        self.risk_summary = r.risk_summary
+        self.risk_detail = r.risk_detail
+        self.immediate_actions = r.immediate_actions
+        self.remediation_steps = r.remediation_steps
+        self.legal_citations = r.legal_citations
+        self.confidence = r.confidence
+        self.requires_legal_counsel = r.requires_legal_counsel
+        self.prior_disclosure_recommended = r.prior_disclosure_recommended
+
+
+def _reconstitute_report_for_export(out: BOMEngineeringReportOut) -> "_ExportReport":
+    """Wrap an API report model for consumption by the Excel generator."""
+    return _ExportReport(out)
