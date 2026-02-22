@@ -1,0 +1,17 @@
+{
+  "tenants": [
+    {
+      "tenant_id": "default",
+      "name": "Development Tenant",
+      "api_keys": [
+        "dev-key-local"
+      ],
+      "plan": "enterprise",
+      "created_at": "2026-02-22T01:00:28.407541+00:00",
+      "sku_limit": 100000,
+      "monthly_analyses": 0,
+      "monthly_analysis_limit": 100000,
+      "metadata": {}
+    }
+  ]
+}
