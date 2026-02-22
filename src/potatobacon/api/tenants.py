@@ -19,8 +19,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
-if TYPE_CHECKING:
+# Request must be imported unconditionally (not just under TYPE_CHECKING)
+# because FastAPI inspects function signatures at runtime to determine how
+# to inject parameters.  Without a runtime annotation, FastAPI treats the
+# `request` parameter in resolve_tenant_from_request as a query parameter
+# instead of automatically injecting the ASGI Request object.
+try:
     from fastapi import Request
+except ImportError:
+    Request = None  # type: ignore[assignment,misc]
 
 # Sprint E: PostgreSQL integration
 USE_POSTGRES = os.getenv("PTB_STORAGE_BACKEND", "jsonl").lower() == "postgres"
@@ -85,11 +92,13 @@ class TenantRegistry:
             pass
 
     def _persist(self) -> None:
+        # NOTE: _persist() must always be called from within a self._lock context
+        # (register_tenant, add_api_key).  Do NOT acquire self._lock here —
+        # threading.Lock() is not reentrant and would deadlock.
         self.path.parent.mkdir(parents=True, exist_ok=True)
         data = {"tenants": [t.to_dict() for t in self._tenants.values()]}
-        with self._lock:
-            with self.path.open("w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
+        with self.path.open("w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
 
     def register_tenant(
         self,
