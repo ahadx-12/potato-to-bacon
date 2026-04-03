@@ -12,6 +12,32 @@
       "monthly_analyses": 0,
       "monthly_analysis_limit": 100000,
       "metadata": {}
+    },
+    {
+      "tenant_id": "test-bom-tenant",
+      "name": "Test BOM Tenant",
+      "api_keys": [
+        "test-bom-key"
+      ],
+      "plan": "enterprise",
+      "created_at": "2026-04-02T23:09:18.804072+00:00",
+      "sku_limit": 100000,
+      "monthly_analyses": 6,
+      "monthly_analysis_limit": 100000,
+      "metadata": {}
+    },
+    {
+      "tenant_id": "test-engineering-tenant",
+      "name": "Engineering Test",
+      "api_keys": [
+        "test-engineering-key"
+      ],
+      "plan": "enterprise",
+      "created_at": "2026-04-02T23:29:57.236714+00:00",
+      "sku_limit": 100000,
+      "monthly_analyses": 33,
+      "monthly_analysis_limit": 100000,
+      "metadata": {}
     }
   ]
 }
