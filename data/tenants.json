@@ -22,7 +22,7 @@
       "plan": "enterprise",
       "created_at": "2026-04-02T23:09:18.804072+00:00",
       "sku_limit": 100000,
-      "monthly_analyses": 6,
+      "monthly_analyses": 8,
       "monthly_analysis_limit": 100000,
       "metadata": {}
     },
